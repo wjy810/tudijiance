@@ -153,41 +153,16 @@ async function remove(row: ObservationView) {
 
 // ---------- 导出 ----------
 
-function csvCell(v: unknown): string {
-  const s = v === null || v === undefined ? '' : String(v)
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
-}
-
-/** 按当前筛选条件导出全部数据，Excel 可以直接打开 */
-async function exportCsv() {
+/** 按当前筛选条件导出全部数据（Excel，由服务器生成） */
+async function exportExcel() {
+  const q = query(1, 1)
+  if (!q) {
+    return
+  }
+  const { page: _page, size: _size, ...filters } = q
   exporting.value = true
   try {
-    const all: ObservationView[] = []
-    for (let p = 1; ; p++) {
-      const q = query(p, 500)
-      if (!q) {
-        break
-      }
-      const res = await observationApi.list(q)
-      all.push(...res.items)
-      if (all.length >= res.total || res.items.length === 0) {
-        break
-      }
-    }
-    const header = ['调查日期', '小区', '品种', '重复', '分类', '项目', '值', '单位', '备注', '录入人', '录入时间', '修改人', '修改时间']
-    const lines = all.map((o) => [
-      o.observedOn, o.plotCode, o.varietyName, o.replicateNo ? replicateLabel(o.replicateNo) : '',
-      TRAIT_CATEGORY[o.traitCategory], o.traitName, o.displayValue, o.unit, o.note, o.recordedBy,
-      o.recordedAt.replace('T', ' ').slice(0, 19), o.updatedBy, o.updatedAt?.replace('T', ' ').slice(0, 19),
-    ].map(csvCell).join(','))
-    // 加 BOM，Excel 打开中文不乱码
-    const blob = new Blob(['﻿' + [header.join(','), ...lines].join('\r\n')], { type: 'text/csv;charset=utf-8' })
-    const a = document.createElement('a')
-    a.href = URL.createObjectURL(blob)
-    a.download = `${picker.trial.value?.name ?? '数据'}.csv`
-    a.click()
-    URL.revokeObjectURL(a.href)
-    ElMessage.success(`已导出 ${all.length} 条`)
+    await observationApi.exportExcel(filters, `${picker.trial.value?.name ?? '数据'}.xlsx`)
   } catch (e) {
     ElMessage.error((e as Error).message)
   } finally {
@@ -205,7 +180,7 @@ async function exportCsv() {
       </div>
       <div class="page-actions">
         <el-button :icon="Refresh" @click="load">刷新</el-button>
-        <el-button type="primary" :icon="Download" :loading="exporting" :disabled="total === 0" @click="exportCsv">导出表格</el-button>
+        <el-button type="primary" :icon="Download" :loading="exporting" :disabled="total === 0" @click="exportExcel">导出 Excel</el-button>
       </div>
     </div>
 

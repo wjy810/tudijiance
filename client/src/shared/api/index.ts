@@ -1,4 +1,4 @@
-import { http } from './http'
+import { download, http } from './http'
 import type {
   Bucket,
   CustomTraitRequest,
@@ -11,6 +11,7 @@ import type {
   PlotDetail,
   PlotValue,
   Screen,
+  TrialReport,
   TraitValue,
   TrialStatus,
   VarietySummary,
@@ -92,6 +93,8 @@ export const observationApi = {
     data<ObservationView>(http.put(`/api/observations/${id}`, { version, observedOn, note, ...value })),
   remove: (id: number) => data<void>(http.delete(`/api/observations/${id}`)),
   history: (id: number) => data<HistoryView[]>(http.get(`/api/observations/${id}/history`)),
+  exportExcel: (q: Omit<ObservationQuery, 'page' | 'size'>, filename: string) =>
+    download('/api/observations/export', q, filename),
   status: (trialId: number) => data<TrialStatus>(http.get(`/api/trials/${trialId}/status`)),
   plotDetail: (trialId: number, plotId: number) => data<PlotDetail>(http.get(`/api/trials/${trialId}/plots/${plotId}`)),
   traitValues: (trialId: number, traitId: number) =>
@@ -106,6 +109,9 @@ export const statsApi = {
   multiYear: (fieldId: number, traitId: number) =>
     data<MultiYear>(http.get('/api/stats/multi-year', { params: { fieldId, traitId } })),
   screen: (fieldId?: number) => data<Screen>(http.get('/api/screen', { params: { fieldId } })),
+  trialReport: (trialId: number) => data<TrialReport>(http.get('/api/stats/trial-report', { params: { trialId } })),
+  exportTrialReport: (trialId: number, filename: string) =>
+    download('/api/stats/trial-report/export', { trialId }, filename),
 }
 
 export const userApi = {

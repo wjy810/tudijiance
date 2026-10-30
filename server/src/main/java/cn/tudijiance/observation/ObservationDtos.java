@@ -50,6 +50,11 @@ public final class ObservationDtos {
             String recordedBy, LocalDateTime recordedAt, String updatedBy, LocalDateTime updatedAt, Integer version) {
     }
 
+    /** 数据查看、导出的筛选条件；除了试验都可以不填。 */
+    public record ObservationFilter(Long trialId, Long varietyId, Long plotId, Long traitId, String category,
+                                    LocalDate from, LocalDate to, Long recordedBy) {
+    }
+
     public record PageResult<T>(long total, List<T> items) {
     }
 

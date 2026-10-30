@@ -8,6 +8,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -17,6 +18,9 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.function.Predicate;
 
+import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.ss.usermodel.Workbook;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -267,6 +271,33 @@ class ApiIntegrationTest {
                 + traitId("yield_per_mu")), null, status().isOk());
         assertThat(multi.get("years").get(0).asInt()).isEqualTo(2026);
         assertThat(multi.get("series").size()).isEqualTo(2);
+
+        // 品种主要性状汇总表：有折合亩产、全生育期两列，按亩产位次排序，品系 A 比对照 +16.7%
+        JsonNode report = call(student, get("/api/stats/trial-report?trialId=" + s.trialId), null, status().isOk());
+        List<String> columnCodes = new ArrayList<>();
+        report.get("columns").forEach(c -> columnCodes.add(c.get("code").asString()));
+        assertThat(columnCodes).contains("whole_growth_days", "yield_per_mu");
+        assertThat(report.get("rows").get(0).get("varietyName").asString()).isEqualTo("新品系A-测试");
+        assertThat(report.get("rows").get(0).get("yieldVsCkPercent").decimalValue()).isEqualByComparingTo("16.7");
+        assertThat(report.get("rows").get(1).get("control").asBoolean()).isTrue();
+
+        // 导出的 Excel 能用 POI 打开，表头和数据在
+        byte[] xlsx = mvc.perform(get("/api/stats/trial-report/export?trialId=" + s.trialId)
+                        .header("Authorization", "Bearer " + student))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsByteArray();
+        try (Workbook wb = new XSSFWorkbook(new ByteArrayInputStream(xlsx))) {
+            Sheet sheet = wb.getSheetAt(0);
+            assertThat(sheet.getRow(3).getCell(1).getStringCellValue()).isEqualTo("品种");
+            assertThat(sheet.getRow(4).getCell(1).getStringCellValue()).isEqualTo("新品系A-测试");
+        }
+        byte[] data = mvc.perform(get("/api/observations/export?trialId=" + s.trialId + "&traitId="
+                        + traitId("plot_yield")).header("Authorization", "Bearer " + student))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsByteArray();
+        try (Workbook wb = new XSSFWorkbook(new ByteArrayInputStream(data))) {
+            Sheet sheet = wb.getSheetAt(0);
+            assertThat(sheet.getLastRowNum()).isEqualTo(2 + 4);
+            assertThat(sheet.getRow(3).getCell(7).getNumericCellValue()).isEqualTo(10.0);
+        }
 
         // 一次给两个小区录同一个值，大屏的最新录入合成一条
         entry(student, s.trialId, "op_weeding", s.plots.subList(0, 2), Map.of("valueText", "人工除草"),

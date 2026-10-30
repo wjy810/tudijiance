@@ -14,6 +14,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 
 import cn.tudijiance.common.ApiException;
@@ -22,6 +23,7 @@ import cn.tudijiance.observation.ObservationDtos.AbnormalRequest;
 import cn.tudijiance.observation.ObservationDtos.EntryItem;
 import cn.tudijiance.observation.ObservationDtos.EntryRequest;
 import cn.tudijiance.observation.ObservationDtos.HistoryView;
+import cn.tudijiance.observation.ObservationDtos.ObservationFilter;
 import cn.tudijiance.observation.ObservationDtos.ObservationView;
 import cn.tudijiance.observation.ObservationDtos.PageResult;
 import cn.tudijiance.observation.ObservationDtos.UpdateRequest;
@@ -39,6 +41,7 @@ public class ObservationService {
 
     private static final String ENTITY = "OBSERVATION";
     private static final int MAX_PAGE_SIZE = 500;
+    private static final int EXPORT_LIMIT = 100_000;
 
     private final ObservationMapper observationMapper;
     private final AuditLogMapper auditMapper;
@@ -122,30 +125,11 @@ public class ObservationService {
     }
 
     /** 查询一个试验的数据，可以按品种、小区、项目、类别、日期、录入人筛选。page 从 1 开始。 */
-    public PageResult<ObservationView> list(Long trialId, Long varietyId, Long plotId, Long traitId, String category,
-                                            LocalDate from, LocalDate to, Long recordedBy, int page, int size) {
-        TrialContext ctx = contextLoader.load(trialId);
-        List<Long> plantingIds = ctx.plantingsById().values().stream()
-                .filter(p -> varietyId == null || varietyId.equals(p.getVarietyId()))
-                .filter(p -> plotId == null || plotId.equals(p.getPlotId()))
-                .map(Planting::getId).toList();
-        if (plantingIds.isEmpty()) {
+    public PageResult<ObservationView> list(ObservationFilter filter, int page, int size) {
+        TrialContext ctx = contextLoader.load(filter.trialId());
+        var query = query(filter, ctx);
+        if (query == null) {
             return new PageResult<>(0, List.of());
-        }
-        var query = Wrappers.<Observation>lambdaQuery()
-                .in(Observation::getPlantingId, plantingIds)
-                .eq(Observation::getDeleted, false)
-                .eq(traitId != null, Observation::getTraitId, traitId)
-                .ge(from != null, Observation::getObservedOn, from)
-                .le(to != null, Observation::getObservedOn, to)
-                .eq(recordedBy != null, Observation::getRecordedBy, recordedBy);
-        if (category != null && !category.isBlank()) {
-            List<Long> traitIds = catalog.all().values().stream()
-                    .filter(t -> category.equals(t.getCategory())).map(TraitDef::getId).toList();
-            if (traitIds.isEmpty()) {
-                return new PageResult<>(0, List.of());
-            }
-            query.in(Observation::getTraitId, traitIds);
         }
         long total = observationMapper.selectCount(query);
         int pageSize = Math.min(Math.max(size, 1), MAX_PAGE_SIZE);
@@ -153,6 +137,44 @@ public class ObservationService {
         query.orderByDesc(Observation::getObservedOn).orderByDesc(Observation::getId)
                 .last("LIMIT " + pageSize + " OFFSET " + offset);
         return new PageResult<>(total, views(observationMapper.selectList(query), ctx));
+    }
+
+    /** 导出用：符合条件的全部数据（最多 EXPORT_LIMIT 条），按小区、项目、日期排好。 */
+    public List<ObservationView> listForExport(ObservationFilter filter) {
+        TrialContext ctx = contextLoader.load(filter.trialId());
+        var query = query(filter, ctx);
+        if (query == null) {
+            return List.of();
+        }
+        query.orderByAsc(Observation::getObservedOn).orderByAsc(Observation::getId).last("LIMIT " + EXPORT_LIMIT);
+        return views(observationMapper.selectList(query), ctx);
+    }
+
+    /** 按筛选条件拼查询；条件下不可能有数据时返回 null。 */
+    private LambdaQueryWrapper<Observation> query(ObservationFilter f, TrialContext ctx) {
+        List<Long> plantingIds = ctx.plantingsById().values().stream()
+                .filter(p -> f.varietyId() == null || f.varietyId().equals(p.getVarietyId()))
+                .filter(p -> f.plotId() == null || f.plotId().equals(p.getPlotId()))
+                .map(Planting::getId).toList();
+        if (plantingIds.isEmpty()) {
+            return null;
+        }
+        var query = Wrappers.<Observation>lambdaQuery()
+                .in(Observation::getPlantingId, plantingIds)
+                .eq(Observation::getDeleted, false)
+                .eq(f.traitId() != null, Observation::getTraitId, f.traitId())
+                .ge(f.from() != null, Observation::getObservedOn, f.from())
+                .le(f.to() != null, Observation::getObservedOn, f.to())
+                .eq(f.recordedBy() != null, Observation::getRecordedBy, f.recordedBy());
+        if (f.category() != null && !f.category().isBlank()) {
+            List<Long> traitIds = catalog.all().values().stream()
+                    .filter(t -> f.category().equals(t.getCategory())).map(TraitDef::getId).toList();
+            if (traitIds.isEmpty()) {
+                return null;
+            }
+            query.in(Observation::getTraitId, traitIds);
+        }
+        return query;
     }
 
     /** 老师修改一条数据。 */

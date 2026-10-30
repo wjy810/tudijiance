@@ -5,6 +5,7 @@ import { computed, nextTick, ref } from 'vue'
 import type Konva from 'konva'
 import type { KonvaEventObject } from 'konva/lib/Node'
 
+import { saveFile } from '@/shared/api/http'
 import type { GridCell, GridDevice, GridLink } from './plotGrid'
 
 const props = defineProps<{
@@ -272,11 +273,7 @@ async function exportJpeg(filename: string) {
   }
   hover.value = null
   await nextTick()
-  const url = stage.toDataURL({ mimeType: 'image/jpeg', quality: 0.92, pixelRatio: 2 / props.zoom })
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  a.click()
+  saveFile(stage.toDataURL({ mimeType: 'image/jpeg', quality: 0.92, pixelRatio: 2 / props.zoom }), filename)
 }
 
 defineExpose({ exportJpeg })

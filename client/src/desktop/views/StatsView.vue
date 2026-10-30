@@ -4,11 +4,12 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import type { EChartsCoreOption } from 'echarts/core'
 
-import { statsApi, type MultiYear, type VarietySummary } from '@/shared/api'
+import { statsApi, type MultiYear, type ReportColumn, type TrialReport, type VarietySummary } from '@/shared/api'
 import { useTrialPicker } from '@/shared/composables/useTrialPicker'
 import { useCatalogStore } from '@/stores/catalog'
 import { FONT, LIGHT, MAX_SERIES, assignSlots, axisStyle, formatNumber, formatPercent, tooltipStyle } from '@/shared/charts'
 import EChart from '@/desktop/components/EChart.vue'
+import { Download } from '@element-plus/icons-vue'
 
 const catalog = useCatalogStore()
 const picker = useTrialPicker()
@@ -68,6 +69,56 @@ async function loadMulti() {
 
 watch([picker.trialId, traitId], loadSummary)
 watch([picker.fieldId, traitId], loadMulti)
+
+// ---------- 品种主要性状汇总表 ----------
+
+const report = ref<TrialReport | null>(null)
+const loadingReport = ref(false)
+const exportingReport = ref(false)
+
+async function loadReport() {
+  if (!picker.trialId.value) {
+    report.value = null
+    return
+  }
+  loadingReport.value = true
+  try {
+    report.value = await statsApi.trialReport(picker.trialId.value)
+  } catch (e) {
+    report.value = null
+    ElMessage.error((e as Error).message)
+  } finally {
+    loadingReport.value = false
+  }
+}
+
+watch(picker.trialId, loadReport)
+
+async function exportReport() {
+  if (!report.value) {
+    return
+  }
+  exportingReport.value = true
+  try {
+    await statsApi.exportTrialReport(report.value.trialId, `${report.value.trialName}-品种主要性状汇总表.xlsx`)
+  } catch (e) {
+    ElMessage.error((e as Error).message)
+  } finally {
+    exportingReport.value = false
+  }
+}
+
+function columnLabel(c: ReportColumn): string {
+  return c.unit && c.unit !== '级' ? `${c.name}（${c.unit}）` : c.name
+}
+
+function reportDigits(c: ReportColumn): number {
+  return catalog.traitById.get(c.traitId)?.trait.precisionDigits ?? 1
+}
+
+function signed(v: number | null, suffix = ''): string {
+  return v === null ? '' : `${v > 0 ? '+' : ''}${v}${suffix}`
+}
 
 // ---------- 本年度：按品种汇总 ----------
 
@@ -216,6 +267,46 @@ const lineOption = computed<EChartsCoreOption>(() => {
     </div>
 
     <section class="panel panel-pad block">
+      <div class="panel-title report-title">
+        <span>品种主要性状汇总表</span>
+        <span class="sub">{{ report ? `${report.seasonYear} 年 · ${report.trialName}` : '' }}；各重复汇总后的值，按折合亩产位次排列</span>
+        <span class="spacer" />
+        <el-button size="small" :icon="Download" :disabled="!report || report.rows.length === 0" :loading="exportingReport" @click="exportReport">
+          导出 Excel
+        </el-button>
+      </div>
+      <div v-loading="loadingReport">
+        <el-empty v-if="!report || report.columns.length === 0" :image-size="60"
+          :description="picker.trialId.value ? '这个试验还没有可以汇总的数据' : '先选择试验'" />
+        <el-table v-else :data="report.rows" size="small" border class="report">
+          <el-table-column label="位次" width="56" align="center">
+            <template #default="{ row }">{{ row.yieldRank ?? '' }}</template>
+          </el-table-column>
+          <el-table-column label="品种" min-width="120" fixed>
+            <template #default="{ row }">
+              {{ row.varietyName }}
+              <el-tag v-if="row.control" size="small" type="danger" effect="plain">CK</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="小区数" width="64" align="center" prop="plots" />
+          <template v-for="(c, i) in report.columns" :key="c.code">
+            <el-table-column :label="columnLabel(c)" min-width="96" align="right">
+              <template #default="{ row }"><span class="num">{{ row.values[i] === null ? '' : formatNumber(row.values[i], reportDigits(c)) }}</span></template>
+            </el-table-column>
+            <el-table-column v-if="c.code === 'whole_growth_days'" label="比对照（天）" min-width="90" align="right">
+              <template #default="{ row }"><span class="num">{{ signed(row.growthDaysVsCk) }}</span></template>
+            </el-table-column>
+          </template>
+          <el-table-column v-if="report.hasYield" label="亩产比对照" min-width="96" align="right">
+            <template #default="{ row }">
+              <span class="num" :class="{ up: row.yieldVsCkPercent > 0, down: row.yieldVsCkPercent < 0 }">{{ formatPercent(row.yieldVsCkPercent) }}</span>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
+    </section>
+
+    <section class="panel panel-pad block">
       <div class="panel-title">
         {{ summary ? `${summary.seasonYear} 年各品种${summary.traitName}` : '本年度按品种汇总' }}
         <span v-if="summary && summary.rows.length" class="sub">
@@ -286,6 +377,10 @@ const lineOption = computed<EChartsCoreOption>(() => {
 <style scoped>
 .gap {
   margin-left: 10px;
+}
+
+.report-title .spacer {
+  flex: 1;
 }
 
 .small {

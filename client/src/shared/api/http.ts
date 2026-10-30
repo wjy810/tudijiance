@@ -35,6 +35,42 @@ http.interceptors.response.use(
   },
 )
 
+/** 把内容存成文件（浏览器下载）。链接要先放进页面再点，有的浏览器才认文件名 */
+export function saveFile(data: Blob | string, filename: string): void {
+  const href = typeof data === 'string' ? data : URL.createObjectURL(data)
+  const a = document.createElement('a')
+  a.href = href
+  a.download = filename
+  a.style.display = 'none'
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  if (typeof data !== 'string') {
+    setTimeout(() => URL.revokeObjectURL(href), 10_000)
+  }
+}
+
+/**
+ * 下载文件（Excel 等）。要带登录令牌，所以不能直接用链接打开。
+ * 出错时服务器返回的是 JSON，这里读出其中的提示文字。
+ */
+export async function download(url: string, params: object, filename: string): Promise<void> {
+  const res = await http.get<Blob>(url, { params, responseType: 'blob', validateStatus: () => true })
+  if (res.status !== 200) {
+    if (res.status === 401 && onUnauthorized) {
+      onUnauthorized()
+    }
+    let message = `下载失败（${res.status}）`
+    try {
+      message = (JSON.parse(await res.data.text()) as { message?: string }).message ?? message
+    } catch {
+      // 不是 JSON，用默认提示
+    }
+    throw new Error(message)
+  }
+  saveFile(res.data, filename)
+}
+
 function errorMessage(error: AxiosError<{ message?: string }>): string {
   if (error.response?.data?.message) {
     return error.response.data.message

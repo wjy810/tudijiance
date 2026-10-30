@@ -414,3 +414,36 @@ export interface Screen {
   recent: { at: string; user: string; plotCode: string; plotCount: number; traitName: string; value: string }[]
   generatedAt: string
 }
+
+// ---------- 品种主要性状汇总表 ----------
+
+export interface ReportColumn {
+  traitId: number
+  code: string
+  name: string
+  unit: string | null
+}
+
+export interface ReportRow {
+  varietyId: number
+  varietyName: string
+  control: boolean
+  plots: number
+  /** 和 columns 一一对应，没有数据的是 null */
+  values: (number | null)[]
+  growthDaysVsCk: number | null
+  yieldVsCkPercent: number | null
+  yieldRank: number | null
+}
+
+export interface TrialReport {
+  trialId: number
+  trialName: string
+  seasonYear: number
+  fieldName: string
+  controlVariety: string | null
+  columns: ReportColumn[]
+  rows: ReportRow[]
+  hasGrowthDays: boolean
+  hasYield: boolean
+}
