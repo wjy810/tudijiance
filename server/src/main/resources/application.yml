@@ -1,0 +1,53 @@
+# 正式部署时用环境变量覆盖带 ${...} 的配置，不要把密码写进这个文件
+server:
+  port: ${SERVER_PORT:8080}
+
+spring:
+  application:
+    name: tudijiance-server
+  datasource:
+    url: ${DB_URL:jdbc:mysql://localhost:3306/tudijiance?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai}
+    username: ${DB_USERNAME:tudijiance}
+    password: ${DB_PASSWORD:}
+  flyway:
+    enabled: true
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    banner: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+
+app:
+  zone: Asia/Shanghai
+  jwt:
+    secret: ${JWT_SECRET:}
+    ttl: PT24H
+  admin:
+    initial-password: ${ADMIN_INITIAL_PASSWORD:}
+  device:
+    # 超过这个时间没有上报数据，设备标记为离线
+    offline-after: PT2H
+  # 硬件预留：MQTT 接入。传感器装好后设为 true
+  mqtt:
+    enabled: ${MQTT_ENABLED:false}
+    broker-url: ${MQTT_BROKER_URL:tcp://localhost:1883}
+    username: ${MQTT_USERNAME:}
+    password: ${MQTT_PASSWORD:}
+    topic-filter: tudi/devices/+/up
+    client-id: tudijiance-server
+  # 硬件到货之前，用模拟器给"模拟设备"产生数据
+  simulator:
+    enabled: ${SIMULATOR_ENABLED:false}
+    interval: PT30M
+    backfill-days: 14

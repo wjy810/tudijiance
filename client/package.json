@@ -1,0 +1,78 @@
+{
+  "name": "tudijiance-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "小麦品种实验田数字化管理系统 桌面端",
+  "type": "module",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "vite",
+    "dev:electron": "concurrently -k \"vite\" \"wait-on tcp:5173 && cross-env ELECTRON_START_URL=http://localhost:5173 electron .\"",
+    "build": "run-p type-check \"build-only {@}\" --",
+    "build-only": "vite build",
+    "type-check": "vue-tsc --build",
+    "test": "vitest run",
+    "electron": "electron .",
+    "dist:win": "pnpm build && electron-builder --win",
+    "dist:dir": "pnpm build && electron-builder --dir"
+  },
+  "dependencies": {
+    "@element-plus/icons-vue": "^2.3.2",
+    "axios": "^1.21.0",
+    "echarts": "^6.1.0",
+    "element-plus": "^2.14.7",
+    "konva": "^10.9.0",
+    "pinia": "^4.0.3",
+    "vue": "^3.5.42",
+    "vue-konva": "^4.0.1",
+    "vue-router": "^5.3.1"
+  },
+  "devDependencies": {
+    "@tsconfig/node24": "^24.0.5",
+    "@types/jsdom": "^30.0.0",
+    "@types/node": "^24.13.4",
+    "@vitejs/plugin-vue": "^6.0.8",
+    "@vue/test-utils": "^2.5.0",
+    "@vue/tsconfig": "^0.9.1",
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0",
+    "electron": "^45.1.0",
+    "electron-builder": "^26.18.0",
+    "jsdom": "^30.0.1",
+    "npm-run-all2": "^9.0.3",
+    "typescript": "~6.0.0",
+    "vite": "^8.2.2",
+    "vitest": "^4.1.11",
+    "vue-tsc": "^3.3.11",
+    "wait-on": "^9.0.1"
+  },
+  "engines": {
+    "node": "^22.18.0 || >=24.12.0"
+  },
+  "build": {
+    "appId": "cn.tudijiance.desktop",
+    "productName": "小麦实验田管理",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**",
+      "electron/**",
+      "package.json"
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "electron",
+      "esbuild",
+      "vue-demi"
+    ]
+  }
+}

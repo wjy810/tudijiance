@@ -1,0 +1,17 @@
+# 本地快速体验：不用装 MySQL，数据存在 server/data 目录下的 H2 文件数据库里，并开启传感器模拟器。
+# 启动：mvn spring-boot:run -Dspring-boot.run.profiles=local
+# 登录：admin / admin123
+spring:
+  datasource:
+    url: jdbc:h2:file:./data/tudijiance;MODE=MySQL;DATABASE_TO_LOWER=TRUE;CASE_INSENSITIVE_IDENTIFIERS=TRUE
+    username: sa
+    password:
+
+app:
+  jwt:
+    secret: local-dev-only-secret-do-not-use-in-production
+  admin:
+    initial-password: admin123
+  simulator:
+    enabled: true
+    interval: PT1M

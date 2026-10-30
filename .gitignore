@@ -5,3 +5,12 @@ dist/
 .idea/
 .vscode/
 *.iml
+
+# 后端
+server/target/
+server/data/
+
+# 前端
+client/dist/
+client/dist-electron/
+client/release/
