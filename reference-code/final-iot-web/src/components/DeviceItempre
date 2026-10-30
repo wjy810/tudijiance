@@ -1,0 +1,440 @@
+
+<script setup>
+import {ref, computed, onBeforeUnmount, nextTick} from 'vue';
+import { Delete } from '@element-plus/icons-vue';
+import { ElMessageBox, ElMessage } from 'element-plus';
+import * as echarts from 'echarts';
+import axios from 'axios';
+
+// 新增的状态和数据
+const selectedDataType = ref('temperature');
+const dateRange = ref([new Date(Date.now() - 7 * 24 * 60 * 60 * 1000), new Date()]);
+const deviceData = ref([]);
+const currentValue = ref(0);
+const currentUnit = ref('');
+const averageValue = ref(0);
+const maxValue = ref(0);
+const minValue = ref(0);
+
+const dataTypes = [
+  { value: 'temperature', label: '温度' },
+  { value: 'humidity', label: '湿度' },
+  { value: 'co2', label: '二氧化碳' },
+  { value: 'light', label: '光照' }
+];
+
+// 获取设备数据
+const fetchDeviceData = async () => {
+  try {
+    const [start, end] = dateRange.value;
+    const params = new URLSearchParams();
+
+    // 确保参数名与后端一致
+    params.append('deviceId', props.device.deviceId);  // 注意参数名是 deviceId 不是 deviceID
+    params.append('messageType', selectedDataType.value);
+    params.append('start', formatDate(start));
+    params.append('end', formatDate(end));
+    params.append('aggregate', 'true');  // 注意这里传字符串
+
+    console.log('请求参数:', params.toString());  // 调试用
+
+    const response = await axios.get('http://localhost:8084/data/history', {
+      params: params,
+      paramsSerializer: params => params.toString()  // 确保参数序列化正确
+    });
+
+    // deviceData.value = response.data.data || [];
+    deviceData.value = response.data.data.map(item => ({
+      id: item.id || null,
+      deviceId: item.deviceId || null,
+      messageType: item.messageType || 'unknown',
+      value: Number(item.value) || 0,
+      unit: item.unit || '',
+      status: item.status || 0,
+      timestamp: item.timestamp || '',
+      // 添加默认值处理
+      statusDesc: getStatusDesc(item.status),
+      formattedValue: `${Number(item.value).toFixed(2)} ${item.unit || ''}`
+    }));
+    console.log('deviceData', deviceData.value);
+    if (deviceData.value.length > 0) {
+      updateChart();
+      calculateStats();
+    } else {
+      ElMessage.warning('该时间段内没有数据');
+    }
+  } catch (error) {
+    console.error('获取设备数据失败:', error);
+    ElMessage.error('获取设备数据失败: ' + error.message);
+  }
+};
+const getStatusDesc = (status) => {
+  const statusMap = {
+    0: '正常',
+    1: '警告',
+    2: '故障'
+  };
+  return statusMap[status] || '未知';
+};
+
+// 格式化日期
+const formatDate = (date) => {
+  return date.toISOString().split('T')[0];
+};
+
+// 计算统计数据
+const calculateStats = () => {
+  const values = deviceData.value.map(item => item.value);
+  currentValue.value = values[values.length - 1].toFixed(2);
+  averageValue.value = (values.reduce((a, b) => a + b, 0) / values.length).toFixed(2);
+  maxValue.value = Math.max(...values).toFixed(2);
+  minValue.value = Math.min(...values).toFixed(2);
+
+  // 设置单位
+  const firstItem = deviceData.value[0];
+  currentUnit.value = firstItem?.unit || '';
+};
+
+// 更新图表
+const updateChart = () => {
+  if (!messageChart) {
+    const chartDom = document.getElementById('messageChart');
+    if (!chartDom) return;
+    messageChart = echarts.init(chartDom);
+  }
+
+  const xData = deviceData.value.map(item => {
+    const date = new Date(item.timestamp);
+    return `${date.getHours()}:${date.getMinutes().toString().padStart(2, '0')}`;
+  });
+
+  const yData = deviceData.value.map(item => item.value);
+
+  const option = {
+    animation: true,
+    animationDuration: 2000,
+    animationEasing: 'cubicOut',
+    title: {
+      text: `${props.device.title} - ${dataTypes.find(t => t.value === selectedDataType.value)?.label}趋势`,
+      left: 'center'
+    },
+    tooltip: {
+      trigger: 'axis',
+      formatter: params => {
+        const data = deviceData.value[params[0].dataIndex];
+        return `
+          <div>时间: ${data.timestamp}</div>
+          <div>数值: ${data.value} ${data.unit}</div>
+          <div>状态: ${getStatusText(data.status)}</div>
+        `;
+      }
+    },
+    xAxis: {
+      type: 'category',
+      data: xData,
+      axisLine: { lineStyle: { color: '#2e7d32' } }
+    },
+    yAxis: {
+      type: 'value',
+      name: selectedDataType.value === 'temperature' ? '温度(℃)' :
+          selectedDataType.value === 'humidity' ? '湿度(%RH)' :
+              selectedDataType.value === 'co2' ? 'CO2(ppm)' : '光照(lux)',
+      axisLine: { lineStyle: { color: '#2e7d32' } }
+    },
+    series: [{
+      name: selectedDataType.value,
+      type: 'line',
+      smooth: true,
+      data: yData,
+      itemStyle: {
+        color: '#2e7d32',
+        borderWidth: 2
+      },
+      lineStyle: {
+        width: 3,
+        shadowColor: 'rgba(0, 0, 0, 0.3)',
+        shadowBlur: 10,
+        shadowOffsetY: 8
+      },
+      symbol: 'circle',
+      symbolSize: 8,
+      markPoint: {
+        data: [
+          { type: 'max', name: '最大值' },
+          { type: 'min', name: '最小值' }
+        ]
+      },
+      markLine: {
+        data: [
+          { type: 'average', name: '平均值' }
+        ]
+      }
+    }],
+    grid: {
+      containLabel: true,
+      left: '3%',
+      right: '4%',
+      bottom: '3%',
+      top: '15%'
+    }
+  };
+
+  messageChart.setOption(option);
+
+  // 添加动画效果
+  setTimeout(() => {
+    messageChart.dispatchAction({
+      type: 'showTip',
+      seriesIndex: 0,
+      dataIndex: yData.length - 1
+    });
+  }, 2200);
+};
+
+// 状态文本
+const getStatusText = (status) => {
+  switch(status) {
+    case 0: return '正常';
+    case 1: return '警告';
+    case 2: return '故障';
+    default: return '未知';
+  }
+};
+
+const props = defineProps({
+  device: {
+    type: Object,
+    default: () => ({}),
+  },
+});
+
+const emit = defineEmits(['deviceDeleted', 'deviceUpdated']);
+
+// 对话框状态
+const detailsDialogVisible = ref(false);
+const editDialogVisible = ref(false);
+const deviceMessagesVisible = ref(false);
+const activeTab = ref('report');
+
+// 编辑设备数据
+const editDeviceData = ref({
+  deviceName: '',
+  password: '',
+});
+
+// 控制表单
+const controlForm = ref({
+  action: '',
+  params: ''
+});
+
+// 图表和数据状态
+let messageChart = null;
+// const currentValue = ref(0);
+
+// 格式化时间
+const formatDateTime = (dateTime) => {
+  if (!dateTime) return '';
+  const date = new Date(dateTime);
+  return date.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  }).replace(/\//g, '-');
+};
+
+const formattedCreateTime = computed(() => formatDateTime(props.device.createTime));
+const formattedUpdateTime = computed(() => formatDateTime(props.device.updateTime));
+
+// 生成稳定波动数据 (6.8-7.3之间)
+const generateStableData = () => {
+  const data = [];
+  let baseValue = 7.0; // 基准值
+
+  for (let i = 0; i < 24; i++) {
+    // 生成微小波动 (±0.25)
+    const fluctuation = (Math.random() * 0.5 - 0.25);
+    let value = baseValue + fluctuation;
+
+    // 确保在6.8-7.3范围内
+    value = Math.max(6.8, Math.min(7.3, value));
+    data.push(value.toFixed(2));
+
+    // 记录当前值
+    if (i === 23) currentValue.value = value.toFixed(2);
+  }
+
+  return data;
+};
+
+// 初始化图表
+const initMessageChart = () => {
+  const chartDom = document.getElementById('messageChart');
+  if (!chartDom) return;
+
+  if (messageChart) {
+    messageChart.dispose();
+  }
+
+  messageChart = echarts.init(chartDom);
+  const data = generateStableData();
+  const hours = Array.from({ length: 24 }, (_, i) => `${i}:00`);
+
+  const option = {
+    title: {
+      text: 'pH值变化趋势',
+      left: 'center'
+    },
+    tooltip: {
+      trigger: 'axis',
+      formatter: params => {
+        return `${params[0].axisValue}<br/>pH值: ${params[0].data}`;
+      }
+    },
+    xAxis: {
+      type: 'category',
+      data: hours,
+      axisLine: { lineStyle: { color: '#2e7d32' } }
+    },
+    yAxis: {
+      type: 'value',
+      name: 'pH值',
+      min: 6.5,
+      max: 7.5,
+      axisLine: { lineStyle: { color: '#2e7d32' } }
+    },
+    series: [{
+      name: 'pH值',
+      type: 'line',
+      smooth: true,
+      data: data,
+      itemStyle: { color: '#2e7d32' },
+      areaStyle: {
+        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+          { offset: 0, color: 'rgba(46, 125, 50, 0.5)' },
+          { offset: 1, color: 'rgba(46, 125, 50, 0.1)' }
+        ])
+      },
+      markLine: {
+        silent: true,
+        data: [
+          { yAxis: 7.0, name: '基准线' },
+          { yAxis: 6.8, name: '下限' },
+          { yAxis: 7.3, name: '上限' }
+        ]
+      }
+    }]
+  };
+
+  messageChart.setOption(option);
+};
+
+// 查看设备详情
+const viewDetails = () => {
+  detailsDialogVisible.value = true;
+};
+
+// 编辑设备
+const editDevice = () => {
+  editDeviceData.value = {
+    deviceId: props.device.deviceID,
+    productKey: props.device.productKey,
+    deviceName: props.device.deviceName,
+    password: props.device.password,
+  };
+  editDialogVisible.value = true;
+};
+
+// 保存设备
+const saveDevice = async () => {
+  try {
+    // 模拟API调用
+    await new Promise(resolve => setTimeout(resolve, 500));
+    ElMessage.success('设备信息更新成功');
+    emit('deviceUpdated', {
+      ...props.device,
+      deviceName: editDeviceData.value.deviceName,
+      password: editDeviceData.value.password
+    });
+    editDialogVisible.value = false;
+  } catch (error) {
+    ElMessage.error('设备信息更新失败');
+  }
+};
+
+// 显示设备消息
+const showDeviceMessages = async () => {
+  try {
+    deviceMessagesVisible.value = true;
+    activeTab.value = 'report';
+
+    // 重置选择器和日期范围
+    selectedDataType.value = 'temperature';
+    dateRange.value = [new Date(Date.now() - 7 * 24 * 60 * 60 * 1000), new Date()];
+
+    // 获取初始数据
+    await fetchDeviceData();
+
+    // initMessageChart();
+    // 确保图表容器已渲染
+    await nextTick();
+
+    // 初始化图表
+    if (!messageChart) {
+      const chartDom = document.getElementById('messageChart');
+      if (chartDom) {
+        messageChart = echarts.init(chartDom);
+      }
+    }
+  } catch (error) {
+    console.error('初始化设备消息失败:', error);
+    ElMessage.error('初始化设备消息失败');
+  }
+};
+
+
+  // 模拟API调用
+  setTimeout(() => {
+    ElMessage.success(`指令下发成功: ${controlForm.value.action}`);
+    controlForm.value = { action: '', params: '' };
+  }, 800);
+
+
+// 删除设备
+const deleteDevice = async () => {
+  try {
+    // 模拟API调用
+    await new Promise(resolve => setTimeout(resolve, 500));
+    ElMessage.success('设备删除成功');
+    emit('deviceDeleted', props.device.deviceID);
+  } catch (error) {
+    ElMessage.error('设备删除失败');
+  }
+};
+
+// 确认删除
+const confirmDeleteDevice = () => {
+  ElMessageBox.confirm(
+      '此操作将永久删除该设备, 是否继续?',
+      '提示',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning',
+      }
+  ).then(deleteDevice).catch(() => {
+    ElMessage.info('已取消删除');
+  });
+};
+
+// 清理图表
+onBeforeUnmount(() => {
+  if (messageChart) {
+    messageChart.dispose();
+  }
+});
+</script>
