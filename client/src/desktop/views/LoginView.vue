@@ -9,7 +9,8 @@ import { getServerUrl, setServerUrl } from '@/shared/settings'
 const auth = useAuthStore()
 const router = useRouter()
 
-const form = reactive({ username: '', password: '', server: getServerUrl() })
+const SERVER_HINT = 'http://服务器地址:8080'
+const form = reactive({ username: '', password: '', serverUrl: getServerUrl() })
 const loading = ref(false)
 
 async function submit() {
@@ -17,11 +18,11 @@ async function submit() {
     ElMessage.warning('请输入用户名和密码')
     return
   }
-  setServerUrl(form.server)
+  setServerUrl(form.serverUrl)
   loading.value = true
   try {
     await auth.login(form.username, form.password)
-    router.replace('/fields')
+    router.replace(auth.homePath)
   } catch (e) {
     ElMessage.error((e as Error).message)
   } finally {
@@ -43,7 +44,7 @@ async function submit() {
           <el-input v-model="form.password" type="password" show-password autocomplete="current-password" />
         </el-form-item>
         <el-form-item label="服务器地址">
-          <el-input v-model="form.server" placeholder="http://服务器地址:8080" />
+          <el-input v-model="form.serverUrl" :placeholder="SERVER_HINT" />
         </el-form-item>
         <el-button type="primary" native-type="submit" :loading="loading" class="submit">登录</el-button>
       </el-form>

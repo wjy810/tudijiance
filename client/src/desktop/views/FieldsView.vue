@@ -36,7 +36,7 @@ onMounted(load)
   <div class="page" v-loading="loading">
     <div class="page-header">
       <h2>实验田</h2>
-      <el-button v-if="auth.isAdmin" type="primary" :icon="Plus" @click="dialogOpen = true">新建实验田</el-button>
+      <el-button v-if="auth.isTeacher" type="primary" :icon="Plus" @click="dialogOpen = true">新建实验田</el-button>
     </div>
 
     <el-empty v-if="!loading && fields.length === 0" description="还没有实验田。新建一块，设定行数和列数后会自动生成小区网格。" />

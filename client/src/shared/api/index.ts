@@ -1,6 +1,18 @@
 import { http } from './http'
 import type {
   Bucket,
+  CustomTraitRequest,
+  EntryRequest,
+  HistoryView,
+  MultiYear,
+  ObservationQuery,
+  ObservationView,
+  PageResult,
+  PlotDetail,
+  Screen,
+  TraitValue,
+  TrialStatus,
+  VarietySummary,
   DeviceRequest,
   DeviceView,
   DeviceWithToken,
@@ -55,6 +67,7 @@ export const varietyApi = {
 export const trialApi = {
   list: (fieldId?: number) => data<Trial[]>(http.get('/api/trials', { params: { fieldId } })),
   create: (req: TrialRequest) => data<Trial>(http.post('/api/trials', req)),
+  update: (id: number, req: TrialRequest) => data<Trial>(http.put(`/api/trials/${id}`, req)),
   remove: (id: number) => data<void>(http.delete(`/api/trials/${id}`)),
   layout: (id: number) => data<Layout>(http.get(`/api/trials/${id}/layout`)),
   assign: (id: number, plotIds: number[], attribute: 'VARIETY' | 'REPLICATE', value: number | null) =>
@@ -67,6 +80,37 @@ export const trialApi = {
 export const traitApi = {
   list: () => data<TraitView[]>(http.get('/api/traits')),
   setEnabled: (id: number, enabled: boolean) => data<void>(http.put(`/api/traits/${id}/enabled`, { enabled })),
+  createCustom: (req: CustomTraitRequest) => data<TraitView>(http.post('/api/traits', req)),
+  removeCustom: (id: number) => data<void>(http.delete(`/api/traits/${id}`)),
+}
+
+export const observationApi = {
+  create: (req: EntryRequest) => data<ObservationView[]>(http.post('/api/observations', req)),
+  list: (q: ObservationQuery) => data<PageResult<ObservationView>>(http.get('/api/observations', { params: q })),
+  update: (id: number, version: number, observedOn: string, value: TraitValue, note: string | null) =>
+    data<ObservationView>(http.put(`/api/observations/${id}`, { version, observedOn, note, ...value })),
+  remove: (id: number) => data<void>(http.delete(`/api/observations/${id}`)),
+  history: (id: number) => data<HistoryView[]>(http.get(`/api/observations/${id}/history`)),
+  status: (trialId: number) => data<TrialStatus>(http.get(`/api/trials/${trialId}/status`)),
+  plotDetail: (trialId: number, plotId: number) => data<PlotDetail>(http.get(`/api/trials/${trialId}/plots/${plotId}`)),
+  setAbnormal: (trialId: number, plotIds: number[], abnormal: boolean, note: string | null) =>
+    data<TrialStatus>(http.put(`/api/trials/${trialId}/abnormal`, { plotIds, abnormal, note })),
+}
+
+export const statsApi = {
+  varietySummary: (trialId: number, traitId: number) =>
+    data<VarietySummary>(http.get('/api/stats/variety-summary', { params: { trialId, traitId } })),
+  multiYear: (fieldId: number, traitId: number) =>
+    data<MultiYear>(http.get('/api/stats/multi-year', { params: { fieldId, traitId } })),
+  screen: (fieldId?: number) => data<Screen>(http.get('/api/screen', { params: { fieldId } })),
+}
+
+export const userApi = {
+  list: () => data<UserView[]>(http.get('/api/users')),
+  create: (req: { username: string; displayName: string; role: string; password: string }) =>
+    data<UserView>(http.post('/api/users', req)),
+  resetPassword: (id: number, password: string) => data<void>(http.put(`/api/users/${id}/password`, { password })),
+  setEnabled: (id: number, enabled: boolean) => data<void>(http.put(`/api/users/${id}/enabled`, { enabled })),
 }
 
 export const deviceApi = {

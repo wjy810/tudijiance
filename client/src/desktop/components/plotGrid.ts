@@ -6,8 +6,13 @@ export interface GridCell {
   colNo: number
   lines: string[]
   fill: string
-  /** 右上角的小标记，例如 CK 表示对照 */
+  /** 右上角的小标记，例如 CK 表示对照、! 表示异常 */
   badge?: string
+  badgeColor?: string
+  /** 左下角的小圆点，表示今天录过数据 */
+  marker?: boolean
+  /** 鼠标停在小区上时显示的说明 */
+  tooltip?: string
 }
 
 export interface GridLinkSegment {

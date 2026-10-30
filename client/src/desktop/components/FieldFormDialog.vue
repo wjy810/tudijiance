@@ -13,6 +13,7 @@ function emptyForm(): FieldRequest {
   return {
     name: '', location: null, latitude: null, longitude: null, altitudeM: null, areaMu: null,
     rowCount: 6, colCount: 10, soilType: null, irrigated: true, previousCrop: null, remark: null,
+    plotLengthM: 6.67, plotWidthM: 2,
   }
 }
 
@@ -21,7 +22,7 @@ const saving = ref(false)
 
 watch(visible, (open) => {
   if (open) {
-    Object.assign(form, props.field ? { ...props.field } : emptyForm())
+    Object.assign(form, props.field ? { ...props.field, plotLengthM: null, plotWidthM: null } : emptyForm())
   }
 })
 
@@ -58,6 +59,17 @@ async function save() {
       </el-form-item>
       <div v-if="field" class="hint grid-hint">
         缩小网格会删掉网格外的小区；已经分配了品种的小区不能删。
+      </div>
+      <el-form-item :label="field ? '新小区尺寸' : '小区尺寸'">
+        <span class="sep first">长</span>
+        <el-input-number v-model="form.plotLengthM" :min="0.1" :max="200" :precision="2" :controls="false" class="dim" />
+        <span class="sep">m × 宽</span>
+        <el-input-number v-model="form.plotWidthM" :min="0.1" :max="200" :precision="2" :controls="false" class="dim" />
+        <span class="sep">m</span>
+      </el-form-item>
+      <div class="hint grid-hint">
+        {{ field ? '扩大网格时新生成的小区用这个尺寸，不填就不设。' : '标准小区面积 13.33 m²（例如 6.67 m × 2 m）。' }}
+        单个小区的尺寸以后在平面图上选中后可以再改。折合亩产按小区面积计算。
       </div>
       <el-form-item label="地点">
         <el-input v-model="form.location" maxlength="200" />
@@ -100,6 +112,14 @@ async function save() {
 .sep {
   margin: 0 8px;
   color: var(--app-text-secondary);
+}
+
+.sep.first {
+  margin-left: 0;
+}
+
+.dim {
+  width: 100px;
 }
 
 .grid-hint {

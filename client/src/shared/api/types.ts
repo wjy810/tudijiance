@@ -1,6 +1,6 @@
 // 和后端接口对应的数据类型
 
-export type Role = 'ADMIN' | 'RECORDER'
+export type Role = 'SYS_ADMIN' | 'TEACHER' | 'STUDENT' | 'GUEST'
 
 export interface UserView {
   id: number
@@ -34,7 +34,11 @@ export interface Field {
   updatedAt: string
 }
 
-export type FieldRequest = Omit<Field, 'id' | 'createdAt' | 'updatedAt'>
+export type FieldRequest = Omit<Field, 'id' | 'createdAt' | 'updatedAt'> & {
+  /** 新生成小区的默认长和宽（米） */
+  plotLengthM?: number | null
+  plotWidthM?: number | null
+}
 
 export type PlotKind = 'PLOT' | 'GUARD' | 'PATH'
 
@@ -117,8 +121,9 @@ export interface Layout {
   links: LinkView[]
 }
 
-export type TraitCategory = 'PHENOLOGY' | 'MORPHOLOGY' | 'GROWTH' | 'STRESS' | 'DISEASE' | 'LAB' | 'YIELD'
-export type TraitDataType = 'DATE' | 'NUMBER' | 'GRADE' | 'OPTION' | 'TEXT'
+export type TraitCategory =
+  | 'OPERATION' | 'PHENOLOGY' | 'MORPHOLOGY' | 'GROWTH' | 'STRESS' | 'DISEASE' | 'LAB' | 'YIELD' | 'CUSTOM'
+export type TraitDataType = 'DATE' | 'NUMBER' | 'GRADE' | 'OPTION' | 'TEXT' | 'OPERATION'
 
 export interface TraitDef {
   id: number
@@ -219,4 +224,173 @@ export interface Series {
   unit: string | null
   bucket: Bucket
   points: SeriesPoint[]
+}
+
+export interface CustomTraitRequest {
+  name: string
+  dataType: 'DATE' | 'NUMBER' | 'OPTION' | 'TEXT'
+  unit?: string | null
+  precisionDigits?: number | null
+  options?: string[]
+  description?: string | null
+}
+
+// ---------- 录入的数据 ----------
+
+/** 录入的值。不同类型的项目用不同的字段。 */
+export interface TraitValue {
+  valueNum: number | null
+  valueText: string | null
+  valueDate: string | null
+}
+
+export interface EntryRequest extends TraitValue {
+  trialId: number
+  traitId: number
+  items: { plotId: number; clientUuid: string }[]
+  observedOn: string
+  note: string | null
+}
+
+export interface ObservationView extends TraitValue {
+  id: number
+  trialId: number
+  plotId: number | null
+  plotCode: string | null
+  varietyId: number | null
+  varietyName: string | null
+  replicateNo: number | null
+  traitId: number
+  traitName: string
+  traitCategory: TraitCategory
+  dataType: TraitDataType
+  unit: string | null
+  standardTrait: boolean
+  observedOn: string
+  displayValue: string
+  note: string | null
+  source: string
+  recordedBy: string | null
+  recordedAt: string
+  updatedBy: string | null
+  updatedAt: string | null
+  version: number
+}
+
+export interface PageResult<T> {
+  total: number
+  items: T[]
+}
+
+export interface HistoryView {
+  action: 'CREATE' | 'UPDATE' | 'DELETE'
+  oldValue: string | null
+  newValue: string | null
+  user: string
+  at: string
+}
+
+export interface ObservationQuery {
+  trialId: number
+  varietyId?: number
+  plotId?: number
+  traitId?: number
+  category?: string
+  from?: string
+  to?: string
+  recordedBy?: number
+  page?: number
+  size?: number
+}
+
+// ---------- 平面图状态和小区详情 ----------
+
+export type PlotStatusCode = 'NONE' | 'GROWING' | 'ABNORMAL' | 'HARVESTED' | 'GUARD' | 'PATH'
+
+export interface PlotStatus {
+  plotId: number
+  status: PlotStatusCode
+  enteredToday: boolean
+  abnormalNote: string | null
+}
+
+export interface Indicators {
+  totalPlots: number
+  planted: number
+  enteredToday: number
+  abnormal: number
+  harvested: number
+  weekEntries: number
+  currentStage: string | null
+}
+
+export interface TrialStatus {
+  plots: PlotStatus[]
+  indicators: Indicators
+}
+
+export interface LatestTraitValue {
+  traitId: number
+  traitName: string
+  category: TraitCategory
+  standard: boolean
+  sortOrder: number
+  displayValue: string
+  observedOn: string
+}
+
+export interface PlotDetail {
+  plot: Plot
+  plantingId: number | null
+  variety: Variety | null
+  replicateNo: number | null
+  abnormal: boolean
+  abnormalNote: string | null
+  latest: LatestTraitValue[]
+  records: ObservationView[]
+}
+
+// ---------- 统计和大屏 ----------
+
+export interface VarietyRow {
+  varietyId: number
+  varietyName: string
+  control: boolean
+  plots: number
+  value: number
+  vsCkPercent: number | null
+  rank: number
+}
+
+export interface VarietySummary {
+  traitId: number
+  traitName: string
+  unit: string | null
+  seasonYear: number
+  controlVariety: string | null
+  rows: VarietyRow[]
+}
+
+export interface MultiYear {
+  traitId: number
+  traitName: string
+  unit: string | null
+  years: number[]
+  series: { varietyId: number; varietyName: string; control: boolean; values: (number | null)[] }[]
+}
+
+export interface Screen {
+  fieldName: string | null
+  trialName: string | null
+  seasonYear: number | null
+  rowCount: number
+  colCount: number
+  indicators: Indicators | null
+  plots: { plotId: number; rowNo: number; colNo: number; code: string | null; varietyName: string | null; status: PlotStatusCode }[]
+  yieldRows: VarietyRow[]
+  /** 亩产对比用的是哪一年（当年还没收获时是上一年） */
+  yieldYear: number | null
+  trend: { year: number; value: number }[]
+  recent: { at: string; user: string; plotCode: string; traitName: string; value: string }[]
+  generatedAt: string
 }

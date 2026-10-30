@@ -105,16 +105,20 @@ public class StatsService {
                 ctx.trial().getSeasonYear(), ck == null ? null : ck.getName(), rows);
     }
 
-    /** 一块实验田历年的变化：每年一个试验，按品种汇总。 */
+    /** 一块实验田历年的变化：每年一个试验，按品种汇总。还没有这个项目数据的年份（例如刚播种的当年）不列出。 */
     public MultiYear multiYear(Long fieldId, Long traitId) {
         TraitDef trait = numericTrait(traitId);
         List<Trial> trials = trialService.list(fieldId).stream()
                 .sorted(Comparator.comparing(Trial::getSeasonYear).thenComparing(Trial::getId)).toList();
         List<Integer> years = new ArrayList<>();
         Map<Long, Series> series = new LinkedHashMap<>();
-        for (int i = 0; i < trials.size(); i++) {
-            VarietySummary summary = varietySummary(trials.get(i).getId(), traitId);
-            years.add(trials.get(i).getSeasonYear());
+        for (Trial trial : trials) {
+            VarietySummary summary = varietySummary(trial.getId(), traitId);
+            if (summary.rows().isEmpty()) {
+                continue;
+            }
+            int i = years.size();
+            years.add(trial.getSeasonYear());
             for (VarietyRow row : summary.rows()) {
                 Series s = series.computeIfAbsent(row.varietyId(),
                         k -> new Series(row.varietyId(), row.varietyName(), row.control(), new ArrayList<>()));
@@ -132,25 +136,29 @@ public class StatsService {
         return new MultiYear(trait.getId(), trait.getName(), trait.getUnit(), years, List.copyOf(series.values()));
     }
 
-    /** 大屏：一块实验田最新一年的状态、亩产对比、历年趋势和最新录入。 */
+    /**
+     * 大屏：一块实验田最新一年的状态、亩产对比、历年趋势和最新录入。
+     * 亩产对比用最近一个有产量数据的试验（当年还没收获时显示上一年的），yieldYear 是它的年份。
+     */
     public Screen screen(Long fieldId) {
         List<Field> fields = fieldService.list();
         if (fields.isEmpty()) {
-            return new Screen(null, null, null, 0, 0, null, List.of(), List.of(), List.of(), List.of(),
+            return new Screen(null, null, null, 0, 0, null, List.of(), List.of(), null, List.of(), List.of(),
                     LocalDateTime.now(clock));
         }
         Field field = fieldId == null ? fields.getFirst()
                 : fields.stream().filter(f -> f.getId().equals(fieldId)).findFirst()
                 .orElseThrow(() -> ApiException.notFound("实验田"));
-        Trial trial = trialService.list(field.getId()).stream()
-                .max(Comparator.comparing(Trial::getSeasonYear).thenComparing(Trial::getId)).orElse(null);
+        List<Trial> trials = trialService.list(field.getId()).stream()
+                .sorted(Comparator.comparing(Trial::getSeasonYear).thenComparing(Trial::getId).reversed()).toList();
+        Trial trial = trials.isEmpty() ? null : trials.getFirst();
         List<ScreenPlot> plots = new ArrayList<>();
         if (trial == null) {
             fieldService.plots(field.getId()).forEach(p -> plots.add(
                     new ScreenPlot(p.getId(), p.getRowNo(), p.getColNo(), p.getCode(), null,
                             Plot.KIND_PLOT.equals(p.getKind()) ? "NONE" : p.getKind())));
             return new Screen(field.getName(), null, null, field.getRowCount(), field.getColCount(), null,
-                    plots, List.of(), List.of(), List.of(), LocalDateTime.now(clock));
+                    plots, List.of(), null, List.of(), List.of(), LocalDateTime.now(clock));
         }
         TrialContext ctx = contextLoader.load(trial.getId());
         TrialStatus status = fieldMapService.status(trial.getId());
@@ -165,7 +173,16 @@ public class StatsService {
                 });
 
         TraitDef yield = catalog.byCode("yield_per_mu");
-        List<VarietyRow> yieldRows = varietySummary(trial.getId(), yield.getId()).rows();
+        List<VarietyRow> yieldRows = List.of();
+        Integer yieldYear = null;
+        for (Trial t : trials) {
+            List<VarietyRow> rows = varietySummary(t.getId(), yield.getId()).rows();
+            if (!rows.isEmpty()) {
+                yieldRows = rows;
+                yieldYear = t.getSeasonYear();
+                break;
+            }
+        }
         List<TrendPoint> trend = new ArrayList<>();
         MultiYear multi = multiYear(field.getId(), yield.getId());
         for (int i = 0; i < multi.years().size(); i++) {
@@ -184,7 +201,7 @@ public class StatsService {
                 .last("LIMIT 6"));
         List<ObservationView> recent = observationService.views(recentRows, ctx);
         return new Screen(field.getName(), trial.getName(), trial.getSeasonYear(), field.getRowCount(),
-                field.getColCount(), status.indicators(), plots, yieldRows, trend,
+                field.getColCount(), status.indicators(), plots, yieldRows, yieldYear, trend,
                 recent.stream().map(o -> new RecentEntry(o.recordedAt(), o.recordedBy(), o.plotCode(),
                         o.traitName(), o.displayValue())).toList(),
                 LocalDateTime.now(clock));
@@ -290,6 +307,7 @@ public class StatsService {
 
     public record Screen(String fieldName, String trialName, Integer seasonYear, int rowCount, int colCount,
                          FieldMapService.Indicators indicators, List<ScreenPlot> plots, List<VarietyRow> yieldRows,
-                         List<TrendPoint> trend, List<RecentEntry> recent, LocalDateTime generatedAt) {
+                         Integer yieldYear, List<TrendPoint> trend, List<RecentEntry> recent,
+                         LocalDateTime generatedAt) {
     }
 }

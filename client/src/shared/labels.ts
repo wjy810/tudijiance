@@ -1,6 +1,8 @@
 // 各种取值的中文名称
 import type {
   ControlType,
+  PlotStatusCode,
+  Role,
   DeviceStatus,
   Ecotype,
   PlotKind,
@@ -44,6 +46,7 @@ export const PLOT_KIND: Record<PlotKind, string> = {
 }
 
 export const TRAIT_CATEGORY: Record<TraitCategory, string> = {
+  OPERATION: '农事操作',
   PHENOLOGY: '物候期',
   MORPHOLOGY: '形态特征',
   GROWTH: '生育动态',
@@ -51,6 +54,7 @@ export const TRAIT_CATEGORY: Record<TraitCategory, string> = {
   DISEASE: '病虫害',
   LAB: '室内考种',
   YIELD: '产量',
+  CUSTOM: '自定义',
 }
 
 export const TRAIT_DATA_TYPE: Record<TraitDataType, string> = {
@@ -59,6 +63,7 @@ export const TRAIT_DATA_TYPE: Record<TraitDataType, string> = {
   GRADE: '分级',
   OPTION: '选项',
   TEXT: '文字',
+  OPERATION: '农事',
 }
 
 export const AGG_METHOD: Record<string, string> = {
@@ -98,4 +103,21 @@ const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X']
 /** 重复号用罗马数字显示（I、II、III），超过 10 用阿拉伯数字。 */
 export function replicateLabel(n: number): string {
   return ROMAN[n] ?? String(n)
+}
+
+export const ROLE: Record<Role, string> = {
+  SYS_ADMIN: '系统管理员',
+  TEACHER: '老师',
+  STUDENT: '学生',
+  GUEST: '游客',
+}
+
+/** 小区状态的名称和颜色（平面图、图例、大屏统一用这一套） */
+export const PLOT_STATUS: Record<PlotStatusCode, { label: string; color: string }> = {
+  NONE: { label: '未种植', color: '#e9ecef' },
+  GROWING: { label: '生长中', color: '#cfe8d5' },
+  ABNORMAL: { label: '有异常', color: '#f4b4b4' },
+  HARVESTED: { label: '已收获', color: '#f1d9a0' },
+  GUARD: { label: '保护区', color: '#dee2e6' },
+  PATH: { label: '走道', color: '#f4efe4' },
 }

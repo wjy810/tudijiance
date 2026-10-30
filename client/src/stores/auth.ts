@@ -1,7 +1,8 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 
-import { authApi, setToken, type UserView } from '@/shared/api'
+import { authApi, setToken, type Role, type UserView } from '@/shared/api'
+import { useCatalogStore } from '@/stores/catalog'
 
 const STORAGE_KEY = 'tudijiance.session'
 
@@ -42,7 +43,20 @@ export const useAuthStore = defineStore('auth', () => {
 
   const user = computed(() => session.value?.user ?? null)
   const loggedIn = computed(() => session.value !== null)
-  const isAdmin = computed(() => session.value?.user.role === 'ADMIN')
+  const role = computed<Role | null>(() => session.value?.user.role ?? null)
+  // 四级权限：系统管理员管系统和用户；老师录入、查看、修改；学生录入、查看；游客只看大屏
+  const isSysAdmin = computed(() => role.value === 'SYS_ADMIN')
+  const isTeacher = computed(() => role.value === 'TEACHER')
+  const isGuest = computed(() => role.value === 'GUEST')
+  const canRecord = computed(() => role.value === 'TEACHER' || role.value === 'STUDENT')
+
+  /** 登录后的首页 */
+  const homePath = computed(() => {
+    if (role.value === 'GUEST') {
+      return '/screen'
+    }
+    return role.value === 'SYS_ADMIN' ? '/users' : '/fields'
+  })
 
   async function login(username: string, password: string): Promise<void> {
     const res = await authApi.login(username, password)
@@ -52,10 +66,12 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   function logout(): void {
+    // 换账号登录后要重新取品种和项目
+    useCatalogStore().reset()
     session.value = null
     setToken(null)
     saveSession(null)
   }
 
-  return { user, loggedIn, isAdmin, login, logout }
+  return { user, loggedIn, role, isSysAdmin, isTeacher, isGuest, canRecord, homePath, login, logout }
 })

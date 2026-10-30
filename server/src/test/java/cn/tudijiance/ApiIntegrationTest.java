@@ -249,7 +249,19 @@ class ApiIntegrationTest {
         assertThat(screen.get("fieldName").asString()).isEqualTo("统计试验田");
         assertThat(screen.get("plots").size()).isEqualTo(6);
         assertThat(screen.get("yieldRows").size()).isEqualTo(2);
+        assertThat(screen.get("yieldYear").asInt()).isEqualTo(2026);
         assertThat(screen.get("recent").size()).isGreaterThan(0);
+
+        // 下一年刚播种还没有产量：历年变化不列这一年，大屏的亩产对比仍显示 2026 年
+        call(teacher, post("/api/trials"), Map.of("fieldId", s.fieldId, "seasonYear", 2027, "name", "2027 品比",
+                "trialType", "COMPARISON"), status().isOk());
+        multi = call(teacher, get("/api/stats/multi-year?fieldId=" + s.fieldId + "&traitId="
+                + traitId("yield_per_mu")), null, status().isOk());
+        assertThat(multi.get("years").size()).isEqualTo(1);
+        screen = call(guest, get("/api/screen?fieldId=" + s.fieldId), null, status().isOk());
+        assertThat(screen.get("seasonYear").asInt()).isEqualTo(2027);
+        assertThat(screen.get("yieldYear").asInt()).isEqualTo(2026);
+        assertThat(screen.get("yieldRows").size()).isEqualTo(2);
     }
 
     @Test
