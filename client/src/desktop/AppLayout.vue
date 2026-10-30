@@ -3,7 +3,7 @@ import { computed, reactive, ref, type Component } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
-  ArrowDown, Collection, Cpu, DataAnalysis, Document, HomeFilled, Monitor, Tickets, User,
+  ArrowDown, Collection, Cpu, DataAnalysis, Document, HomeFilled, Monitor, Tickets, Upload, User,
 } from '@element-plus/icons-vue'
 
 import { authApi, type Role } from '@/shared/api'
@@ -39,6 +39,7 @@ const GROUPS: { title: string; items: MenuItem[] }[] = [
     items: [
       { path: '/varieties', label: '品种', icon: Collection, roles: RECORDERS },
       { path: '/traits', label: '录入项目', icon: Tickets, roles: RECORDERS },
+      { path: '/import', label: '导入历史表格', icon: Upload, roles: ['TEACHER'] },
     ],
   },
   {

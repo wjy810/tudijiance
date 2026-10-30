@@ -1,5 +1,6 @@
 package cn.tudijiance.observation;
 
+import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -175,6 +176,48 @@ public class ObservationService {
             query.in(Observation::getTraitId, traitIds);
         }
         return query;
+    }
+
+    // ---------- 导入历史表格用 ----------
+
+    /** 检查一个值是否合法，不合法时抛出带提示的 ApiException。 */
+    public void checkValue(TraitDef trait, List<TraitOption> options, BigDecimal num, String text, LocalDate date) {
+        TraitValues.validate(trait, options, num, text, date);
+    }
+
+    public boolean exists(String clientUuid) {
+        return observationMapper.selectCount(Wrappers.<Observation>lambdaQuery()
+                .eq(Observation::getClientUuid, clientUuid)) > 0;
+    }
+
+    /**
+     * 导入一个值，来源记为 IMPORT。clientUuid 由导入内容算出，同一份表格再导一次时已存在，返回 false，不重复导入。
+     */
+    public boolean importValue(TrialContext ctx, Long plotId, TraitDef trait, List<TraitOption> options,
+                               BigDecimal num, String text, LocalDate date, LocalDate observedOn,
+                               String clientUuid, long userId, LocalDateTime now) {
+        TraitValues.Value value = TraitValues.validate(trait, options, num, text, date);
+        if (exists(clientUuid)) {
+            return false;
+        }
+        Planting planting = plantingFor(ctx, plotId);
+        Observation o = new Observation();
+        o.setClientUuid(clientUuid);
+        o.setPlantingId(planting.getId());
+        o.setTraitId(trait.getId());
+        o.setObservedOn(observedOn);
+        o.setValueNum(value.num());
+        o.setValueText(value.text());
+        o.setValueDate(value.date());
+        o.setSource(Observation.SOURCE_IMPORT);
+        o.setRecordedBy(userId);
+        o.setRecordedAt(now);
+        o.setVersion(1);
+        o.setDeleted(false);
+        observationMapper.insert(o);
+        audit(o.getId(), "CREATE", null, "导入 " + TraitValues.display(trait, options, value.num(), value.text(),
+                value.date()), userId, now);
+        return true;
     }
 
     /** 老师修改一条数据。 */

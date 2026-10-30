@@ -47,6 +47,10 @@ const router = createRouter({
           meta: { roles: RECORDERS },
         },
         {
+          path: 'import', name: 'import', component: () => import('@/desktop/views/ImportView.vue'),
+          meta: { roles: ['TEACHER'] },
+        },
+        {
           path: 'traits', name: 'traits', component: () => import('@/desktop/views/TraitsView.vue'),
           meta: { roles: RECORDERS },
         },

@@ -534,6 +534,8 @@ function onMoreCommand(cmd: string) {
     fieldDialog.value = true
   } else if (cmd === 'export') {
     exportMap()
+  } else if (cmd === 'import') {
+    router.push('/import')
   }
 }
 
@@ -695,6 +697,7 @@ const metricGroups = computed(() => {
           <template #dropdown>
             <el-dropdown-menu>
               <el-dropdown-item v-if="auth.isTeacher" command="field">修改实验田（行列、尺寸）</el-dropdown-item>
+              <el-dropdown-item v-if="auth.isTeacher" command="import">导入历史表格</el-dropdown-item>
               <el-dropdown-item command="export">导出种植图（jpg）</el-dropdown-item>
             </el-dropdown-menu>
           </template>

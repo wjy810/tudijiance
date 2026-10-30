@@ -4,6 +4,9 @@ import type {
   CustomTraitRequest,
   EntryRequest,
   HistoryView,
+  ImportMapping,
+  ImportPreview,
+  ImportResult,
   MultiYear,
   ObservationQuery,
   ObservationView,
@@ -112,6 +115,21 @@ export const statsApi = {
   trialReport: (trialId: number) => data<TrialReport>(http.get('/api/stats/trial-report', { params: { trialId } })),
   exportTrialReport: (trialId: number, filename: string) =>
     download('/api/stats/trial-report/export', { trialId }, filename),
+}
+
+export const importApi = {
+  preview: (file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return data<ImportPreview>(http.post('/api/imports/preview', form, { timeout: 120000 }))
+  },
+  run: (file: File, mapping: ImportMapping) => {
+    const form = new FormData()
+    form.append('file', file)
+    form.append('mapping', new Blob([JSON.stringify(mapping)], { type: 'application/json' }))
+    return data<ImportResult>(http.post('/api/imports/run', form, { timeout: 300000 }))
+  },
+  template: (trialId: number, filename: string) => download('/api/imports/template', { trialId }, filename),
 }
 
 export const userApi = {

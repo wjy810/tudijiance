@@ -447,3 +447,50 @@ export interface TrialReport {
   hasGrowthDays: boolean
   hasYield: boolean
 }
+
+// ---------- 导入历史表格 ----------
+
+export interface ImportPreviewSheet {
+  name: string
+  rowCount: number
+  colCount: number
+  /** 前 40 行，每个格子都是文字 */
+  rows: string[][]
+}
+
+export interface ImportPreview {
+  sheets: ImportPreviewSheet[]
+}
+
+/** 列号从 0 开始，表头行从 1 开始 */
+export interface ImportMapping {
+  trialId: number
+  sheet: number
+  headerRow: number
+  plotCodeCol: number | null
+  varietyCol: number | null
+  replicateCol: number | null
+  observedOnCol: number | null
+  observedOn: string | null
+  assignLayout: boolean
+  createVarieties: boolean
+  columns: { col: number; traitId: number }[]
+  dryRun: boolean
+}
+
+export interface ImportCellError {
+  row: number
+  col: string
+  message: string
+}
+
+export interface ImportResult {
+  dryRun: boolean
+  rows: number
+  created: number
+  duplicates: number
+  errorCount: number
+  errors: ImportCellError[]
+  newVarieties: string[]
+  layoutChanges: number
+}

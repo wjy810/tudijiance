@@ -11,6 +11,11 @@ spring:
     password: ${DB_PASSWORD:}
   flyway:
     enabled: true
+  servlet:
+    multipart:
+      # 导入历史表格
+      max-file-size: 20MB
+      max-request-size: 25MB
 
 mybatis-plus:
   configuration:

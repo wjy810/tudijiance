@@ -3,6 +3,7 @@ package cn.tudijiance;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -27,6 +28,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultMatcher;
@@ -390,6 +392,122 @@ class ApiIntegrationTest {
     // ---------- 准备数据 ----------
 
     /** 2 行 × 3 列；第 1、3 个小区种对照，第 2、4 个种品系 A，第 5 个空着，第 6 个是保护区。 */
+    @Test
+    void importHistoricalSpreadsheet() throws Exception {
+        Setup s = setup("导入试验田");
+        // 表格第 1 行是标题，第 2 行是表头；小区编号是 1~6，第 6 个是保护区
+        byte[] xlsx = workbook(List.of(
+                List.of("2026 年品比试验记载表"),
+                List.of("小区编号", "品种", "重复", "播种期", "株高(cm)", "最终倒伏程度", "折合亩产"),
+                List.of(1, "周麦18-测试", "I", "10月12日", 78.5, "2级", 500),
+                List.of(2, "新品系A-测试", 1, "2025-10-12", "80cm", 3, 520),
+                List.of(3, "新品种B-导入", "II", "10.12", "abc", "9级", ""),
+                List.of(99, "周麦18-测试", "I", "10月12日", 70),
+                List.of(6, "周麦18-测试", "I", "10月12日", 70)));
+        Map<String, Object> mapping = new HashMap<>(Map.of("trialId", s.trialId, "sheet", 0, "headerRow", 2,
+                "plotCodeCol", 0, "varietyCol", 1, "replicateCol", 2, "observedOn", "2026-06-10",
+                "assignLayout", true, "createVarieties", true, "dryRun", true));
+        mapping.put("columns", List.of(Map.of("col", 3, "traitId", traitId("sowing_date")),
+                Map.of("col", 4, "traitId", traitId("plant_height")),
+                Map.of("col", 5, "traitId", traitId("lodging_final_grade")),
+                Map.of("col", 6, "traitId", traitId("yield_per_mu"))));
+
+        // 学生不能导入
+        mvc.perform(multipart("/api/imports/run").file(file(xlsx)).file(part(mapping))
+                .header("Authorization", "Bearer " + student)).andExpect(status().isForbidden());
+
+        JsonNode check = importRun(xlsx, mapping);
+        assertThat(check.get("dryRun").asBoolean()).isTrue();
+        assertThat(check.get("rows").asInt()).isEqualTo(5);
+        assertThat(check.get("created").asInt()).isEqualTo(9);
+        assertThat(check.get("errorCount").asInt()).isEqualTo(4);
+        assertThat(check.get("newVarieties").get(0).asString()).isEqualTo("新品种B-导入");
+        List<String> where = new ArrayList<>();
+        check.get("errors").forEach(e -> where.add(e.get("row").asInt() + e.get("col").asString()));
+        assertThat(where).containsExactly("5E", "5F", "6A", "7A");
+        // 检查时什么都不写
+        assertThat(call(teacher, get("/api/observations?trialId=" + s.trialId), null, status().isOk())
+                .get("total").asInt()).isZero();
+
+        mapping.put("dryRun", false);
+        JsonNode done = importRun(xlsx, mapping);
+        assertThat(done.get("created").asInt()).isEqualTo(9);
+        JsonNode yields = call(teacher, get("/api/observations?trialId=" + s.trialId + "&traitId="
+                + traitId("plot_yield") + "&plotId=" + s.plots.get(0)), null, status().isOk());
+        // 亩产 500 × 面积 13.3 ÷ 666.7 = 9.97 kg
+        assertThat(yields.get("items").get(0).get("valueNum").decimalValue()).isEqualByComparingTo("9.97");
+        assertThat(yields.get("items").get(0).get("source").asString()).isEqualTo("IMPORT");
+        assertThat(yields.get("items").get(0).get("observedOn").asString()).isEqualTo("2026-06-10");
+        // 第 3 个小区按表格改成了新品种 B 的重复 II
+        JsonNode layout = call(teacher, get("/api/trials/" + s.trialId + "/layout"), null, status().isOk());
+        JsonNode plot3 = find(layout.get("plantings"), p -> p.get("plotId").asLong() == s.plots.get(2));
+        assertThat(plot3.get("replicateNo").asInt()).isEqualTo(2);
+        assertThat(plot3.get("varietyId").asLong()).isNotEqualTo(s.ckVariety);
+
+        // 同一份表格再导一次不会重复
+        JsonNode again = importRun(xlsx, mapping);
+        assertThat(again.get("created").asInt()).isZero();
+        assertThat(again.get("duplicates").asInt()).isEqualTo(9);
+
+        // 没有小区编号时按品种 + 重复找小区
+        byte[] byVariety = workbook(List.of(List.of("品种", "重复", "千粒重"), List.of("周麦18-测试", "I", 45.2)));
+        Map<String, Object> m2 = new HashMap<>(Map.of("trialId", s.trialId, "sheet", 0, "headerRow", 1,
+                "varietyCol", 0, "replicateCol", 1, "observedOn", "2026-06-20", "assignLayout", false,
+                "createVarieties", false, "dryRun", false));
+        m2.put("columns", List.of(Map.of("col", 2, "traitId", traitId("thousand_grain_weight"))));
+        assertThat(importRun(byVariety, m2).get("created").asInt()).isEqualTo(1);
+
+        // 预览和模板
+        JsonNode preview = json.readTree(mvc.perform(multipart("/api/imports/preview").file(file(xlsx))
+                        .header("Authorization", "Bearer " + teacher))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8));
+        assertThat(preview.get("sheets").get(0).get("rows").get(1).get(0).asString()).isEqualTo("小区编号");
+        byte[] template = mvc.perform(get("/api/imports/template?trialId=" + s.trialId)
+                        .header("Authorization", "Bearer " + teacher))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsByteArray();
+        try (Workbook wb = new XSSFWorkbook(new ByteArrayInputStream(template))) {
+            assertThat(wb.getSheetAt(0).getRow(0).getCell(0).getStringCellValue()).isEqualTo("小区编号");
+            assertThat(wb.getSheetAt(0).getLastRowNum()).isEqualTo(5);
+        }
+    }
+
+    private JsonNode importRun(byte[] xlsx, Map<String, Object> mapping) throws Exception {
+        String body = mvc.perform(multipart("/api/imports/run").file(file(xlsx)).file(part(mapping))
+                        .header("Authorization", "Bearer " + teacher))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+        return json.readTree(body);
+    }
+
+    private static MockMultipartFile file(byte[] bytes) {
+        return new MockMultipartFile("file", "历史数据.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", bytes);
+    }
+
+    private MockMultipartFile part(Map<String, Object> mapping) {
+        return new MockMultipartFile("mapping", "", MediaType.APPLICATION_JSON_VALUE,
+                json.writeValueAsString(mapping).getBytes(StandardCharsets.UTF_8));
+    }
+
+    /** 用 POI 写一个测试用的工作簿：数字写成数字格子，"2025-10-12" 这样的字符串照原样写 */
+    private static byte[] workbook(List<List<Object>> rows) throws Exception {
+        try (Workbook wb = new XSSFWorkbook(); java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream()) {
+            Sheet sheet = wb.createSheet("记载表");
+            for (int r = 0; r < rows.size(); r++) {
+                var row = sheet.createRow(r);
+                for (int c = 0; c < rows.get(r).size(); c++) {
+                    Object v = rows.get(r).get(c);
+                    if (v instanceof Number n) {
+                        row.createCell(c).setCellValue(n.doubleValue());
+                    } else if (!"".equals(v)) {
+                        row.createCell(c).setCellValue(v.toString());
+                    }
+                }
+            }
+            wb.write(out);
+            return out.toByteArray();
+        }
+    }
+
     private record Setup(long fieldId, long trialId, long ckVariety, long testVariety, List<Long> plots) {
     }
 
