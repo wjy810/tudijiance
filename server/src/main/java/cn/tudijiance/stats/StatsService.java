@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Clock;
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -48,6 +49,8 @@ public class StatsService {
 
     private static final BigDecimal MU = new BigDecimal("666.7");
     private static final BigDecimal STD_AREA = new BigDecimal("13.33");
+    private static final int RECENT_LIMIT = 8;
+    private static final int RECENT_SCAN = 300;
 
     private final ObservationMapper observationMapper;
     private final ObservationService observationService;
@@ -156,20 +159,22 @@ public class StatsService {
         if (trial == null) {
             fieldService.plots(field.getId()).forEach(p -> plots.add(
                     new ScreenPlot(p.getId(), p.getRowNo(), p.getColNo(), p.getCode(), null,
-                            Plot.KIND_PLOT.equals(p.getKind()) ? "NONE" : p.getKind())));
+                            Plot.KIND_PLOT.equals(p.getKind()) ? "NONE" : p.getKind(), null)));
             return new Screen(field.getName(), null, null, field.getRowCount(), field.getColCount(), null,
                     plots, List.of(), null, List.of(), List.of(), LocalDateTime.now(clock));
         }
         TrialContext ctx = contextLoader.load(trial.getId());
         TrialStatus status = fieldMapService.status(trial.getId());
-        Map<Long, String> statusByPlot = status.plots().stream()
-                .collect(Collectors.toMap(FieldMapService.PlotStatus::plotId, FieldMapService.PlotStatus::status));
+        Map<Long, FieldMapService.PlotStatus> statusByPlot = status.plots().stream()
+                .collect(Collectors.toMap(FieldMapService.PlotStatus::plotId, ps -> ps));
         ctx.plots().values().stream()
                 .sorted(Comparator.comparing(Plot::getRowNo).thenComparing(Plot::getColNo))
                 .forEach(p -> {
                     Variety v = ctx.varietyOf(ctx.plantingsByPlot().get(p.getId()));
+                    FieldMapService.PlotStatus ps = statusByPlot.get(p.getId());
                     plots.add(new ScreenPlot(p.getId(), p.getRowNo(), p.getColNo(), p.getCode(),
-                            v == null ? null : v.getName(), statusByPlot.get(p.getId())));
+                            v == null ? null : v.getName(), ps == null ? null : ps.status(),
+                            ps == null ? null : ps.abnormalNote()));
                 });
 
         TraitDef yield = catalog.byCode("yield_per_mu");
@@ -198,13 +203,35 @@ public class StatsService {
                 .in(Observation::getPlantingId, ctx.plantingsById().keySet())
                 .eq(Observation::getDeleted, false)
                 .orderByDesc(Observation::getRecordedAt).orderByDesc(Observation::getId)
-                .last("LIMIT 6"));
-        List<ObservationView> recent = observationService.views(recentRows, ctx);
+                .last("LIMIT " + RECENT_SCAN));
+        List<RecentEntry> recent = groupRecent(observationService.views(recentRows, ctx));
         return new Screen(field.getName(), trial.getName(), trial.getSeasonYear(), field.getRowCount(),
-                field.getColCount(), status.indicators(), plots, yieldRows, yieldYear, trend,
-                recent.stream().map(o -> new RecentEntry(o.recordedAt(), o.recordedBy(), o.plotCode(),
-                        o.traitName(), o.displayValue())).toList(),
+                field.getColCount(), status.indicators(), plots, yieldRows, yieldYear, trend, recent,
                 LocalDateTime.now(clock));
+    }
+
+    /**
+     * 最新录入：一次批量录入会给很多小区各存一条，这里把同一个人、同一分钟、同一项目、同一个值的合成一条，
+     * 显示成"给 8 个小区录入灌溉"。最多 RECENT_LIMIT 条。
+     */
+    private static List<RecentEntry> groupRecent(List<ObservationView> views) {
+        Map<String, RecentEntry> groups = new LinkedHashMap<>();
+        for (ObservationView o : views) {
+            String key = o.recordedBy() + "|" + o.recordedAt().truncatedTo(ChronoUnit.MINUTES) + "|"
+                    + o.traitId() + "|" + o.displayValue();
+            RecentEntry g = groups.get(key);
+            if (g == null) {
+                if (groups.size() == RECENT_LIMIT) {
+                    break;
+                }
+                groups.put(key, new RecentEntry(o.recordedAt(), o.recordedBy(), o.plotCode(), 1, o.traitName(),
+                        o.displayValue()));
+            } else {
+                groups.put(key, new RecentEntry(g.at(), g.user(), g.plotCode(), g.plotCount() + 1, g.traitName(),
+                        g.value()));
+            }
+        }
+        return List.copyOf(groups.values());
     }
 
     private Map<Long, BigDecimal> valuesPerPlanting(TrialContext ctx, TraitDef trait) {
@@ -296,13 +323,16 @@ public class StatsService {
     public record MultiYear(Long traitId, String traitName, String unit, List<Integer> years, List<Series> series) {
     }
 
-    public record ScreenPlot(Long plotId, int rowNo, int colNo, String code, String varietyName, String status) {
+    public record ScreenPlot(Long plotId, int rowNo, int colNo, String code, String varietyName, String status,
+                             String abnormalNote) {
     }
 
     public record TrendPoint(int year, BigDecimal value) {
     }
 
-    public record RecentEntry(LocalDateTime at, String user, String plotCode, String traitName, String value) {
+    /** plotCode 是其中一个小区的编号，plotCount 是这一次录了几个小区。 */
+    public record RecentEntry(LocalDateTime at, String user, String plotCode, int plotCount, String traitName,
+                              String value) {
     }
 
     public record Screen(String fieldName, String trialName, Integer seasonYear, int rowCount, int colCount,

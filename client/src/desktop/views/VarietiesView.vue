@@ -95,15 +95,21 @@ async function remove(v: Variety) {
 <template>
   <div class="page">
     <div class="page-header">
-      <h2>品种</h2>
-      <div class="tools">
+      <div>
+        <h2>品种</h2>
+        <div class="page-desc">试验用的品种，共 {{ catalog.varieties.length }} 个。标为对照的品种在统计时作为比较基准。</div>
+      </div>
+      <div class="page-actions">
         <el-input v-model="keyword" placeholder="搜索名称、编号、选育单位" clearable class="search" />
         <el-button v-if="auth.isTeacher" type="primary" :icon="Plus" @click="open(null)">新增品种</el-button>
       </div>
     </div>
 
-    <el-table v-loading="loading" :data="rows" border stripe empty-text="还没有品种">
-      <el-table-column prop="name" label="品种名称" min-width="140" />
+    <div class="panel table-panel">
+    <el-table v-loading="loading" :data="rows" empty-text="还没有品种">
+      <el-table-column label="品种名称" min-width="140">
+        <template #default="{ row }"><b>{{ row.name }}</b></template>
+      </el-table-column>
       <el-table-column prop="code" label="编号" width="110" />
       <el-table-column prop="breeder" label="选育单位" min-width="160" show-overflow-tooltip />
       <el-table-column label="冬春性" width="90">
@@ -125,6 +131,7 @@ async function remove(v: Variety) {
         </template>
       </el-table-column>
     </el-table>
+    </div>
 
     <el-dialog v-model="dialogOpen" :title="editing ? '修改品种' : '新增品种'" width="520px">
       <el-form label-width="88px">
@@ -169,9 +176,8 @@ async function remove(v: Variety) {
 </template>
 
 <style scoped>
-.tools {
-  display: flex;
-  gap: 8px;
+.table-panel {
+  padding: 4px 16px 12px;
 }
 
 .search {

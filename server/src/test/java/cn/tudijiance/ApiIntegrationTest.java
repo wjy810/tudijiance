@@ -251,6 +251,12 @@ class ApiIntegrationTest {
         assertThat(screen.get("yieldRows").size()).isEqualTo(2);
         assertThat(screen.get("yieldYear").asInt()).isEqualTo(2026);
         assertThat(screen.get("recent").size()).isGreaterThan(0);
+        // 同一次给几个小区录的同一个值合成一条
+        int grouped = 0;
+        for (JsonNode r : screen.get("recent")) {
+            grouped += r.get("plotCount").asInt();
+        }
+        assertThat(grouped).isGreaterThan(screen.get("recent").size());
 
         // 下一年刚播种还没有产量：历年变化不列这一年，大屏的亩产对比仍显示 2026 年
         call(teacher, post("/api/trials"), Map.of("fieldId", s.fieldId, "seasonYear", 2027, "name", "2027 品比",

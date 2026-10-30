@@ -12,6 +12,13 @@ const auth = useAuthStore()
 const users = ref<UserView[]>([])
 const loading = ref(false)
 
+const ROLE_TAG: Record<Role, 'danger' | 'success' | 'primary' | 'info'> = {
+  SYS_ADMIN: 'danger',
+  TEACHER: 'success',
+  STUDENT: 'primary',
+  GUEST: 'info',
+}
+
 const ROLE_HINT: Record<Role, string> = {
   SYS_ADMIN: '维护系统、管理用户，不录入和修改试验数据',
   TEACHER: '布置试验，录入、查看、修改数据',
@@ -96,15 +103,30 @@ async function setEnabled(u: UserView, enabled: boolean) {
 <template>
   <div class="page">
     <div class="page-header">
-      <h2>用户管理</h2>
+      <div>
+        <h2>用户管理</h2>
+        <div class="page-desc">四级权限：系统管理员、老师、学生、游客。停用的账号不能登录。</div>
+      </div>
       <el-button type="primary" :icon="Plus" @click="openCreate">新增用户</el-button>
     </div>
 
-    <el-table v-loading="loading" :data="users" border stripe>
-      <el-table-column prop="username" label="用户名" min-width="120" />
-      <el-table-column prop="displayName" label="姓名" min-width="120" />
-      <el-table-column label="角色" width="110">
-        <template #default="{ row }">{{ ROLE[row.role as Role] ?? row.role }}</template>
+    <div class="panel table-panel">
+    <el-table v-loading="loading" :data="users">
+      <el-table-column label="用户" min-width="180">
+        <template #default="{ row }">
+          <div class="user-cell">
+            <span class="avatar" :class="row.role">{{ (row.displayName || row.username).slice(0, 1) }}</span>
+            <div>
+              <div>{{ row.displayName || row.username }}</div>
+              <div class="muted small">{{ row.username }}</div>
+            </div>
+          </div>
+        </template>
+      </el-table-column>
+      <el-table-column label="角色" width="120">
+        <template #default="{ row }">
+          <el-tag :type="ROLE_TAG[row.role as Role]" effect="light" round>{{ ROLE[row.role as Role] ?? row.role }}</el-tag>
+        </template>
       </el-table-column>
       <el-table-column label="权限" min-width="240">
         <template #default="{ row }"><span class="muted">{{ ROLE_HINT[row.role as Role] }}</span></template>
@@ -125,6 +147,7 @@ async function setEnabled(u: UserView, enabled: boolean) {
         </template>
       </el-table-column>
     </el-table>
+    </div>
 
     <el-dialog v-model="dialogOpen" title="新增用户" width="480px">
       <el-form label-width="80px">
@@ -155,5 +178,41 @@ async function setEnabled(u: UserView, enabled: boolean) {
 <style scoped>
 .full {
   width: 100%;
+}
+
+.table-panel {
+  padding: 4px 16px 12px;
+}
+
+.small {
+  font-size: 12px;
+}
+
+.user-cell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  background: #eef1ec;
+  color: #4f5c54;
+}
+
+.avatar.TEACHER {
+  background: var(--app-accent-soft);
+  color: var(--app-accent);
+}
+
+.avatar.SYS_ADMIN {
+  background: #fbeaea;
+  color: var(--app-danger);
 }
 </style>

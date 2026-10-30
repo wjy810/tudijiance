@@ -215,13 +215,14 @@ const lineOption = computed<EChartsCoreOption>(() => {
   <div class="page">
     <div class="page-header">
       <div>
-        <h2>传感器（第二期预留）</h2>
-        <div class="hint">第一期只预留接口：设备通过 HTTP 或 MQTT 上报读数。现在可以用模拟设备试用。</div>
+        <h2>设备接入（第二期预留）</h2>
+        <div class="page-desc">第一期只预留接口：传感器通过 HTTP 或 MQTT 上报读数。没有硬件时可以登记模拟设备试用。</div>
       </div>
       <el-button v-if="auth.isSysAdmin" type="primary" :icon="Plus" @click="open(null)">登记设备</el-button>
     </div>
 
-    <el-table v-loading="loading" :data="devices" border stripe empty-text="还没有登记设备">
+    <div class="panel table-panel">
+    <el-table v-loading="loading" :data="devices" empty-text="还没有登记设备">
       <el-table-column prop="code" label="编号" width="110" />
       <el-table-column label="名称" min-width="130">
         <template #default="{ row }">
@@ -262,6 +263,7 @@ const lineOption = computed<EChartsCoreOption>(() => {
         </template>
       </el-table-column>
     </el-table>
+    </div>
 
     <el-dialog v-model="dialogOpen" :title="editing ? '修改设备' : '登记设备'" width="520px">
       <el-form label-width="88px">
@@ -347,6 +349,10 @@ const lineOption = computed<EChartsCoreOption>(() => {
 </template>
 
 <style scoped>
+.table-panel {
+  padding: 4px 16px 12px;
+}
+
 .full {
   width: 100%;
 }

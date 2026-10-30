@@ -2,12 +2,15 @@
 import { computed, reactive, ref, type Component } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Collection, Cpu, DataAnalysis, Document, Grid, Monitor, Tickets, User } from '@element-plus/icons-vue'
+import {
+  ArrowDown, Collection, Cpu, DataAnalysis, Document, HomeFilled, Monitor, Tickets, User,
+} from '@element-plus/icons-vue'
 
 import { authApi, type Role } from '@/shared/api'
 import { ROLE } from '@/shared/labels'
 import { useAuthStore } from '@/stores/auth'
 import { getServerUrl } from '@/shared/settings'
+import BrandMark from '@/desktop/components/BrandMark.vue'
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -20,24 +23,50 @@ interface MenuItem {
   roles: Role[]
 }
 
-const MENU: MenuItem[] = [
-  { path: '/fields', label: '实验田', icon: Grid, roles: ['TEACHER', 'STUDENT'] },
-  { path: '/data', label: '数据查看', icon: Document, roles: ['TEACHER', 'STUDENT'] },
-  { path: '/stats', label: '统计分析', icon: DataAnalysis, roles: ['TEACHER', 'STUDENT'] },
-  { path: '/varieties', label: '品种', icon: Collection, roles: ['TEACHER', 'STUDENT'] },
-  { path: '/traits', label: '录入项目', icon: Tickets, roles: ['TEACHER', 'STUDENT'] },
-  { path: '/users', label: '用户管理', icon: User, roles: ['SYS_ADMIN'] },
-  { path: '/devices', label: '传感器（预留）', icon: Cpu, roles: ['SYS_ADMIN', 'TEACHER'] },
+const RECORDERS: Role[] = ['TEACHER', 'STUDENT']
+
+const GROUPS: { title: string; items: MenuItem[] }[] = [
+  {
+    title: '日常',
+    items: [
+      { path: '/home', label: '首页', icon: HomeFilled, roles: RECORDERS },
+      { path: '/data', label: '数据查看', icon: Document, roles: RECORDERS },
+      { path: '/stats', label: '统计分析', icon: DataAnalysis, roles: RECORDERS },
+    ],
+  },
+  {
+    title: '资料',
+    items: [
+      { path: '/varieties', label: '品种', icon: Collection, roles: RECORDERS },
+      { path: '/traits', label: '录入项目', icon: Tickets, roles: RECORDERS },
+    ],
+  },
+  {
+    title: '系统',
+    items: [
+      { path: '/users', label: '用户管理', icon: User, roles: ['SYS_ADMIN'] },
+      { path: '/devices', label: '设备接入（预留）', icon: Cpu, roles: ['SYS_ADMIN'] },
+    ],
+  },
 ]
 
-const menu = computed(() => MENU.filter((m) => auth.role && m.roles.includes(auth.role)))
+const groups = computed(() =>
+  GROUPS.map((g) => ({ ...g, items: g.items.filter((m) => auth.role && m.roles.includes(auth.role)) }))
+    .filter((g) => g.items.length > 0),
+)
 
-// 平面图页面也算在"实验田"菜单下
-const activeMenu = computed(() => '/' + (route.path.split('/')[1] ?? ''))
+// 平面图是从首页点进去的，菜单仍然高亮"首页"
+const activeMenu = computed(() => (route.path.startsWith('/fields') ? '/home' : '/' + (route.path.split('/')[1] ?? '')))
 
-function logout() {
-  auth.logout()
-  router.replace({ name: 'login' })
+const displayName = computed(() => auth.user?.displayName || auth.user?.username || '')
+
+function onCommand(cmd: string) {
+  if (cmd === 'password') {
+    openPassword()
+  } else if (cmd === 'logout') {
+    auth.logout()
+    router.replace({ name: 'login' })
+  }
 }
 
 // ---------- 修改自己的密码 ----------
@@ -73,34 +102,61 @@ async function savePassword() {
 </script>
 
 <template>
-  <el-container class="layout">
-    <el-aside width="200px" class="aside">
+  <div class="layout">
+    <aside class="aside">
       <div class="brand">
-        <div class="brand-title">小麦实验田管理</div>
-        <div class="brand-sub">第一期 · 数据采集与展示</div>
-      </div>
-      <el-menu :default-active="activeMenu" router class="menu">
-        <el-menu-item v-for="m in menu" :key="m.path" :index="m.path">
-          <el-icon><component :is="m.icon" /></el-icon>
-          <span>{{ m.label }}</span>
-        </el-menu-item>
-      </el-menu>
-      <div class="screen-entry">
-        <el-button :icon="Monitor" plain @click="router.push('/screen')">打开数据大屏</el-button>
-      </div>
-      <div class="aside-footer">
-        <div>{{ auth.user?.displayName || auth.user?.username }}</div>
-        <div class="muted">{{ auth.role ? ROLE[auth.role] : '' }}</div>
-        <div class="hint">服务器：{{ getServerUrl() }}</div>
+        <BrandMark :size="30" color="#e6c36a" />
         <div>
-          <el-button text size="small" @click="openPassword">修改密码</el-button>
-          <el-button text size="small" @click="logout">退出登录</el-button>
+          <div class="brand-title">小麦实验田</div>
+          <div class="brand-sub">品种试验数据平台</div>
         </div>
       </div>
-    </el-aside>
-    <el-main class="main">
+
+      <nav class="nav">
+        <div v-for="g in groups" :key="g.title" class="nav-group">
+          <div class="nav-group-title">{{ g.title }}</div>
+          <RouterLink
+            v-for="m in g.items"
+            :key="m.path"
+            :to="m.path"
+            class="nav-item"
+            :class="{ active: activeMenu === m.path }"
+          >
+            <el-icon><component :is="m.icon" /></el-icon>
+            <span>{{ m.label }}</span>
+          </RouterLink>
+        </div>
+        <div class="nav-group">
+          <div class="nav-group-title">展示</div>
+          <RouterLink to="/screen" class="nav-item">
+            <el-icon><Monitor /></el-icon>
+            <span>数据大屏</span>
+          </RouterLink>
+        </div>
+      </nav>
+
+      <el-dropdown trigger="click" placement="top-start" class="user-dropdown" @command="onCommand">
+        <div class="user">
+          <div class="avatar">{{ displayName.slice(0, 1) }}</div>
+          <div class="user-text">
+            <div class="user-name">{{ displayName }}</div>
+            <div class="user-role">{{ auth.role ? ROLE[auth.role] : '' }}</div>
+          </div>
+          <el-icon class="user-arrow"><ArrowDown /></el-icon>
+        </div>
+        <template #dropdown>
+          <div class="server">服务器 {{ getServerUrl() }}</div>
+          <el-dropdown-menu>
+            <el-dropdown-item command="password">修改密码</el-dropdown-item>
+            <el-dropdown-item command="logout" divided>退出登录</el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
+    </aside>
+
+    <main class="main">
       <RouterView />
-    </el-main>
+    </main>
 
     <el-dialog v-model="pwdOpen" title="修改密码" width="400px">
       <el-form label-width="90px" @submit.prevent="savePassword">
@@ -119,64 +175,166 @@ async function savePassword() {
         <el-button type="primary" :loading="pwdSaving" @click="savePassword">保存</el-button>
       </template>
     </el-dialog>
-  </el-container>
+  </div>
 </template>
 
 <style scoped>
 .layout {
   height: 100%;
+  display: flex;
 }
 
 .aside {
-  background: #fff;
-  border-right: 1px solid var(--app-border);
+  width: 212px;
+  flex-shrink: 0;
+  background: linear-gradient(180deg, #17402d 0%, #123323 100%);
+  color: #d4e3d9;
   display: flex;
   flex-direction: column;
 }
 
 .brand {
-  padding: 20px 20px 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 22px 20px 18px;
 }
 
 .brand-title {
   font-size: 17px;
   font-weight: 600;
-  color: var(--app-accent);
+  color: #ffffff;
+  letter-spacing: 1px;
 }
 
 .brand-sub {
   font-size: 12px;
-  color: var(--app-text-secondary);
+  color: #8fb09c;
+  margin-top: 2px;
 }
 
-.menu {
-  border-right: none;
+.nav {
   flex: 1;
+  overflow: auto;
+  padding: 4px 12px;
 }
 
-.screen-entry {
-  padding: 0 20px 12px;
+.nav-group {
+  margin-bottom: 14px;
 }
 
-.screen-entry .el-button {
-  width: 100%;
+.nav-group-title {
+  font-size: 12px;
+  color: #6f9580;
+  padding: 0 10px 6px;
+  letter-spacing: 2px;
 }
 
-.aside-footer {
-  padding: 12px 20px 16px;
-  border-top: 1px solid var(--app-border);
+.nav-item {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
-  align-items: flex-start;
+  align-items: center;
+  gap: 10px;
+  height: 40px;
+  padding: 0 12px;
+  margin-bottom: 2px;
+  border-radius: 8px;
+  color: #d4e3d9;
+  text-decoration: none;
+  font-size: 14px;
+  position: relative;
+  transition: background 0.15s;
 }
 
-.aside-footer .el-button + .el-button {
-  margin-left: 4px;
+.nav-item:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: #ffffff;
+}
+
+.nav-item.active {
+  background: rgba(255, 255, 255, 0.13);
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.nav-item.active::before {
+  content: '';
+  position: absolute;
+  left: -12px;
+  top: 10px;
+  bottom: 10px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: #e6c36a;
+}
+
+.nav-item .el-icon {
+  font-size: 16px;
+}
+
+.user-dropdown {
+  display: block;
+}
+
+.user {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 12px 14px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  cursor: pointer;
+  width: 164px;
+}
+
+.user:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: #e6c36a;
+  color: #17402d;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.user-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.user-name {
+  color: #ffffff;
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.user-role {
+  color: #8fb09c;
+  font-size: 12px;
+}
+
+.user-arrow {
+  color: #8fb09c;
+}
+
+.server {
+  padding: 8px 16px 4px;
+  font-size: 12px;
+  color: var(--app-text-muted);
 }
 
 .main {
-  padding: 0;
+  flex: 1;
+  min-width: 0;
   overflow: auto;
 }
 </style>

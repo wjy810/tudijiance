@@ -379,6 +379,16 @@ export interface MultiYear {
   series: { varietyId: number; varietyName: string; control: boolean; values: (number | null)[] }[]
 }
 
+export interface ScreenPlot {
+  plotId: number
+  rowNo: number
+  colNo: number
+  code: string | null
+  varietyName: string | null
+  status: PlotStatusCode
+  abnormalNote: string | null
+}
+
 export interface Screen {
   fieldName: string | null
   trialName: string | null
@@ -386,11 +396,12 @@ export interface Screen {
   rowCount: number
   colCount: number
   indicators: Indicators | null
-  plots: { plotId: number; rowNo: number; colNo: number; code: string | null; varietyName: string | null; status: PlotStatusCode }[]
+  plots: ScreenPlot[]
   yieldRows: VarietyRow[]
   /** 亩产对比用的是哪一年（当年还没收获时是上一年） */
   yieldYear: number | null
   trend: { year: number; value: number }[]
-  recent: { at: string; user: string; plotCode: string; traitName: string; value: string }[]
+  /** 最新录入：同一次给多个小区录的同一个值合成一条，plotCount 是小区数 */
+  recent: { at: string; user: string; plotCode: string; plotCount: number; traitName: string; value: string }[]
   generatedAt: string
 }

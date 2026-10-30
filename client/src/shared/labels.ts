@@ -114,10 +114,10 @@ export const ROLE: Record<Role, string> = {
 
 /** 小区状态的名称和颜色（平面图、图例、大屏统一用这一套） */
 export const PLOT_STATUS: Record<PlotStatusCode, { label: string; color: string }> = {
-  NONE: { label: '未种植', color: '#e9ecef' },
-  GROWING: { label: '生长中', color: '#cfe8d5' },
-  ABNORMAL: { label: '有异常', color: '#f4b4b4' },
-  HARVESTED: { label: '已收获', color: '#f1d9a0' },
-  GUARD: { label: '保护区', color: '#dee2e6' },
-  PATH: { label: '走道', color: '#f4efe4' },
+  NONE: { label: '未种植', color: '#eceee9' },
+  GROWING: { label: '生长中', color: '#bfe0c9' },
+  ABNORMAL: { label: '有异常', color: '#f2b8b0' },
+  HARVESTED: { label: '已收获', color: '#f0d595' },
+  GUARD: { label: '保护区', color: '#d9ddd6' },
+  PATH: { label: '走道', color: '#f3ede0' },
 }

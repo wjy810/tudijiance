@@ -55,7 +55,7 @@ export const useAuthStore = defineStore('auth', () => {
     if (role.value === 'GUEST') {
       return '/screen'
     }
-    return role.value === 'SYS_ADMIN' ? '/users' : '/fields'
+    return role.value === 'SYS_ADMIN' ? '/users' : '/home'
   })
 
   async function login(username: string, password: string): Promise<void> {

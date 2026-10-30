@@ -290,7 +290,7 @@ const trendOption = computed<EChartsCoreOption>(() => {
         <div v-for="(r, i) in screen.recent" :key="i" class="recent-row">
           <span class="recent-time">{{ r.at.replace('T', ' ').slice(5, 16) }}</span>
           <span>{{ r.user }}</span>
-          <span>小区 {{ r.plotCode }}</span>
+          <span>{{ r.plotCount > 1 ? `${r.plotCount} 个小区` : `小区 ${r.plotCode}` }}</span>
           <span class="recent-trait">{{ r.traitName }}</span>
           <span class="recent-value">{{ r.value }}</span>
         </div>
@@ -341,6 +341,15 @@ const trendOption = computed<EChartsCoreOption>(() => {
 
 .field-select {
   width: 200px;
+}
+
+.field-select :deep(.el-select__wrapper) {
+  background: #1a1a19;
+  box-shadow: 0 0 0 1px #383835 inset;
+}
+
+.field-select :deep(.el-select__selected-item) {
+  color: #f0efec;
 }
 
 .clock {

@@ -1,8 +1,34 @@
+/* 全局样式：品牌色（田地绿 + 麦穗金）覆盖 Element Plus 的默认蓝色，统一页面、卡片、表格的样子 */
 :root {
-  --app-bg: #f5f7f5;
-  --app-border: #e3e8e4;
-  --app-text-secondary: #6b7570;
-  --app-accent: #3f8f5b;
+  --app-bg: #f3f5f1;
+  --app-surface: #ffffff;
+  --app-border: #e4e8e2;
+  --app-text: #1d2a22;
+  --app-text-secondary: #66736b;
+  --app-text-muted: #98a29b;
+  --app-accent: #2f7d55;
+  --app-accent-soft: #eaf2ee;
+  --app-wheat: #c8962e;
+  --app-wheat-soft: #f8efd9;
+  --app-danger: #c94040;
+  --app-radius: 10px;
+  --app-shadow: 0 1px 2px rgba(29, 42, 34, 0.04), 0 2px 8px rgba(29, 42, 34, 0.04);
+
+  --el-color-primary: #2f7d55;
+  --el-color-primary-light-3: #6da488;
+  --el-color-primary-light-5: #97beaa;
+  --el-color-primary-light-7: #c1d8cc;
+  --el-color-primary-light-8: #d5e5dd;
+  --el-color-primary-light-9: #eaf2ee;
+  --el-color-primary-dark-2: #266444;
+  --el-border-radius-base: 6px;
+  --el-text-color-primary: #1d2a22;
+  --el-text-color-regular: #3b4740;
+  --el-border-color: #dde3dc;
+  --el-border-color-light: #e4e8e2;
+  --el-border-color-lighter: #eceff0;
+  --el-fill-color-light: #f5f7f4;
+  --el-font-size-base: 14px;
 }
 
 html,
@@ -14,27 +40,82 @@ body,
 
 body {
   background: var(--app-bg);
-  color: #1f2a24;
-  font-family: 'Microsoft YaHei', 'PingFang SC', 'Noto Sans CJK SC', 'WenQuanYi Zen Hei', sans-serif;
+  color: var(--app-text);
+  font-family: 'Microsoft YaHei', 'PingFang SC', 'Noto Sans CJK SC', 'WenQuanYi Zen Hei', system-ui, sans-serif;
   font-size: 14px;
+  -webkit-font-smoothing: antialiased;
 }
 
+/* ---------- 页面骨架 ---------- */
+
 .page {
-  padding: 20px 24px;
+  padding: 24px 28px 32px;
+  max-width: 1480px;
+  box-sizing: border-box;
 }
 
 .page-header {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: space-between;
-  margin-bottom: 16px;
-  gap: 12px;
+  margin-bottom: 18px;
+  gap: 16px;
 }
 
 .page-header h2 {
   margin: 0;
-  font-size: 20px;
+  font-size: 22px;
   font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.page-desc {
+  margin-top: 6px;
+  color: var(--app-text-secondary);
+  font-size: 13px;
+}
+
+.page-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+/* 白底圆角的内容块 */
+.panel {
+  background: var(--app-surface);
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius);
+  box-shadow: var(--app-shadow);
+}
+
+.panel-pad {
+  padding: 16px 18px;
+}
+
+.panel-title {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0 0 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.panel-title .sub {
+  font-size: 12px;
+  font-weight: normal;
+  color: var(--app-text-muted);
+}
+
+/* 筛选条 */
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  padding: 12px 14px;
+  margin-bottom: 14px;
 }
 
 .muted {
@@ -47,10 +128,50 @@ body {
   line-height: 1.6;
 }
 
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
 code.inline {
   background: #eef2ef;
   border-radius: 4px;
   padding: 1px 6px;
   font-family: Consolas, 'Courier New', monospace;
   word-break: break-all;
+}
+
+/* ---------- Element Plus 细节 ---------- */
+
+.el-card {
+  border-radius: var(--app-radius);
+  border-color: var(--app-border);
+}
+
+.el-table {
+  --el-table-header-bg-color: #f6f8f5;
+  --el-table-header-text-color: #4f5c54;
+  --el-table-row-hover-bg-color: #f3f8f4;
+  border-radius: 8px;
+}
+
+.el-table th.el-table__cell {
+  font-weight: 600;
+}
+
+.el-dialog {
+  border-radius: 12px;
+}
+
+.el-dialog__title {
+  font-weight: 600;
+}
+
+.el-drawer__header {
+  margin-bottom: 8px;
+  font-weight: 600;
+  color: var(--app-text);
+}
+
+.el-radio-button__inner {
+  font-weight: normal;
 }

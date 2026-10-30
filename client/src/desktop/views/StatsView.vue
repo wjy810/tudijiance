@@ -159,15 +159,8 @@ const lineOption = computed<EChartsCoreOption>(() => {
     animationDuration: 1200,
     animationEasing: 'cubicOut',
     textStyle: { fontFamily: FONT },
-    grid: { left: 8, right: directLabels ? 110 : 24, top: 56, bottom: m.years.length > 8 ? 56 : 24, containLabel: true },
-    legend: {
-      top: 0,
-      left: 0,
-      icon: 'roundRect',
-      itemWidth: 14,
-      itemHeight: 4,
-      textStyle: { color: t.textSecondary, fontFamily: FONT },
-    },
+    // 图例用图表上方的品种标签（带颜色，可点选），不再画 ECharts 自带的图例
+    grid: { left: 8, right: directLabels ? 110 : 24, top: 28, bottom: m.years.length > 8 ? 56 : 24, containLabel: true },
     tooltip: {
       trigger: 'axis',
       ...tooltipStyle(t),
@@ -201,31 +194,34 @@ const lineOption = computed<EChartsCoreOption>(() => {
 <template>
   <div class="page">
     <div class="page-header">
-      <h2>统计分析</h2>
+      <div>
+        <h2>统计分析</h2>
+        <div class="page-desc">每个小区取最近一次的值，同一品种的各个重复按项目的汇总方法合并，和对照品种比较。</div>
+      </div>
     </div>
 
-    <div class="filters">
+    <div class="filter-bar panel">
+      <span class="muted">实验田</span>
       <el-select :model-value="picker.fieldId.value" placeholder="实验田" class="w180" @update:model-value="picker.selectField">
         <el-option v-for="f in picker.fields.value" :key="f.id" :value="f.id" :label="f.name" />
       </el-select>
+      <span class="muted gap">试验</span>
       <el-select v-model="picker.trialId.value" placeholder="试验" class="w240" no-data-text="这块地还没有试验">
         <el-option v-for="tr in picker.trials.value" :key="tr.id" :value="tr.id" :label="`${tr.seasonYear} 年 · ${tr.name}`" />
       </el-select>
+      <span class="muted gap">统计项目</span>
       <el-select v-model="traitId" placeholder="统计项目" filterable class="w220">
         <el-option v-for="x in catalog.statTraits" :key="x.trait.id" :value="x.trait.id" :label="x.trait.unit ? `${x.trait.name}（${x.trait.unit}）` : x.trait.name" />
       </el-select>
-      <span class="hint">每个小区取最近一次的值，同一品种的各个重复按项目的汇总方法合并。</span>
     </div>
 
-    <el-card shadow="never" class="block">
-      <template #header>
-        <div class="card-head">
-          <b>{{ summary ? `${summary.seasonYear} 年 · ${summary.traitName}` : '本年度按品种汇总' }}</b>
-          <span v-if="summary && summary.rows.length" class="muted">
-            {{ summary.controlVariety ? `对照：${summary.controlVariety}` : '没有设对照品种，不计算比对照增减' }}
-          </span>
-        </div>
-      </template>
+    <section class="panel panel-pad block">
+      <div class="panel-title">
+        {{ summary ? `${summary.seasonYear} 年各品种${summary.traitName}` : '本年度按品种汇总' }}
+        <span v-if="summary && summary.rows.length" class="sub">
+          {{ summary.controlVariety ? `对照品种：${summary.controlVariety}（灰色）` : '没有设对照品种，不计算比对照增减' }}
+        </span>
+      </div>
       <div v-loading="loadingSummary">
         <el-empty v-if="!summary || summary.rows.length === 0" :image-size="60"
           :description="picker.trialId.value ? '这个项目还没有数据' : '先选择试验'" />
@@ -251,45 +247,91 @@ const lineOption = computed<EChartsCoreOption>(() => {
           </el-table>
         </div>
       </div>
-    </el-card>
+    </section>
 
-    <el-card shadow="never" class="block">
-      <template #header>
-        <div class="card-head">
-          <b>{{ picker.field.value?.name ?? '' }} 历年{{ multi?.traitName ?? '' }}变化</b>
-          <span class="muted">每年一个试验；虚线是对照品种</span>
-        </div>
-      </template>
+    <section class="panel panel-pad block">
+      <div class="panel-title">
+        {{ picker.field.value?.name ?? '' }} 历年{{ multi?.traitName ?? '' }}变化
+        <span class="sub">每年一个试验；虚线是对照品种；点品种标签显示或隐藏</span>
+      </div>
       <div v-loading="loadingMulti">
         <el-empty v-if="!multi || multi.years.length === 0" :image-size="60" description="还没有数据" />
         <template v-else>
-          <div class="pick">
-            <span class="muted">显示的品种（最多 {{ MAX_SERIES }} 个）：</span>
-            <el-checkbox
+          <div class="chips">
+            <button
               v-for="s in multi.series"
               :key="s.varietyId"
-              :model-value="shown.includes(s.varietyId)"
-              size="small"
-              @update:model-value="(v: string | number | boolean) => toggleVariety(s.varietyId, !!v)"
+              type="button"
+              class="chip"
+              :class="{ off: !shown.includes(s.varietyId) }"
+              @click="toggleVariety(s.varietyId, !shown.includes(s.varietyId))"
             >
+              <span
+                class="chip-key"
+                :class="{ dashed: s.control }"
+                :style="{ borderColor: shown.includes(s.varietyId) ? LIGHT.series[slots.get(s.varietyId) ?? 0] : '#c9cec8' }"
+              />
               {{ s.varietyName }}{{ s.control ? '（CK）' : '' }}
-            </el-checkbox>
+            </button>
+            <span class="muted small">最多同时显示 {{ MAX_SERIES }} 个</span>
           </div>
           <div v-if="multi.years.length === 1" class="hint">目前只有 {{ multi.years[0] }} 年的数据，多录几年后这里能看到变化趋势。</div>
           <EChart :option="lineOption" height="360px" />
         </template>
       </div>
-    </el-card>
+    </section>
   </div>
 </template>
 
 <style scoped>
-.filters {
+.gap {
+  margin-left: 10px;
+}
+
+.small {
+  font-size: 12px;
+}
+
+.chips {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   align-items: center;
-  margin-bottom: 14px;
+  margin-bottom: 8px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--app-border);
+  background: #fff;
+  border-radius: 999px;
+  padding: 4px 12px 4px 10px;
+  font-size: 13px;
+  color: var(--app-text);
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.chip:hover {
+  border-color: var(--el-color-primary-light-5);
+}
+
+.chip.off {
+  color: var(--app-text-muted);
+  background: #f7f8f6;
+}
+
+.chip-key {
+  width: 16px;
+  height: 0;
+  border-top: 3px solid;
+  border-radius: 2px;
+}
+
+.chip-key.dashed {
+  border-top-style: dashed;
 }
 
 .w180 {
@@ -308,11 +350,6 @@ const lineOption = computed<EChartsCoreOption>(() => {
   margin-bottom: 16px;
 }
 
-.card-head {
-  display: flex;
-  gap: 12px;
-  align-items: baseline;
-}
 
 .summary {
   display: grid;

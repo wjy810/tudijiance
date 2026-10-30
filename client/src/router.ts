@@ -26,9 +26,10 @@ const router = createRouter({
       children: [
         { path: '', name: 'home', redirect: () => useAuthStore().homePath },
         {
-          path: 'fields', name: 'fields', component: () => import('@/desktop/views/FieldsView.vue'),
+          path: 'home', name: 'home-dashboard', component: () => import('@/desktop/views/HomeView.vue'),
           meta: { roles: RECORDERS },
         },
+        { path: 'fields', redirect: '/home' },
         {
           path: 'fields/:id', name: 'field-map', component: () => import('@/desktop/views/FieldMapView.vue'),
           meta: { roles: RECORDERS },
@@ -55,7 +56,7 @@ const router = createRouter({
         },
         {
           path: 'devices', name: 'devices', component: () => import('@/desktop/views/DevicesView.vue'),
-          meta: { roles: ['SYS_ADMIN', 'TEACHER'] },
+          meta: { roles: ['SYS_ADMIN'] },
         },
       ],
     },
