@@ -9,7 +9,6 @@ import org.springframework.boot.ApplicationRunner;
 import org.springframework.stereotype.Component;
 
 import cn.tudijiance.common.AppProperties;
-import cn.tudijiance.user.User;
 import cn.tudijiance.user.UserService;
 
 /**
@@ -39,7 +38,7 @@ public class AdminInitializer implements ApplicationRunner {
         if (generated) {
             password = randomPassword();
         }
-        userService.create("admin", "管理员", User.ROLE_ADMIN, password);
+        userService.create("admin", "系统管理员", Roles.SYS_ADMIN, password);
         if (generated) {
             log.warn("已创建管理员账号 admin，初始密码：{}（只显示这一次，登录后请修改）", password);
         } else {

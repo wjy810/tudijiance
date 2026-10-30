@@ -17,4 +17,7 @@ public class Planting {
     private Long plotId;
     private Long varietyId;
     private Integer replicateNo;
+    /** 平面图右键"标记异常"，例如倒伏、病害、缺苗 */
+    private Boolean abnormal;
+    private String abnormalNote;
 }

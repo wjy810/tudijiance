@@ -19,6 +19,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 
 import cn.tudijiance.common.ApiException;
+import cn.tudijiance.security.Roles;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
@@ -40,6 +41,7 @@ public class VarietyController {
     }
 
     @GetMapping
+    @PreAuthorize(Roles.CAN_RECORD)
     public List<Variety> list(@RequestParam(required = false) String keyword) {
         var query = Wrappers.<Variety>lambdaQuery().orderByAsc(Variety::getName);
         if (keyword != null && !keyword.isBlank()) {
@@ -49,7 +51,7 @@ public class VarietyController {
     }
 
     @PostMapping
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(Roles.IS_TEACHER)
     public Variety create(@Valid @RequestBody VarietyRequest req) {
         Variety variety = new Variety();
         apply(variety, req);
@@ -59,7 +61,7 @@ public class VarietyController {
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(Roles.IS_TEACHER)
     public Variety update(@PathVariable Long id, @Valid @RequestBody VarietyRequest req) {
         Variety variety = get(id);
         apply(variety, req);
@@ -76,7 +78,7 @@ public class VarietyController {
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(Roles.IS_TEACHER)
     public void delete(@PathVariable Long id) {
         get(id);
         varietyMapper.deleteById(id);

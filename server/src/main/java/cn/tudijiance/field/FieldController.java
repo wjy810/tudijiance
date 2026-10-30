@@ -17,6 +17,7 @@ import cn.tudijiance.field.FieldDtos.FieldDetail;
 import cn.tudijiance.field.FieldDtos.FieldRequest;
 import cn.tudijiance.field.FieldDtos.PlotCodesRequest;
 import cn.tudijiance.field.FieldDtos.PlotPatchRequest;
+import cn.tudijiance.security.Roles;
 import jakarta.validation.Valid;
 
 @RestController
@@ -30,41 +31,43 @@ public class FieldController {
     }
 
     @GetMapping
+    @PreAuthorize(Roles.CAN_VIEW_SETUP)
     public List<Field> list() {
         return fieldService.list();
     }
 
     @GetMapping("/{id}")
+    @PreAuthorize(Roles.CAN_RECORD)
     public FieldDetail detail(@PathVariable Long id) {
         return fieldService.detail(id);
     }
 
     @PostMapping
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(Roles.IS_TEACHER)
     public FieldDetail create(@Valid @RequestBody FieldRequest req) {
         return fieldService.create(req);
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(Roles.IS_TEACHER)
     public FieldDetail update(@PathVariable Long id, @Valid @RequestBody FieldRequest req) {
         return fieldService.update(id, req);
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(Roles.IS_TEACHER)
     public void delete(@PathVariable Long id) {
         fieldService.delete(id);
     }
 
     @PutMapping("/{id}/plot-codes")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(Roles.IS_TEACHER)
     public List<Plot> updateCodes(@PathVariable Long id, @Valid @RequestBody PlotCodesRequest req) {
         return fieldService.updateCodes(id, req.codes());
     }
 
     @PatchMapping("/{id}/plots")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(Roles.IS_TEACHER)
     public List<Plot> patchPlots(@PathVariable Long id, @Valid @RequestBody PlotPatchRequest req) {
         return fieldService.patchPlots(id, req);
     }

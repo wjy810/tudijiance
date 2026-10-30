@@ -4,6 +4,8 @@ import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 
+import jakarta.validation.constraints.DecimalMax;
+import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
@@ -16,7 +18,10 @@ public final class FieldDtos {
     private FieldDtos() {
     }
 
-    /** 新建或修改实验田。修改行列数时，网格会扩大或缩小。 */
+    /**
+     * 新建或修改实验田。修改行列数时，网格会扩大或缩小。
+     * plotLengthM、plotWidthM 是小区的默认长和宽，用于新生成的小区；单个小区的尺寸可以再单独改。
+     */
     public record FieldRequest(
             @NotBlank @Size(max = 100) String name,
             @Size(max = 200) String location,
@@ -29,7 +34,9 @@ public final class FieldDtos {
             @Size(max = 50) String soilType,
             Boolean irrigated,
             @Size(max = 50) String previousCrop,
-            @Size(max = 500) String remark) {
+            @Size(max = 500) String remark,
+            @DecimalMin("0.1") @DecimalMax("200") BigDecimal plotLengthM,
+            @DecimalMin("0.1") @DecimalMax("200") BigDecimal plotWidthM) {
     }
 
     public record FieldDetail(Field field, List<Plot> plots) {

@@ -20,6 +20,7 @@ import cn.tudijiance.device.DeviceDtos.DeviceRequest;
 import cn.tudijiance.device.DeviceDtos.DeviceView;
 import cn.tudijiance.device.DeviceDtos.DeviceWithToken;
 import cn.tudijiance.device.DeviceDtos.Series;
+import cn.tudijiance.security.Roles;
 import jakarta.validation.Valid;
 
 @RestController
@@ -33,40 +34,43 @@ public class DeviceController {
     }
 
     @GetMapping("/sensor-metrics")
+    @PreAuthorize(Roles.CAN_VIEW_SETUP)
     public List<SensorMetric> metrics() {
         return deviceService.metrics();
     }
 
     @GetMapping("/devices")
+    @PreAuthorize(Roles.CAN_VIEW_SETUP)
     public List<DeviceView> list(@RequestParam(required = false) Long fieldId) {
         return deviceService.list(fieldId);
     }
 
     @PostMapping("/devices")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(Roles.IS_SYS_ADMIN)
     public DeviceWithToken create(@Valid @RequestBody DeviceRequest req) {
         return deviceService.create(req);
     }
 
     @PutMapping("/devices/{id}")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(Roles.IS_SYS_ADMIN)
     public DeviceView update(@PathVariable Long id, @Valid @RequestBody DeviceRequest req) {
         return deviceService.update(id, req);
     }
 
     @DeleteMapping("/devices/{id}")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(Roles.IS_SYS_ADMIN)
     public void delete(@PathVariable Long id) {
         deviceService.delete(id);
     }
 
     @PostMapping("/devices/{id}/token")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(Roles.IS_SYS_ADMIN)
     public DeviceWithToken regenerateToken(@PathVariable Long id) {
         return deviceService.regenerateToken(id);
     }
 
     @GetMapping("/devices/{id}/readings")
+    @PreAuthorize(Roles.CAN_VIEW_SETUP)
     public Series readings(@PathVariable Long id,
                            @RequestParam String metric,
                            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime from,

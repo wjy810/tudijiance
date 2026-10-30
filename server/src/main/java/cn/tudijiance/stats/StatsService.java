@@ -1,0 +1,295 @@
+package cn.tudijiance.stats;
+
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.Clock;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
+
+import org.springframework.stereotype.Service;
+
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+
+import cn.tudijiance.common.ApiException;
+import cn.tudijiance.field.Field;
+import cn.tudijiance.field.FieldService;
+import cn.tudijiance.field.Plot;
+import cn.tudijiance.observation.FieldMapService;
+import cn.tudijiance.observation.FieldMapService.TrialStatus;
+import cn.tudijiance.observation.Observation;
+import cn.tudijiance.observation.ObservationMapper;
+import cn.tudijiance.observation.ObservationService;
+import cn.tudijiance.observation.ObservationDtos.ObservationView;
+import cn.tudijiance.observation.TrialContext;
+import cn.tudijiance.observation.TrialContextLoader;
+import cn.tudijiance.trait.TraitCatalog;
+import cn.tudijiance.trait.TraitDef;
+import cn.tudijiance.trial.Planting;
+import cn.tudijiance.trial.Trial;
+import cn.tudijiance.trial.TrialService;
+import cn.tudijiance.variety.Variety;
+
+/**
+ * 统计：按品种汇总、多年变化、大屏。
+ *
+ * 每个小区（一个重复）取这个项目最近一次的值，再按项目的汇总方法（附录 D）把同一品种的各个重复汇总成一个值。
+ * 折合亩产按标准 A.3.8 由小区产量和小区面积计算：亩产 = 小区产量 × 666.7 ÷ 小区面积。
+ */
+@Service
+public class StatsService {
+
+    private static final BigDecimal MU = new BigDecimal("666.7");
+    private static final BigDecimal STD_AREA = new BigDecimal("13.33");
+
+    private final ObservationMapper observationMapper;
+    private final ObservationService observationService;
+    private final FieldMapService fieldMapService;
+    private final TrialContextLoader contextLoader;
+    private final TrialService trialService;
+    private final FieldService fieldService;
+    private final TraitCatalog catalog;
+    private final Clock clock;
+
+    public StatsService(ObservationMapper observationMapper, ObservationService observationService,
+                        FieldMapService fieldMapService, TrialContextLoader contextLoader, TrialService trialService,
+                        FieldService fieldService, TraitCatalog catalog, Clock clock) {
+        this.observationMapper = observationMapper;
+        this.observationService = observationService;
+        this.fieldMapService = fieldMapService;
+        this.contextLoader = contextLoader;
+        this.trialService = trialService;
+        this.fieldService = fieldService;
+        this.catalog = catalog;
+        this.clock = clock;
+    }
+
+    /** 一个试验里，某个数值或分级项目按品种汇总，并算出比对照增减和位次。 */
+    public VarietySummary varietySummary(Long trialId, Long traitId) {
+        TraitDef trait = numericTrait(traitId);
+        TrialContext ctx = contextLoader.load(trialId);
+        Map<Long, BigDecimal> perPlanting = valuesPerPlanting(ctx, trait);
+
+        Map<Long, List<BigDecimal>> byVariety = new LinkedHashMap<>();
+        for (Planting p : ctx.plantingsById().values()) {
+            BigDecimal v = perPlanting.get(p.getId());
+            if (p.getVarietyId() != null && v != null) {
+                byVariety.computeIfAbsent(p.getVarietyId(), k -> new ArrayList<>()).add(v);
+            }
+        }
+        int scale = trait.getPrecisionDigits() == null ? 2 : trait.getPrecisionDigits();
+        Map<Long, BigDecimal> aggregated = new HashMap<>();
+        byVariety.forEach((varietyId, values) -> aggregated.put(varietyId, aggregate(trait.getAggMethod(), values, scale)));
+
+        Variety ck = controlVariety(ctx, aggregated.keySet());
+        BigDecimal ckValue = ck == null ? null : aggregated.get(ck.getId());
+        List<Map.Entry<Long, BigDecimal>> ranked = aggregated.entrySet().stream()
+                .sorted(Map.Entry.<Long, BigDecimal>comparingByValue().reversed()).toList();
+        List<VarietyRow> rows = new ArrayList<>();
+        for (int i = 0; i < ranked.size(); i++) {
+            Variety v = ctx.varieties().get(ranked.get(i).getKey());
+            BigDecimal value = ranked.get(i).getValue();
+            BigDecimal vsCk = ckValue == null || ckValue.signum() == 0 || v.getId().equals(ck.getId()) ? null
+                    : value.subtract(ckValue).multiply(BigDecimal.valueOf(100)).divide(ckValue, 1, RoundingMode.HALF_UP);
+            rows.add(new VarietyRow(v.getId(), v.getName(), v.getControlType() != null,
+                    byVariety.get(v.getId()).size(), value, vsCk, i + 1));
+        }
+        return new VarietySummary(trait.getId(), trait.getName(), trait.getUnit(),
+                ctx.trial().getSeasonYear(), ck == null ? null : ck.getName(), rows);
+    }
+
+    /** 一块实验田历年的变化：每年一个试验，按品种汇总。 */
+    public MultiYear multiYear(Long fieldId, Long traitId) {
+        TraitDef trait = numericTrait(traitId);
+        List<Trial> trials = trialService.list(fieldId).stream()
+                .sorted(Comparator.comparing(Trial::getSeasonYear).thenComparing(Trial::getId)).toList();
+        List<Integer> years = new ArrayList<>();
+        Map<Long, Series> series = new LinkedHashMap<>();
+        for (int i = 0; i < trials.size(); i++) {
+            VarietySummary summary = varietySummary(trials.get(i).getId(), traitId);
+            years.add(trials.get(i).getSeasonYear());
+            for (VarietyRow row : summary.rows()) {
+                Series s = series.computeIfAbsent(row.varietyId(),
+                        k -> new Series(row.varietyId(), row.varietyName(), row.control(), new ArrayList<>()));
+                while (s.values().size() < i) {
+                    s.values().add(null);
+                }
+                s.values().add(row.value());
+            }
+        }
+        series.values().forEach(s -> {
+            while (s.values().size() < years.size()) {
+                s.values().add(null);
+            }
+        });
+        return new MultiYear(trait.getId(), trait.getName(), trait.getUnit(), years, List.copyOf(series.values()));
+    }
+
+    /** 大屏：一块实验田最新一年的状态、亩产对比、历年趋势和最新录入。 */
+    public Screen screen(Long fieldId) {
+        List<Field> fields = fieldService.list();
+        if (fields.isEmpty()) {
+            return new Screen(null, null, null, 0, 0, null, List.of(), List.of(), List.of(), List.of(),
+                    LocalDateTime.now(clock));
+        }
+        Field field = fieldId == null ? fields.getFirst()
+                : fields.stream().filter(f -> f.getId().equals(fieldId)).findFirst()
+                .orElseThrow(() -> ApiException.notFound("实验田"));
+        Trial trial = trialService.list(field.getId()).stream()
+                .max(Comparator.comparing(Trial::getSeasonYear).thenComparing(Trial::getId)).orElse(null);
+        List<ScreenPlot> plots = new ArrayList<>();
+        if (trial == null) {
+            fieldService.plots(field.getId()).forEach(p -> plots.add(
+                    new ScreenPlot(p.getId(), p.getRowNo(), p.getColNo(), p.getCode(), null,
+                            Plot.KIND_PLOT.equals(p.getKind()) ? "NONE" : p.getKind())));
+            return new Screen(field.getName(), null, null, field.getRowCount(), field.getColCount(), null,
+                    plots, List.of(), List.of(), List.of(), LocalDateTime.now(clock));
+        }
+        TrialContext ctx = contextLoader.load(trial.getId());
+        TrialStatus status = fieldMapService.status(trial.getId());
+        Map<Long, String> statusByPlot = status.plots().stream()
+                .collect(Collectors.toMap(FieldMapService.PlotStatus::plotId, FieldMapService.PlotStatus::status));
+        ctx.plots().values().stream()
+                .sorted(Comparator.comparing(Plot::getRowNo).thenComparing(Plot::getColNo))
+                .forEach(p -> {
+                    Variety v = ctx.varietyOf(ctx.plantingsByPlot().get(p.getId()));
+                    plots.add(new ScreenPlot(p.getId(), p.getRowNo(), p.getColNo(), p.getCode(),
+                            v == null ? null : v.getName(), statusByPlot.get(p.getId())));
+                });
+
+        TraitDef yield = catalog.byCode("yield_per_mu");
+        List<VarietyRow> yieldRows = varietySummary(trial.getId(), yield.getId()).rows();
+        List<TrendPoint> trend = new ArrayList<>();
+        MultiYear multi = multiYear(field.getId(), yield.getId());
+        for (int i = 0; i < multi.years().size(); i++) {
+            int idx = i;
+            List<BigDecimal> values = multi.series().stream().map(s -> s.values().get(idx))
+                    .filter(Objects::nonNull).toList();
+            if (!values.isEmpty()) {
+                trend.add(new TrendPoint(multi.years().get(i), aggregate("AVG", values, 1)));
+            }
+        }
+        List<Observation> recentRows = ctx.plantingsById().isEmpty() ? List.of()
+                : observationMapper.selectList(Wrappers.<Observation>lambdaQuery()
+                .in(Observation::getPlantingId, ctx.plantingsById().keySet())
+                .eq(Observation::getDeleted, false)
+                .orderByDesc(Observation::getRecordedAt).orderByDesc(Observation::getId)
+                .last("LIMIT 6"));
+        List<ObservationView> recent = observationService.views(recentRows, ctx);
+        return new Screen(field.getName(), trial.getName(), trial.getSeasonYear(), field.getRowCount(),
+                field.getColCount(), status.indicators(), plots, yieldRows, trend,
+                recent.stream().map(o -> new RecentEntry(o.recordedAt(), o.recordedBy(), o.plotCode(),
+                        o.traitName(), o.displayValue())).toList(),
+                LocalDateTime.now(clock));
+    }
+
+    private Map<Long, BigDecimal> valuesPerPlanting(TrialContext ctx, TraitDef trait) {
+        boolean yieldPerMu = "yield_per_mu".equals(trait.getCode());
+        boolean stdYield = "std_plot_yield".equals(trait.getCode());
+        TraitDef source = yieldPerMu || stdYield ? catalog.byCode("plot_yield") : trait;
+        Map<Long, BigDecimal> latest = latestValues(ctx, source.getId());
+        if (!yieldPerMu && !stdYield) {
+            return latest;
+        }
+        Map<Long, BigDecimal> result = new HashMap<>();
+        latest.forEach((plantingId, plotYield) -> {
+            Plot plot = ctx.plots().get(ctx.plantingsById().get(plantingId).getPlotId());
+            if (plot.getLengthM() == null || plot.getWidthM() == null) {
+                return;
+            }
+            BigDecimal area = plot.getLengthM().multiply(plot.getWidthM());
+            if (area.signum() == 0) {
+                return;
+            }
+            BigDecimal factor = yieldPerMu ? MU : STD_AREA;
+            result.put(plantingId, plotYield.multiply(factor).divide(area, 4, RoundingMode.HALF_UP));
+        });
+        return result;
+    }
+
+    /** 每个种植记录取这个项目最近一次（按日期，再按录入顺序）的数值。 */
+    private Map<Long, BigDecimal> latestValues(TrialContext ctx, Long traitId) {
+        if (ctx.plantingsById().isEmpty()) {
+            return Map.of();
+        }
+        List<Observation> list = observationMapper.selectList(Wrappers.<Observation>lambdaQuery()
+                .in(Observation::getPlantingId, ctx.plantingsById().keySet())
+                .eq(Observation::getTraitId, traitId)
+                .eq(Observation::getDeleted, false)
+                .isNotNull(Observation::getValueNum)
+                .orderByDesc(Observation::getObservedOn).orderByDesc(Observation::getId));
+        Map<Long, BigDecimal> latest = new HashMap<>();
+        list.forEach(o -> latest.putIfAbsent(o.getPlantingId(), o.getValueNum()));
+        return latest;
+    }
+
+    private TraitDef numericTrait(Long traitId) {
+        TraitDef trait = catalog.get(traitId);
+        boolean computedYield = "yield_per_mu".equals(trait.getCode()) || "std_plot_yield".equals(trait.getCode());
+        if (!computedYield && !"NUMBER".equals(trait.getDataType()) && !"GRADE".equals(trait.getDataType())) {
+            throw ApiException.badRequest(trait.getName() + "不是数值或分级项目，不能做统计图");
+        }
+        if (!computedYield && Boolean.TRUE.equals(trait.getIsComputed())) {
+            throw ApiException.badRequest(trait.getName() + "的统计还没有支持");
+        }
+        return trait;
+    }
+
+    /** 同一品种有多个对照时优先用丰产对照。 */
+    private static Variety controlVariety(TrialContext ctx, Set<Long> varietyIds) {
+        return varietyIds.stream().map(ctx.varieties()::get)
+                .filter(v -> v.getControlType() != null)
+                .min(Comparator.comparing(v -> "YIELD".equals(v.getControlType()) ? 0 : 1))
+                .orElse(null);
+    }
+
+    static BigDecimal aggregate(String method, List<BigDecimal> values, int scale) {
+        return switch (method) {
+            case "MAX" -> values.stream().max(BigDecimal::compareTo).orElseThrow().setScale(scale, RoundingMode.HALF_UP);
+            case "MIN" -> values.stream().min(BigDecimal::compareTo).orElseThrow().setScale(scale, RoundingMode.HALF_UP);
+            case "MODE" -> values.stream()
+                    .collect(Collectors.groupingBy(v -> v.stripTrailingZeros(), Collectors.counting()))
+                    .entrySet().stream()
+                    .max(Map.Entry.<BigDecimal, Long>comparingByValue()
+                            .thenComparing(Map.Entry.comparingByKey(Comparator.reverseOrder())))
+                    .map(Map.Entry::getKey).orElseThrow().setScale(scale, RoundingMode.HALF_UP);
+            default -> values.stream().reduce(BigDecimal.ZERO, BigDecimal::add)
+                    .divide(BigDecimal.valueOf(values.size()), scale, RoundingMode.HALF_UP);
+        };
+    }
+
+    public record VarietyRow(Long varietyId, String varietyName, boolean control, int plots,
+                             BigDecimal value, BigDecimal vsCkPercent, int rank) {
+    }
+
+    public record VarietySummary(Long traitId, String traitName, String unit, Integer seasonYear,
+                                 String controlVariety, List<VarietyRow> rows) {
+    }
+
+    public record Series(Long varietyId, String varietyName, boolean control, List<BigDecimal> values) {
+    }
+
+    public record MultiYear(Long traitId, String traitName, String unit, List<Integer> years, List<Series> series) {
+    }
+
+    public record ScreenPlot(Long plotId, int rowNo, int colNo, String code, String varietyName, String status) {
+    }
+
+    public record TrendPoint(int year, BigDecimal value) {
+    }
+
+    public record RecentEntry(LocalDateTime at, String user, String plotCode, String traitName, String value) {
+    }
+
+    public record Screen(String fieldName, String trialName, Integer seasonYear, int rowCount, int colCount,
+                         FieldMapService.Indicators indicators, List<ScreenPlot> plots, List<VarietyRow> yieldRows,
+                         List<TrendPoint> trend, List<RecentEntry> recent, LocalDateTime generatedAt) {
+    }
+}

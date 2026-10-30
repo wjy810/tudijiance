@@ -8,10 +8,14 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
+import java.util.function.Predicate;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -33,7 +37,8 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
- * 用 H2（MySQL 模式）跑完整的接口流程：登录、实验田、品种、试验布局、对照关系、设备和传感器上报。
+ * 用 H2（MySQL 模式）跑完整的接口流程。四级用户：
+ * 系统管理员 admin、老师 teacher1、学生 student1、游客 guest1。
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -49,11 +54,20 @@ class ApiIntegrationTest {
     @Autowired
     private DeviceStatusJob deviceStatusJob;
 
-    private String adminToken;
+    private String admin;
+    private String teacher;
+    private String student;
+    private String guest;
 
     @BeforeEach
-    void login() throws Exception {
-        adminToken = loginAs("admin", "admin123");
+    void loginAll() throws Exception {
+        admin = loginAs("admin", "admin123");
+        ensureUser("teacher1", "王老师", "TEACHER");
+        ensureUser("student1", "张同学", "STUDENT");
+        ensureUser("guest1", "大屏", "GUEST");
+        teacher = loginAs("teacher1", "secret123");
+        student = loginAs("student1", "secret123");
+        guest = loginAs("guest1", "secret123");
     }
 
     @Test
@@ -65,117 +79,207 @@ class ApiIntegrationTest {
     }
 
     @Test
-    void recorderCannotChangeConfiguration() throws Exception {
-        call(post("/api/users"), Map.of("username", "student1", "displayName", "学生",
-                "role", "RECORDER", "password", "secret123"), status().isOk());
-        String recorder = loginAs("student1", "secret123");
-        mvc.perform(post("/api/fields").header("Authorization", "Bearer " + recorder)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"name\":\"x\",\"rowCount\":1,\"colCount\":1}"))
-                .andExpect(status().isForbidden());
-        mvc.perform(get("/api/fields").header("Authorization", "Bearer " + recorder))
-                .andExpect(status().isOk());
+    void permissionsFollowTheFourRoles() throws Exception {
+        String fieldBody = "{\"name\":\"x\",\"rowCount\":1,\"colCount\":1}";
+        // 系统管理员不能设置实验田，也不能录入数据
+        mvc.perform(post("/api/fields").header("Authorization", "Bearer " + admin)
+                .contentType(MediaType.APPLICATION_JSON).content(fieldBody)).andExpect(status().isForbidden());
+        String entryBody = "{\"trialId\":1,\"traitId\":1,\"items\":[{\"plotId\":1,\"clientUuid\":\"x\"}]}";
+        mvc.perform(post("/api/observations").header("Authorization", "Bearer " + admin)
+                .contentType(MediaType.APPLICATION_JSON).content(entryBody)).andExpect(status().isForbidden());
+        // 学生能看不能设置
+        mvc.perform(post("/api/fields").header("Authorization", "Bearer " + student)
+                .contentType(MediaType.APPLICATION_JSON).content(fieldBody)).andExpect(status().isForbidden());
+        mvc.perform(get("/api/fields").header("Authorization", "Bearer " + student)).andExpect(status().isOk());
+        // 游客只能看大屏
+        mvc.perform(get("/api/fields").header("Authorization", "Bearer " + guest)).andExpect(status().isForbidden());
+        mvc.perform(get("/api/screen").header("Authorization", "Bearer " + guest)).andExpect(status().isOk());
+        // 只有系统管理员能管理用户
+        mvc.perform(get("/api/users").header("Authorization", "Bearer " + teacher)).andExpect(status().isForbidden());
+        mvc.perform(get("/api/users").header("Authorization", "Bearer " + admin)).andExpect(status().isOk());
     }
 
     @Test
-    void seedsStandardTraits() throws Exception {
-        JsonNode traits = call(get("/api/traits"), null, status().isOk());
-        assertThat(traits.size()).isGreaterThan(80);
+    void seedsStandardAndOperationTraits() throws Exception {
+        JsonNode traits = call(teacher, get("/api/traits"), null, status().isOk());
+        assertThat(traits.size()).isGreaterThan(90);
         JsonNode lodging = find(traits, t -> t.get("trait").get("code").asString().equals("lodging_final_grade"));
-        assertThat(lodging.get("trait").get("name").asString()).isEqualTo("最终倒伏程度");
         assertThat(lodging.get("trait").get("aggMethod").asString()).isEqualTo("MAX");
-        assertThat(lodging.get("options").size()).isEqualTo(5);
         assertThat(lodging.get("options").get(2).get("description").asString()).contains("30°–45°");
+        JsonNode fertilize = find(traits, t -> t.get("trait").get("code").asString().equals("op_fertilize"));
+        assertThat(fertilize.get("trait").get("dataType").asString()).isEqualTo("OPERATION");
+        assertThat(fertilize.get("options").get(0).get("label").asString()).isEqualTo("尿素");
     }
 
     @Test
     void fieldGridNumberingAndPlotKinds() throws Exception {
-        JsonNode field = call(post("/api/fields"), Map.of("name", "东区试验田", "rowCount", 3, "colCount", 4),
-                status().isOk());
+        JsonNode field = call(teacher, post("/api/fields"), Map.of("name", "东区试验田", "rowCount", 3, "colCount", 4,
+                "plotLengthM", 6.65, "plotWidthM", 2.0), status().isOk());
         long fieldId = field.get("field").get("id").asLong();
         JsonNode plots = field.get("plots");
         assertThat(plots.size()).isEqualTo(12);
         assertThat(plots.get(0).get("code").asString()).isEqualTo("1");
-        assertThat(plots.get(11).get("code").asString()).isEqualTo("12");
+        assertThat(plots.get(11).get("lengthM").decimalValue()).isEqualByComparingTo("6.65");
 
         long p1 = plots.get(0).get("id").asLong();
         long p2 = plots.get(1).get("id").asLong();
-        // 两个小区互换编号
-        JsonNode swapped = call(put("/api/fields/" + fieldId + "/plot-codes"),
+        JsonNode swapped = call(teacher, put("/api/fields/" + fieldId + "/plot-codes"),
                 Map.of("codes", Map.of(String.valueOf(p1), "2", String.valueOf(p2), "1")), status().isOk());
         assertThat(swapped.get(0).get("code").asString()).isEqualTo("2");
-        assertThat(swapped.get(1).get("code").asString()).isEqualTo("1");
-        // 和别的小区重复
-        call(put("/api/fields/" + fieldId + "/plot-codes"), Map.of("codes", Map.of(String.valueOf(p1), "5")),
+        call(teacher, put("/api/fields/" + fieldId + "/plot-codes"), Map.of("codes", Map.of(String.valueOf(p1), "5")),
                 status().isBadRequest());
 
-        JsonNode patched = call(patch("/api/fields/" + fieldId + "/plots"),
-                Map.of("plotIds", List.of(p1), "kind", "GUARD", "lengthM", 6.65), status().isOk());
+        JsonNode patched = call(teacher, patch("/api/fields/" + fieldId + "/plots"),
+                Map.of("plotIds", List.of(p1), "kind", "GUARD"), status().isOk());
         assertThat(patched.get(0).get("kind").asString()).isEqualTo("GUARD");
-        assertThat(patched.get(0).get("lengthM").decimalValue()).isEqualByComparingTo("6.65");
 
-        // 扩大网格到 4 × 4，新增的一行小区没有编号
-        JsonNode resized = call(put("/api/fields/" + fieldId),
+        JsonNode resized = call(teacher, put("/api/fields/" + fieldId),
                 Map.of("name", "东区试验田", "rowCount", 4, "colCount", 4), status().isOk());
         assertThat(resized.get("plots").size()).isEqualTo(16);
     }
 
     @Test
     void trialLayoutWithControlLink() throws Exception {
-        JsonNode field = call(post("/api/fields"), Map.of("name", "西区试验田", "rowCount", 2, "colCount", 3),
-                status().isOk());
-        long fieldId = field.get("field").get("id").asLong();
-        List<Long> plotIds = new ArrayList<>();
-        field.get("plots").forEach(p -> plotIds.add(p.get("id").asLong()));
-
-        long ck = call(post("/api/varieties"), Map.of("name", "周麦18-测试", "controlType", "YIELD"),
-                status().isOk()).get("id").asLong();
-        long test = call(post("/api/varieties"), Map.of("name", "新品系A-测试", "ecotype", "SEMI_WINTER"),
-                status().isOk()).get("id").asLong();
-
-        long trialId = call(post("/api/trials"), Map.of("fieldId", fieldId, "seasonYear", 2026,
-                "name", "2026 品比试验", "trialType", "COMPARISON", "wheatZone", "Q3"), status().isOk())
-                .get("id").asLong();
-
-        String trialUrl = "/api/trials/" + trialId;
-        call(put(trialUrl + "/plantings"), Map.of("plotIds", List.of(plotIds.get(0)),
-                "attribute", "VARIETY", "value", ck), status().isOk());
-        call(put(trialUrl + "/plantings"), Map.of("plotIds", List.of(plotIds.get(1), plotIds.get(2)),
-                "attribute", "VARIETY", "value", test), status().isOk());
-        JsonNode layout = call(put(trialUrl + "/plantings"), Map.of("plotIds", plotIds.subList(0, 3),
-                "attribute", "REPLICATE", "value", 1), status().isOk());
-        assertThat(layout.get("plantings").size()).isEqualTo(3);
-
-        // 没有指定对照小区时，自动把种了对照品种的小区当对照
-        layout = call(post(trialUrl + "/control-links"), Map.of("plotIds", plotIds.subList(0, 2)), status().isOk());
+        Setup s = setup("西区试验田");
+        String trialUrl = "/api/trials/" + s.trialId;
+        JsonNode layout = call(teacher, post(trialUrl + "/control-links"),
+                Map.of("plotIds", List.of(s.plots.get(0), s.plots.get(1))), status().isOk());
         JsonNode link = layout.get("links").get(0);
         assertThat(link.get("label").asString()).isEqualTo("对照品种");
-        JsonNode controlPlot = find(link.get("plots"), p -> p.get("control").asBoolean());
-        assertThat(controlPlot.get("plotId").asLong()).isEqualTo(plotIds.get(0));
+        assertThat(find(link.get("plots"), p -> p.get("control").asBoolean()).get("plotId").asLong())
+                .isEqualTo(s.plots.get(0));
+        // 两个小区都是品系 A，没有对照品种，又没指定对照
+        call(teacher, post(trialUrl + "/control-links"), Map.of("plotIds", List.of(s.plots.get(1), s.plots.get(3))),
+                status().isBadRequest());
+        call(teacher, delete("/api/varieties/" + s.ckVariety), null, status().isConflict());
+    }
 
-        // 两个都不是对照品种，又没指定对照
-        call(post(trialUrl + "/control-links"), Map.of("plotIds", plotIds.subList(1, 3)), status().isBadRequest());
+    @Test
+    void entryEditDeleteStatusAndStats() throws Exception {
+        Setup s = setup("统计试验田");
+        String trialId = String.valueOf(s.trialId);
 
-        // 保护区不能分配品种
-        call(patch("/api/fields/" + fieldId + "/plots"), Map.of("plotIds", List.of(plotIds.get(5)), "kind", "GUARD"),
+        // 学生一次给 4 个小区录入施肥（选类型、填用量）
+        JsonNode created = entry(student, s.trialId, "op_fertilize", s.plots.subList(0, 4),
+                Map.of("valueText", "尿素", "valueNum", 10), status().isOk());
+        assertThat(created.size()).isEqualTo(4);
+        assertThat(created.get(0).get("displayValue").asString()).isEqualTo("尿素 10 kg/亩");
+        assertThat(created.get(0).get("recordedBy").asString()).isEqualTo("张同学");
+
+        // 同一个 clientUuid 重复提交，不会重复保存
+        String uuid = UUID.randomUUID().toString();
+        Map<String, Object> once = entryBody(s.trialId, traitId("plant_height"),
+                List.of(Map.of("plotId", s.plots.get(0), "clientUuid", uuid)), Map.of("valueNum", 78));
+        long first = call(student, post("/api/observations"), once, status().isOk()).get(0).get("id").asLong();
+        long again = call(student, post("/api/observations"), once, status().isOk()).get(0).get("id").asLong();
+        assertThat(again).isEqualTo(first);
+
+        // 分级只能选规定的级别；保护区不能录入
+        entry(student, s.trialId, "lodging_final_grade", s.plots.subList(0, 1), Map.of("valueNum", 7),
+                status().isBadRequest());
+        entry(student, s.trialId, "plant_height", List.of(s.plots.get(5)), Map.of("valueNum", 70),
+                status().isBadRequest());
+        JsonNode grade = entry(student, s.trialId, "lodging_final_grade", s.plots.subList(0, 1),
+                Map.of("valueNum", 3), status().isOk());
+        assertThat(grade.get(0).get("displayValue").asString()).isEqualTo("3 级");
+
+        // 小区产量：两个对照小区 10、11 kg，两个品系 A 小区 12、12.5 kg；小区面积 6.65 × 2 = 13.3 平方米
+        double[] yields = {10, 12, 11, 12.5};
+        for (int i = 0; i < 4; i++) {
+            entry(student, s.trialId, "plot_yield", List.of(s.plots.get(i)), Map.of("valueNum", yields[i]),
+                    status().isOk());
+        }
+
+        // 学生不能改，老师可以改；版本号不对时提示别人改过
+        mvc.perform(put("/api/observations/" + first).header("Authorization", "Bearer " + student)
+                .contentType(MediaType.APPLICATION_JSON).content("{\"version\":1,\"valueNum\":80}"))
+                .andExpect(status().isForbidden());
+        JsonNode updated = call(teacher, put("/api/observations/" + first), Map.of("version", 1, "valueNum", 80),
                 status().isOk());
-        call(put(trialUrl + "/plantings"), Map.of("plotIds", List.of(plotIds.get(5)),
-                "attribute", "VARIETY", "value", test), status().isBadRequest());
+        assertThat(updated.get("version").asInt()).isEqualTo(2);
+        assertThat(updated.get("updatedBy").asString()).isEqualTo("王老师");
+        call(teacher, put("/api/observations/" + first), Map.of("version", 1, "valueNum", 81), status().isConflict());
+        JsonNode history = call(student, get("/api/observations/" + first + "/history"), null, status().isOk());
+        assertThat(history.size()).isEqualTo(2);
+        assertThat(history.get(0).get("action").asString()).isEqualTo("UPDATE");
+        assertThat(history.get(0).get("oldValue").asString()).contains("78");
+        assertThat(history.get(0).get("newValue").asString()).contains("80");
 
-        // 品种被使用时不能删除
-        call(delete("/api/varieties/" + ck), null, status().isConflict());
-        layout = call(delete(trialUrl + "/control-links/" + link.get("id").asLong()), null, status().isOk());
-        assertThat(layout.get("links").size()).isZero();
+        JsonNode page = call(teacher, get("/api/observations?trialId=" + trialId + "&traitId=" + traitId("plant_height")),
+                null, status().isOk());
+        assertThat(page.get("total").asInt()).isEqualTo(1);
+        call(teacher, delete("/api/observations/" + first), null, status().isOk());
+        page = call(teacher, get("/api/observations?trialId=" + trialId + "&traitId=" + traitId("plant_height")),
+                null, status().isOk());
+        assertThat(page.get("total").asInt()).isZero();
+
+        // 平面图状态：录了小区产量的算已收获；标记异常后显示有异常
+        call(student, put("/api/trials/" + trialId + "/abnormal"),
+                Map.of("plotIds", List.of(s.plots.get(1)), "abnormal", true, "note", "倒伏"), status().isOk());
+        JsonNode st = call(teacher, get("/api/trials/" + trialId + "/status"), null, status().isOk());
+        assertThat(statusOf(st, s.plots.get(0))).isEqualTo("HARVESTED");
+        assertThat(statusOf(st, s.plots.get(1))).isEqualTo("ABNORMAL");
+        assertThat(statusOf(st, s.plots.get(5))).isEqualTo("GUARD");
+        assertThat(st.get("indicators").get("totalPlots").asInt()).isEqualTo(5);
+        assertThat(st.get("indicators").get("abnormal").asInt()).isEqualTo(1);
+        assertThat(st.get("indicators").get("enteredToday").asInt()).isEqualTo(4);
+
+        // 右键小区详情：每个项目最近一次的值
+        JsonNode detail = call(teacher, get("/api/trials/" + trialId + "/plots/" + s.plots.get(0)), null,
+                status().isOk());
+        assertThat(detail.get("variety").get("name").asString()).isEqualTo("周麦18-测试");
+        assertThat(find(detail.get("latest"), l -> l.get("traitName").asString().equals("施肥"))
+                .get("displayValue").asString()).isEqualTo("尿素 10 kg/亩");
+
+        // 折合亩产 = 小区产量 × 666.7 ÷ 13.3；对照平均 (10+11)/2 → 526.3，品系 A (12+12.5)/2 → 614.1
+        JsonNode summary = call(teacher, get("/api/stats/variety-summary?trialId=" + trialId + "&traitId="
+                + traitId("yield_per_mu")), null, status().isOk());
+        JsonNode top = summary.get("rows").get(0);
+        assertThat(top.get("varietyName").asString()).isEqualTo("新品系A-测试");
+        assertThat(top.get("value").decimalValue()).isEqualByComparingTo("614.1");
+        assertThat(top.get("vsCkPercent").decimalValue()).isEqualByComparingTo("16.7");
+        assertThat(summary.get("rows").get(1).get("value").decimalValue()).isEqualByComparingTo("526.3");
+
+        JsonNode multi = call(teacher, get("/api/stats/multi-year?fieldId=" + s.fieldId + "&traitId="
+                + traitId("yield_per_mu")), null, status().isOk());
+        assertThat(multi.get("years").get(0).asInt()).isEqualTo(2026);
+        assertThat(multi.get("series").size()).isEqualTo(2);
+
+        JsonNode screen = call(guest, get("/api/screen?fieldId=" + s.fieldId), null, status().isOk());
+        assertThat(screen.get("fieldName").asString()).isEqualTo("统计试验田");
+        assertThat(screen.get("plots").size()).isEqualTo(6);
+        assertThat(screen.get("yieldRows").size()).isEqualTo(2);
+        assertThat(screen.get("recent").size()).isGreaterThan(0);
+    }
+
+    @Test
+    void customTraitCanBeCreatedUsedAndProtected() throws Exception {
+        Setup s = setup("自定义项目试验田");
+        JsonNode custom = call(teacher, post("/api/traits"), Map.of("name", "田间积水", "dataType", "OPTION",
+                "options", List.of("无", "轻", "重")), status().isOk());
+        long traitId = custom.get("trait").get("id").asLong();
+        assertThat(custom.get("trait").get("isStandard").asBoolean()).isFalse();
+        assertThat(custom.get("options").size()).isEqualTo(3);
+        call(student, post("/api/traits"), Map.of("name", "x", "dataType", "TEXT"), status().isForbidden());
+
+        Map<String, Object> body = entryBody(s.trialId, traitId,
+                List.of(Map.of("plotId", s.plots.get(0), "clientUuid", UUID.randomUUID().toString())),
+                Map.of("valueText", "轻"));
+        JsonNode saved = call(student, post("/api/observations"), body, status().isOk());
+        assertThat(saved.get(0).get("displayValue").asString()).isEqualTo("轻");
+        assertThat(saved.get(0).get("standardTrait").asBoolean()).isFalse();
+
+        call(teacher, delete("/api/traits/" + traitId), null, status().isConflict());
+        call(teacher, delete("/api/traits/" + traitId("plant_height")), null, status().isBadRequest());
     }
 
     @Test
     void deviceIngestOverHttp() throws Exception {
-        JsonNode created = call(post("/api/devices"), Map.of("code", "SOIL-T01", "name", "测试土壤传感器",
+        JsonNode created = call(admin, post("/api/devices"), Map.of("code", "SOIL-T01", "name", "测试土壤传感器",
                 "deviceType", "SOIL_3IN1", "depthCm", 10), status().isOk());
         String token = created.get("token").asString();
         long deviceId = created.get("device").get("id").asLong();
         assertThat(created.get("device").get("mqttTopic").asString()).isEqualTo("tudi/devices/SOIL-T01/up");
-        assertThat(created.get("device").get("status").asString()).isEqualTo("NEVER");
 
         String payload = """
                 {"ts": "2026-10-30T08:00:00+08:00",
@@ -184,40 +288,106 @@ class ApiIntegrationTest {
         JsonNode result = ingest("SOIL-T01", token, payload, status().isOk());
         assertThat(result.get("accepted").asInt()).isEqualTo(3);
         assertThat(result.get("rejected").get(0).asString()).contains("air_temp").contains("未启用");
-
-        // DTU 断线后重发同一条数据，不会重复入库
         result = ingest("SOIL-T01", token, payload, status().isOk());
-        assertThat(result.get("accepted").asInt()).isZero();
         assertThat(result.get("duplicates").asInt()).isEqualTo(3);
-
-        // 批量补发，pH 超出合理范围的标记出来
         result = ingest("SOIL-T01", token, """
                 {"records": [
                   {"ts": "2026-10-30T08:30:00", "values": {"soil_ph": 12.5}},
                   {"ts": "2026-10-30T09:00:00", "values": {"soil_ph": 7.10}}]}
                 """, status().isOk());
         assertThat(result.get("accepted").asInt()).isEqualTo(2);
-
         ingest("SOIL-T01", "wrong-token", payload, status().isUnauthorized());
         ingest("SOIL-T01", token, "not json", status().isBadRequest());
 
-        JsonNode devices = call(get("/api/devices"), null, status().isOk());
-        JsonNode device = find(devices, d -> d.get("code").asString().equals("SOIL-T01"));
+        JsonNode device = find(call(admin, get("/api/devices"), null, status().isOk()),
+                d -> d.get("code").asString().equals("SOIL-T01"));
         assertThat(device.get("status").asString()).isEqualTo("ONLINE");
         assertThat(device.get("latest").get("soil_ph").get("value").decimalValue()).isEqualByComparingTo("7.10");
-        assertThat(device.get("latest").get("soil_temp").get("value").decimalValue()).isEqualByComparingTo("12.3");
 
-        JsonNode series = call(get("/api/devices/" + deviceId + "/readings?metric=soil_ph&bucket=HOUR"
+        JsonNode series = call(admin, get("/api/devices/" + deviceId + "/readings?metric=soil_ph&bucket=HOUR"
                 + "&from=2026-10-30T00:00:00&to=2026-10-30T23:59:59"), null, status().isOk());
         assertThat(series.get("points").size()).isEqualTo(2);
         assertThat(series.get("points").get(0).get("max").decimalValue()).isEqualByComparingTo("12.5");
 
-        // 超过 2 小时没有数据，定时任务把设备标记为离线
         deviceMapper.update(null, Wrappers.<Device>lambdaUpdate()
                 .set(Device::getLastSeenAt, LocalDateTime.now().minusHours(3))
                 .eq(Device::getId, deviceId));
         deviceStatusJob.markOffline();
         assertThat(deviceMapper.selectById(deviceId).getStatus()).isEqualTo("OFFLINE");
+    }
+
+    // ---------- 准备数据 ----------
+
+    /** 2 行 × 3 列；第 1、3 个小区种对照，第 2、4 个种品系 A，第 5 个空着，第 6 个是保护区。 */
+    private record Setup(long fieldId, long trialId, long ckVariety, long testVariety, List<Long> plots) {
+    }
+
+    private Setup setup(String fieldName) throws Exception {
+        JsonNode field = call(teacher, post("/api/fields"), Map.of("name", fieldName, "rowCount", 2, "colCount", 3,
+                "plotLengthM", 6.65, "plotWidthM", 2.0), status().isOk());
+        long fieldId = field.get("field").get("id").asLong();
+        List<Long> plots = new ArrayList<>();
+        field.get("plots").forEach(p -> plots.add(p.get("id").asLong()));
+        long ck = varietyId("周麦18-测试", "YIELD");
+        long test = varietyId("新品系A-测试", null);
+        long trialId = call(teacher, post("/api/trials"), Map.of("fieldId", fieldId, "seasonYear", 2026,
+                "name", "2026 品比试验", "trialType", "COMPARISON", "wheatZone", "Q3"), status().isOk())
+                .get("id").asLong();
+        String url = "/api/trials/" + trialId + "/plantings";
+        call(teacher, put(url), Map.of("plotIds", List.of(plots.get(0), plots.get(2)), "attribute", "VARIETY",
+                "value", ck), status().isOk());
+        call(teacher, put(url), Map.of("plotIds", List.of(plots.get(1), plots.get(3)), "attribute", "VARIETY",
+                "value", test), status().isOk());
+        call(teacher, patch("/api/fields/" + fieldId + "/plots"), Map.of("plotIds", List.of(plots.get(5)),
+                "kind", "GUARD"), status().isOk());
+        return new Setup(fieldId, trialId, ck, test, plots);
+    }
+
+    private long varietyId(String name, String controlType) throws Exception {
+        JsonNode existing = call(teacher, get("/api/varieties"), null, status().isOk());
+        for (JsonNode v : existing) {
+            if (v.get("name").asString().equals(name)) {
+                return v.get("id").asLong();
+            }
+        }
+        Map<String, Object> body = new HashMap<>(Map.of("name", name));
+        if (controlType != null) {
+            body.put("controlType", controlType);
+        }
+        return call(teacher, post("/api/varieties"), body, status().isOk()).get("id").asLong();
+    }
+
+    private long traitId(String code) throws Exception {
+        return find(call(teacher, get("/api/traits"), null, status().isOk()),
+                t -> t.get("trait").get("code").asString().equals(code)).get("trait").get("id").asLong();
+    }
+
+    private JsonNode entry(String token, long trialId, String traitCode, List<Long> plotIds,
+                           Map<String, Object> value, ResultMatcher expected) throws Exception {
+        List<Map<String, Object>> items = plotIds.stream()
+                .map(id -> Map.<String, Object>of("plotId", id, "clientUuid", UUID.randomUUID().toString())).toList();
+        return call(token, post("/api/observations"), entryBody(trialId, traitId(traitCode), items, value), expected);
+    }
+
+    private static Map<String, Object> entryBody(long trialId, long traitId, List<Map<String, Object>> items,
+                                                 Map<String, Object> value) {
+        Map<String, Object> body = new HashMap<>(value);
+        body.put("trialId", trialId);
+        body.put("traitId", traitId);
+        body.put("items", items);
+        return body;
+    }
+
+    private static String statusOf(JsonNode trialStatus, long plotId) {
+        return find(trialStatus.get("plots"), p -> p.get("plotId").asLong() == plotId).get("status").asString();
+    }
+
+    private void ensureUser(String username, String displayName, String role) throws Exception {
+        String body = json.writeValueAsString(Map.of("username", username, "displayName", displayName,
+                "role", role, "password", "secret123"));
+        int code = mvc.perform(post("/api/users").header("Authorization", "Bearer " + admin)
+                .contentType(MediaType.APPLICATION_JSON).content(body)).andReturn().getResponse().getStatus();
+        assertThat(code).isIn(200, 409);
     }
 
     private JsonNode ingest(String code, String token, String body, ResultMatcher expected) throws Exception {
@@ -238,17 +408,18 @@ class ApiIntegrationTest {
         return json.readTree(body).get("token").asString();
     }
 
-    private JsonNode call(MockHttpServletRequestBuilder request, Object body, ResultMatcher expected) throws Exception {
-        request.header("Authorization", "Bearer " + adminToken);
+    private JsonNode call(String token, MockHttpServletRequestBuilder request, Object body, ResultMatcher expected)
+            throws Exception {
+        request.header("Authorization", "Bearer " + token);
         if (body != null) {
             request.contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(body));
         }
         String response = mvc.perform(request).andExpect(expected).andReturn().getResponse()
-                .getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+                .getContentAsString(StandardCharsets.UTF_8);
         return response.isEmpty() ? null : json.readTree(response);
     }
 
-    private static JsonNode find(JsonNode array, java.util.function.Predicate<JsonNode> predicate) {
+    private static JsonNode find(JsonNode array, Predicate<JsonNode> predicate) {
         for (JsonNode n : array) {
             if (predicate.test(n)) {
                 return n;

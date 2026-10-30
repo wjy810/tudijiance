@@ -3,7 +3,6 @@ package cn.tudijiance.user;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Set;
 
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -11,11 +10,10 @@ import org.springframework.stereotype.Service;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 
 import cn.tudijiance.common.ApiException;
+import cn.tudijiance.security.Roles;
 
 @Service
 public class UserService {
-
-    private static final Set<String> ROLES = Set.of(User.ROLE_ADMIN, User.ROLE_RECORDER);
 
     private final UserMapper userMapper;
     private final PasswordEncoder passwordEncoder;
@@ -48,8 +46,8 @@ public class UserService {
     }
 
     public User create(String username, String displayName, String role, String password) {
-        if (!ROLES.contains(role)) {
-            throw ApiException.badRequest("角色只能是 ADMIN 或 RECORDER");
+        if (!Roles.ALL.contains(role)) {
+            throw ApiException.badRequest("角色只能是 SYS_ADMIN、TEACHER、STUDENT 或 GUEST");
         }
         if (findByUsername(username) != null) {
             throw ApiException.conflict("用户名已存在");

@@ -12,9 +12,6 @@ import lombok.Data;
 @TableName("app_user")
 public class User {
 
-    public static final String ROLE_ADMIN = "ADMIN";
-    public static final String ROLE_RECORDER = "RECORDER";
-
     @TableId(type = IdType.AUTO)
     private Long id;
     private String username;

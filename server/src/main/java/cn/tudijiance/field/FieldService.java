@@ -72,7 +72,7 @@ public class FieldService {
         int seq = 1;
         for (int r = 1; r <= req.rowCount(); r++) {
             for (int c = 1; c <= req.colCount(); c++) {
-                insertPlot(field.getId(), r, c, String.valueOf(seq++));
+                insertPlot(field.getId(), r, c, String.valueOf(seq++), req);
             }
         }
         return detail(field.getId());
@@ -102,7 +102,7 @@ public class FieldService {
         for (int r = 1; r <= req.rowCount(); r++) {
             for (int c = 1; c <= req.colCount(); c++) {
                 if (r > oldRows || c > oldCols) {
-                    insertPlot(id, r, c, null);
+                    insertPlot(id, r, c, null, req);
                 }
             }
         }
@@ -211,13 +211,15 @@ public class FieldService {
         return found;
     }
 
-    private void insertPlot(Long fieldId, int row, int col, String code) {
+    private void insertPlot(Long fieldId, int row, int col, String code, FieldRequest req) {
         Plot plot = new Plot();
         plot.setFieldId(fieldId);
         plot.setRowNo(row);
         plot.setColNo(col);
         plot.setCode(code);
         plot.setKind(Plot.KIND_PLOT);
+        plot.setLengthM(req.plotLengthM());
+        plot.setWidthM(req.plotWidthM());
         plotMapper.insert(plot);
     }
 
