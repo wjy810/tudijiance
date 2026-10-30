@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { assignSlots, formatNumber, formatPercent } from '@/shared/charts'
+import { sequentialColor } from '@/shared/colors'
 
 describe('assignSlots', () => {
   it('gives new ids the lowest free slots in order', () => {
@@ -33,5 +34,22 @@ describe('format', () => {
     expect(formatPercent(16.7)).toBe('+16.7%')
     expect(formatPercent(-3.04)).toBe('-3.0%')
     expect(formatPercent(null)).toBe('')
+  })
+})
+
+describe('sequentialColor', () => {
+  it('maps the ends of the range to the lightest and darkest step', () => {
+    expect(sequentialColor(0)).toBe('#e6f0fc')
+    expect(sequentialColor(1)).toBe('#3987e5')
+  })
+
+  it('clamps values outside 0..1 and treats NaN as 0', () => {
+    expect(sequentialColor(-2)).toBe('#e6f0fc')
+    expect(sequentialColor(5)).toBe('#3987e5')
+    expect(sequentialColor(Number.NaN)).toBe('#e6f0fc')
+  })
+
+  it('interpolates between steps', () => {
+    expect(sequentialColor(0.5)).toBe('#9ec5f4')
   })
 })

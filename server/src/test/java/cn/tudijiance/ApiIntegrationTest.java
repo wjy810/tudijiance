@@ -190,6 +190,29 @@ class ApiIntegrationTest {
                     status().isOk());
         }
 
+        // 计算项目：全生育期 = 成熟期 − 播种期，生育期 = 成熟期 − 出苗期，折合亩产 = 小区产量 × 666.7 ÷ 面积
+        entry(student, s.trialId, "sowing_date", s.plots.subList(0, 1),
+                Map.of("valueDate", "2024-10-10", "observedOn", "2024-10-10"), status().isOk());
+        entry(student, s.trialId, "emergence_date", s.plots.subList(0, 1),
+                Map.of("valueDate", "2024-10-18", "observedOn", "2024-10-18"), status().isOk());
+        entry(student, s.trialId, "maturity_date", s.plots.subList(0, 1),
+                Map.of("valueDate", "2025-06-01", "observedOn", "2025-06-01"), status().isOk());
+        JsonNode plot0 = call(student, get("/api/trials/" + s.trialId + "/plots/" + s.plots.get(0)), null,
+                status().isOk());
+        Map<String, String> computed = new HashMap<>();
+        plot0.get("latest").forEach(v -> {
+            if (v.get("computed").asBoolean()) {
+                computed.put(v.get("traitName").asString(), v.get("displayValue").asString());
+            }
+        });
+        assertThat(computed).containsEntry("全生育期", "234 d").containsEntry("生育期", "226 d")
+                .containsEntry("折合亩产", "501.3 kg");
+        JsonNode values = call(student, get("/api/trials/" + s.trialId + "/trait-values?traitId="
+                + traitId("yield_per_mu")), null, status().isOk());
+        assertThat(values.size()).isEqualTo(4);
+        call(student, get("/api/trials/" + s.trialId + "/trait-values?traitId=" + traitId("op_fertilize")), null,
+                status().isBadRequest());
+
         // 学生不能改，老师可以改；版本号不对时提示别人改过
         mvc.perform(put("/api/observations/" + first).header("Authorization", "Bearer " + student)
                 .contentType(MediaType.APPLICATION_JSON).content("{\"version\":1,\"valueNum\":80}"))
@@ -245,18 +268,17 @@ class ApiIntegrationTest {
         assertThat(multi.get("years").get(0).asInt()).isEqualTo(2026);
         assertThat(multi.get("series").size()).isEqualTo(2);
 
+        // 一次给两个小区录同一个值，大屏的最新录入合成一条
+        entry(student, s.trialId, "op_weeding", s.plots.subList(0, 2), Map.of("valueText", "人工除草"),
+                status().isOk());
         JsonNode screen = call(guest, get("/api/screen?fieldId=" + s.fieldId), null, status().isOk());
         assertThat(screen.get("fieldName").asString()).isEqualTo("统计试验田");
         assertThat(screen.get("plots").size()).isEqualTo(6);
         assertThat(screen.get("yieldRows").size()).isEqualTo(2);
         assertThat(screen.get("yieldYear").asInt()).isEqualTo(2026);
         assertThat(screen.get("recent").size()).isGreaterThan(0);
-        // 同一次给几个小区录的同一个值合成一条
-        int grouped = 0;
-        for (JsonNode r : screen.get("recent")) {
-            grouped += r.get("plotCount").asInt();
-        }
-        assertThat(grouped).isGreaterThan(screen.get("recent").size());
+        assertThat(screen.get("recent").get(0).get("traitName").asString()).isEqualTo("中耕除草");
+        assertThat(screen.get("recent").get(0).get("plotCount").asInt()).isEqualTo(2);
 
         // 下一年刚播种还没有产量：历年变化不列这一年，大屏的亩产对比仍显示 2026 年
         call(teacher, post("/api/trials"), Map.of("fieldId", s.fieldId, "seasonYear", 2027, "name", "2027 品比",

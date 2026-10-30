@@ -93,6 +93,12 @@ public class ObservationController {
         return fieldMapService.plotDetail(id, plotId);
     }
 
+    @GetMapping("/api/trials/{id}/trait-values")
+    @PreAuthorize(Roles.CAN_RECORD)
+    public List<FieldMapService.PlotValue> traitValues(@PathVariable Long id, @RequestParam Long traitId) {
+        return fieldMapService.traitValues(id, traitId);
+    }
+
     @PutMapping("/api/trials/{id}/abnormal")
     @PreAuthorize(Roles.CAN_RECORD)
     public TrialStatus setAbnormal(@PathVariable Long id, @Valid @RequestBody AbnormalRequest req) {

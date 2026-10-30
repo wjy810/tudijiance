@@ -12,9 +12,11 @@ import {
 
 import {
   deviceApi, fieldApi, observationApi, trialApi,
-  type DeviceView, type FieldDetail, type Layout, type Plot, type PlotStatusCode, type Trial, type TrialStatus,
+  type DeviceView, type FieldDetail, type Layout, type Plot, type PlotStatusCode, type PlotValue, type TraitView, type Trial,
+  type TrialStatus,
 } from '@/shared/api'
-import { PLOT_KIND, PLOT_STATUS, replicateLabel } from '@/shared/labels'
+import { PLOT_KIND, PLOT_STATUS, TRAIT_CATEGORY, replicateLabel } from '@/shared/labels'
+import { SEQUENTIAL_GRADIENT, sequentialColor } from '@/shared/colors'
 import { rememberTrial } from '@/shared/composables/useTrialPicker'
 import { useAuthStore } from '@/stores/auth'
 import { useCatalogStore } from '@/stores/catalog'
@@ -93,6 +95,7 @@ async function load() {
   initializing = true
   try {
     await Promise.all([
+      catalog.loadTraits(),
       loadField(),
       loadTrials(Number(route.query.trial) || null),
       catalog.loadVarieties(),
@@ -131,7 +134,7 @@ onMounted(async () => {
 // ---------- 模式和显示方式 ----------
 
 type Mode = 'record' | 'layout'
-type ViewMode = 'status' | 'variety' | 'replicate'
+type ViewMode = 'status' | 'variety' | 'replicate' | 'trait'
 
 /** 老师刚建好试验、还没分配品种时，直接进入布置模式 */
 const mode = ref<Mode>('record')
@@ -147,12 +150,14 @@ interface Display {
   cellH: number
   /** 一直显示对照虚线；不勾时只在选中相关小区时显示 */
   showAllLinks: boolean
+  /** "按指标"着色时用的项目 */
+  traitId: number | null
 }
 
 const DISPLAY_KEY = 'tudijiance.mapDisplay.v2'
 
 function loadDisplay(): Display {
-  const fallback: Display = { view: 'status', cellW: 108, cellH: 72, showAllLinks: false }
+  const fallback: Display = { view: 'status', cellW: 108, cellH: 72, showAllLinks: false, traitId: null }
   try {
     return { ...fallback, ...JSON.parse(localStorage.getItem(DISPLAY_KEY) || '{}') }
   } catch {
@@ -202,6 +207,46 @@ const varietyColor = computed(() => {
   return new Map(ids.map((id, i) => [id, VARIETY_COLORS[i % VARIETY_COLORS.length]!]))
 })
 
+// ---------- 按指标着色 ----------
+
+const traitValues = ref(new Map<number, PlotValue>())
+const metricTrait = computed(() => catalog.traitById.get(display.value.traitId ?? -1)?.trait ?? null)
+const metricRange = computed(() => {
+  const vals = [...traitValues.value.values()].map((v) => v.value)
+  return vals.length ? { min: Math.min(...vals), max: Math.max(...vals) } : null
+})
+
+async function loadTraitValues() {
+  if (display.value.view !== 'trait' || !trialId.value) {
+    return
+  }
+  if (!display.value.traitId) {
+    display.value.traitId = catalog.statTraits.find((t) => t.trait.code === 'yield_per_mu')?.trait.id
+      ?? catalog.statTraits[0]?.trait.id ?? null
+  }
+  if (!display.value.traitId) {
+    return
+  }
+  try {
+    const list = await observationApi.traitValues(trialId.value, display.value.traitId)
+    traitValues.value = new Map(list.map((v) => [v.plotId, v]))
+  } catch (e) {
+    traitValues.value = new Map()
+    ElMessage.error((e as Error).message)
+  }
+}
+
+watch([() => display.value.view, () => display.value.traitId, trialId], loadTraitValues)
+
+function metricFill(plotId: number): string {
+  const v = traitValues.value.get(plotId)
+  const r = metricRange.value
+  if (!v || !r) {
+    return '#f6f7f4'
+  }
+  return sequentialColor(r.max === r.min ? 1 : (v.value - r.min) / (r.max - r.min))
+}
+
 function plotStatus(p: Plot): PlotStatusCode {
   if (p.kind !== 'PLOT') {
     return p.kind
@@ -216,6 +261,9 @@ function fillOf(p: Plot): string {
   }
   if (display.value.view === 'variety') {
     return planting?.varietyId ? varietyColor.value.get(planting.varietyId)! : '#f6f7f4'
+  }
+  if (display.value.view === 'trait') {
+    return metricFill(p.id)
   }
   return planting?.replicateNo
     ? REPLICATE_COLORS[(planting.replicateNo - 1) % REPLICATE_COLORS.length]!
@@ -233,7 +281,9 @@ const cells = computed<GridCell[]>(() =>
       lines.push(PLOT_KIND[p.kind])
     } else {
       lines.push(variety?.name ?? '—')
-      if (planting?.replicateNo) {
+      if (display.value.view === 'trait') {
+        lines.push(traitValues.value.get(p.id)?.displayValue ?? '无数据')
+      } else if (planting?.replicateNo) {
         lines.push(`重复 ${replicateLabel(planting.replicateNo)}`)
       }
     }
@@ -244,6 +294,8 @@ const cells = computed<GridCell[]>(() =>
       planting?.replicateNo ? `重复：${replicateLabel(planting.replicateNo)}` : '',
       p.kind === 'PLOT' && trial.value ? `状态：${PLOT_STATUS[plotStatus(p)].label}${st?.abnormalNote ? '（' + st.abnormalNote + '）' : ''}` : '',
       st?.enteredToday ? '今天录过数据' : '',
+      display.value.view === 'trait' && metricTrait.value
+        ? `${metricTrait.value.name}：${traitValues.value.get(p.id)?.displayValue ?? '无数据'}` : '',
       p.lengthM && p.widthM ? `尺寸：${p.lengthM} × ${p.widthM} m` : '',
     ].filter(Boolean).join('\n')
     return {
@@ -289,6 +341,9 @@ const colWidths = computed(() => (field.value ? Array(field.value.colCount).fill
 const rowHeights = computed(() => (field.value ? Array(field.value.rowCount).fill(display.value.cellH) : undefined))
 
 const legend = computed(() => {
+  if (display.value.view === 'trait') {
+    return []
+  }
   if (display.value.view === 'status') {
     return (Object.keys(PLOT_STATUS) as PlotStatusCode[]).map((k) => ({ label: PLOT_STATUS[k].label, color: PLOT_STATUS[k].color }))
   }
@@ -419,6 +474,7 @@ function entryFromDrawer(plotId: number, traitId: number | null) {
 
 async function onEntrySaved() {
   await refreshStatus().catch(() => undefined)
+  loadTraitValues()
   if (drawerOpen.value) {
     drawerRef.value?.reload()
   }
@@ -595,6 +651,16 @@ function exportMap() {
 }
 
 const ind = computed(() => status.value?.indicators ?? null)
+
+/** 着色可选的指标，按分类分组 */
+const metricGroups = computed(() => {
+  const groups = new Map<string, TraitView[]>()
+  for (const t of catalog.statTraits) {
+    const label = TRAIT_CATEGORY[t.trait.category]
+    groups.set(label, [...(groups.get(label) ?? []), t])
+  }
+  return [...groups.entries()].map(([label, items]) => ({ label, items }))
+})
 </script>
 
 <template>
@@ -684,7 +750,25 @@ const ind = computed(() => status.value?.indicators ?? null)
             <el-radio-button value="status">按状态</el-radio-button>
             <el-radio-button value="variety">按品种</el-radio-button>
             <el-radio-button value="replicate">按重复</el-radio-button>
+            <el-radio-button value="trait">按指标</el-radio-button>
           </el-radio-group>
+          <el-select
+            v-if="display.view === 'trait'"
+            v-model="display.traitId"
+            size="small"
+            filterable
+            placeholder="选择指标"
+            class="metric-select"
+          >
+            <el-option-group v-for="g in metricGroups" :key="g.label" :label="g.label">
+              <el-option
+                v-for="t in g.items"
+                :key="t.trait.id"
+                :value="t.trait.id"
+                :label="t.trait.unit && t.trait.unit !== '级' ? `${t.trait.name}（${t.trait.unit}）` : t.trait.name"
+              />
+            </el-option-group>
+          </el-select>
           <div class="spacer" />
           <el-button size="small" text @click="selectAllPlots">全选小区</el-button>
           <el-button-group size="small">
@@ -781,10 +865,21 @@ const ind = computed(() => status.value?.indicators ?? null)
       <aside class="side">
         <section class="panel panel-pad">
           <div class="panel-title">图例</div>
-          <div v-for="l in legend" :key="l.label" class="legend-row">
-            <span class="swatch" :style="{ background: l.color }" />{{ l.label }}
-          </div>
-          <div v-if="legend.length === 0" class="hint">还没有分配</div>
+          <template v-if="display.view === 'trait'">
+            <div class="metric-name">{{ metricTrait?.name ?? '选择指标' }}<span v-if="metricTrait?.unit && metricTrait.unit !== '级'" class="muted">（{{ metricTrait.unit }}）</span></div>
+            <template v-if="metricRange">
+              <div class="ramp" :style="{ background: SEQUENTIAL_GRADIENT }" />
+              <div class="ramp-labels num"><span>{{ metricRange.min }}</span><span>{{ metricRange.max }}</span></div>
+            </template>
+            <div v-else class="hint">这个试验还没有这项数据</div>
+            <div class="legend-row"><span class="swatch" style="background: #f6f7f4" />无数据</div>
+          </template>
+          <template v-else>
+            <div v-for="l in legend" :key="l.label" class="legend-row">
+              <span class="swatch" :style="{ background: l.color }" />{{ l.label }}
+            </div>
+            <div v-if="legend.length === 0" class="hint">还没有分配</div>
+          </template>
           <div class="legend-sep" />
           <div class="legend-row"><span class="dot" />今天录过数据</div>
           <div class="legend-row"><b class="ck">CK</b>对照品种</div>
@@ -1127,6 +1222,28 @@ const ind = computed(() => status.value?.indicators ?? null)
   gap: 8px;
   padding: 3px 0;
   font-size: 13px;
+}
+
+.metric-select {
+  width: 190px;
+}
+
+.metric-name {
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+.ramp {
+  height: 10px;
+  border-radius: 3px;
+}
+
+.ramp-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--app-text-secondary);
+  margin: 4px 0 6px;
 }
 
 .legend-sep {

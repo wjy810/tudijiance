@@ -9,6 +9,7 @@ import type {
   ObservationView,
   PageResult,
   PlotDetail,
+  PlotValue,
   Screen,
   TraitValue,
   TrialStatus,
@@ -93,6 +94,8 @@ export const observationApi = {
   history: (id: number) => data<HistoryView[]>(http.get(`/api/observations/${id}/history`)),
   status: (trialId: number) => data<TrialStatus>(http.get(`/api/trials/${trialId}/status`)),
   plotDetail: (trialId: number, plotId: number) => data<PlotDetail>(http.get(`/api/trials/${trialId}/plots/${plotId}`)),
+  traitValues: (trialId: number, traitId: number) =>
+    data<PlotValue[]>(http.get(`/api/trials/${trialId}/trait-values`, { params: { traitId } })),
   setAbnormal: (trialId: number, plotIds: number[], abnormal: boolean, note: string | null) =>
     data<TrialStatus>(http.put(`/api/trials/${trialId}/abnormal`, { plotIds, abnormal, note })),
 }

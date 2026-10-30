@@ -23,6 +23,7 @@ import cn.tudijiance.common.ApiException;
 import cn.tudijiance.field.Field;
 import cn.tudijiance.field.FieldService;
 import cn.tudijiance.field.Plot;
+import cn.tudijiance.observation.ComputedTraits;
 import cn.tudijiance.observation.FieldMapService;
 import cn.tudijiance.observation.FieldMapService.TrialStatus;
 import cn.tudijiance.observation.Observation;
@@ -47,8 +48,6 @@ import cn.tudijiance.variety.Variety;
 @Service
 public class StatsService {
 
-    private static final BigDecimal MU = new BigDecimal("666.7");
-    private static final BigDecimal STD_AREA = new BigDecimal("13.33");
     private static final int RECENT_LIMIT = 8;
     private static final int RECENT_SCAN = 300;
 
@@ -59,11 +58,12 @@ public class StatsService {
     private final TrialService trialService;
     private final FieldService fieldService;
     private final TraitCatalog catalog;
+    private final ComputedTraits computedTraits;
     private final Clock clock;
 
     public StatsService(ObservationMapper observationMapper, ObservationService observationService,
                         FieldMapService fieldMapService, TrialContextLoader contextLoader, TrialService trialService,
-                        FieldService fieldService, TraitCatalog catalog, Clock clock) {
+                        FieldService fieldService, TraitCatalog catalog, ComputedTraits computedTraits, Clock clock) {
         this.observationMapper = observationMapper;
         this.observationService = observationService;
         this.fieldMapService = fieldMapService;
@@ -71,6 +71,7 @@ public class StatsService {
         this.trialService = trialService;
         this.fieldService = fieldService;
         this.catalog = catalog;
+        this.computedTraits = computedTraits;
         this.clock = clock;
     }
 
@@ -235,53 +236,13 @@ public class StatsService {
     }
 
     private Map<Long, BigDecimal> valuesPerPlanting(TrialContext ctx, TraitDef trait) {
-        boolean yieldPerMu = "yield_per_mu".equals(trait.getCode());
-        boolean stdYield = "std_plot_yield".equals(trait.getCode());
-        TraitDef source = yieldPerMu || stdYield ? catalog.byCode("plot_yield") : trait;
-        Map<Long, BigDecimal> latest = latestValues(ctx, source.getId());
-        if (!yieldPerMu && !stdYield) {
-            return latest;
-        }
-        Map<Long, BigDecimal> result = new HashMap<>();
-        latest.forEach((plantingId, plotYield) -> {
-            Plot plot = ctx.plots().get(ctx.plantingsById().get(plantingId).getPlotId());
-            if (plot.getLengthM() == null || plot.getWidthM() == null) {
-                return;
-            }
-            BigDecimal area = plot.getLengthM().multiply(plot.getWidthM());
-            if (area.signum() == 0) {
-                return;
-            }
-            BigDecimal factor = yieldPerMu ? MU : STD_AREA;
-            result.put(plantingId, plotYield.multiply(factor).divide(area, 4, RoundingMode.HALF_UP));
-        });
-        return result;
-    }
-
-    /** 每个种植记录取这个项目最近一次（按日期，再按录入顺序）的数值。 */
-    private Map<Long, BigDecimal> latestValues(TrialContext ctx, Long traitId) {
-        if (ctx.plantingsById().isEmpty()) {
-            return Map.of();
-        }
-        List<Observation> list = observationMapper.selectList(Wrappers.<Observation>lambdaQuery()
-                .in(Observation::getPlantingId, ctx.plantingsById().keySet())
-                .eq(Observation::getTraitId, traitId)
-                .eq(Observation::getDeleted, false)
-                .isNotNull(Observation::getValueNum)
-                .orderByDesc(Observation::getObservedOn).orderByDesc(Observation::getId));
-        Map<Long, BigDecimal> latest = new HashMap<>();
-        list.forEach(o -> latest.putIfAbsent(o.getPlantingId(), o.getValueNum()));
-        return latest;
+        return computedTraits.values(ctx, trait);
     }
 
     private TraitDef numericTrait(Long traitId) {
         TraitDef trait = catalog.get(traitId);
-        boolean computedYield = "yield_per_mu".equals(trait.getCode()) || "std_plot_yield".equals(trait.getCode());
-        if (!computedYield && !"NUMBER".equals(trait.getDataType()) && !"GRADE".equals(trait.getDataType())) {
+        if (!ComputedTraits.isNumeric(trait)) {
             throw ApiException.badRequest(trait.getName() + "不是数值或分级项目，不能做统计图");
-        }
-        if (!computedYield && Boolean.TRUE.equals(trait.getIsComputed())) {
-            throw ApiException.badRequest(trait.getName() + "的统计还没有支持");
         }
         return trait;
     }

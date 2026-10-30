@@ -4,6 +4,8 @@ import { defineStore } from 'pinia'
 
 import { traitApi, varietyApi, type TraitCategory, type TraitView, type Variety } from '@/shared/api'
 
+const COMPUTED_CODES = new Set(['whole_growth_days', 'growth_days', 'spike_rate', 'std_plot_yield', 'yield_per_mu'])
+
 export const useCatalogStore = defineStore('catalog', () => {
   const traits = ref<TraitView[]>([])
   const varieties = ref<Variety[]>([])
@@ -51,12 +53,11 @@ export const useCatalogStore = defineStore('catalog', () => {
     return groups
   })
 
-  /** 能做统计图的项目：数值、分级，以及折合亩产等计算项目 */
+  /** 能做统计图、按数值着色的项目：数值、分级，以及服务器能算的计算项目（和后端 ComputedTraits 一致） */
   const statTraits = computed(() =>
-    traits.value.filter(
-      (t) => t.trait.enabled && (t.trait.dataType === 'NUMBER' || t.trait.dataType === 'GRADE'
-        || t.trait.code === 'yield_per_mu' || t.trait.code === 'std_plot_yield'),
-    ),
+    traits.value.filter((t) => t.trait.enabled && (t.trait.isComputed
+      ? COMPUTED_CODES.has(t.trait.code)
+      : t.trait.dataType === 'NUMBER' || t.trait.dataType === 'GRADE')),
   )
 
   function reset() {

@@ -189,7 +189,8 @@ async function onEdited() {
                   <span class="name">{{ v.traitName }}</span>
                   <span class="value">{{ v.displayValue }}</span>
                   <span class="date muted">{{ v.observedOn }}</span>
-                  <el-button v-if="canEntry" link type="primary" size="small" @click="emit('entry', plot.id, v.traitId)">再录</el-button>
+                  <span v-if="v.computed" class="auto">自动算</span>
+                  <el-button v-else-if="canEntry" link type="primary" size="small" @click="emit('entry', plot.id, v.traitId)">再录</el-button>
                 </div>
               </div>
             </template>
@@ -200,7 +201,8 @@ async function onEdited() {
                   <span class="name">{{ v.traitName }}</span>
                   <span class="value">{{ v.displayValue }}</span>
                   <span class="date muted">{{ v.observedOn }}</span>
-                  <el-button v-if="canEntry" link type="primary" size="small" @click="emit('entry', plot.id, v.traitId)">再录</el-button>
+                  <span v-if="v.computed" class="auto">自动算</span>
+                  <el-button v-else-if="canEntry" link type="primary" size="small" @click="emit('entry', plot.id, v.traitId)">再录</el-button>
                 </div>
               </div>
             </template>
@@ -277,5 +279,10 @@ async function onEdited() {
 
 .latest-row .date {
   font-size: 12px;
+}
+
+.auto {
+  font-size: 12px;
+  color: var(--app-wheat);
 }
 </style>

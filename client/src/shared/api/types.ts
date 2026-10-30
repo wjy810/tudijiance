@@ -336,7 +336,16 @@ export interface LatestTraitValue {
   standard: boolean
   sortOrder: number
   displayValue: string
-  observedOn: string
+  observedOn: string | null
+  /** 由其它项目算出来的（全生育期、折合亩产等），不能直接录入 */
+  computed: boolean
+}
+
+/** 平面图"按指标"着色用：一个小区某个项目的值 */
+export interface PlotValue {
+  plotId: number
+  value: number
+  displayValue: string
 }
 
 export interface PlotDetail {
