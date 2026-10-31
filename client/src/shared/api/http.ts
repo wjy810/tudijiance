@@ -16,6 +16,29 @@ export function setUnauthorizedHandler(handler: () => void): void {
 
 export const http = axios.create({ timeout: 20000 })
 
+/**
+ * 请求出错。status 是服务器返回的状态码；连不上服务器（没网、地址不对、超时）时为 null。
+ * 手机端靠它区分"没网，先存在本机"和"服务器不收，要改"。
+ */
+export class ApiError extends Error {
+  readonly status: number | null
+
+  constructor(message: string, status: number | null) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+  }
+
+  get network(): boolean {
+    return this.status === null
+  }
+}
+
+/** 是不是连不上服务器（没网） */
+export function isNetworkError(e: unknown): boolean {
+  return e instanceof ApiError && e.network
+}
+
 http.interceptors.request.use((config) => {
   config.baseURL = getServerUrl()
   if (token) {
@@ -31,7 +54,7 @@ http.interceptors.response.use(
     if (error.response?.status === 401 && !isLogin && onUnauthorized) {
       onUnauthorized()
     }
-    return Promise.reject(new Error(errorMessage(error)))
+    return Promise.reject(new ApiError(errorMessage(error), error.response?.status ?? null))
   },
 )
 

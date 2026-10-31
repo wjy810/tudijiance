@@ -1,0 +1,117 @@
+/* 手机端样式：和电脑端同一套"麦田手记"变量，换成 Vant 的主题色 */
+@import '../tokens.css';
+
+:root {
+  --van-primary-color: #2e6b4f;
+  --van-success-color: #2e6b4f;
+  --van-warning-color: #b98227;
+  --van-danger-color: #b0543a;
+  --van-orange: #b98227;
+  --van-text-color: #1f2a22;
+  --van-text-color-2: #5c5b4d;
+  --van-text-color-3: #978f7a;
+  --van-background: #f4efe3;
+  --van-background-2: #fffdf8;
+  --van-background-3: #f8f3e8;
+  --van-border-color: #e6ddca;
+  --van-active-color: #efe7d4;
+  --van-radius-md: 10px;
+  --van-radius-lg: 14px;
+  --van-font-family: var(--font-sans);
+  --van-button-primary-background: #2e6b4f;
+  --van-button-primary-border-color: #2e6b4f;
+  --van-button-default-height: 46px;
+  --van-button-large-height: 52px;
+  --van-button-normal-font-size: 15px;
+  --van-cell-group-inset-radius: 14px;
+  --van-tabbar-background: #fffdf8;
+  --van-tabbar-item-active-color: #1c4231;
+  --van-tabbar-item-text-color: #978f7a;
+  --van-tabbar-height: 56px;
+  --van-nav-bar-background: #1c4231;
+  --van-nav-bar-title-text-color: #fbf3df;
+  --van-nav-bar-icon-color: #e2b65a;
+  --van-nav-bar-text-color: #e2b65a;
+  --van-tabs-bottom-bar-color: #b98227;
+  --van-tab-active-text-color: #1c4231;
+  --van-popup-background: #fffdf8;
+  --van-action-sheet-item-background: #fffdf8;
+  --van-picker-background: #fffdf8;
+  --van-number-keyboard-background: #ebe3d1;
+  --van-number-keyboard-key-background: #fffdf8;
+  --van-number-keyboard-button-background: #2e6b4f;
+  --van-notice-bar-background: #f5e8cc;
+  --van-notice-bar-text-color: #6b5216;
+  --van-dialog-confirm-button-text-color: #2e6b4f;
+  --van-toast-background: rgba(28, 66, 49, 0.92);
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  background: var(--paper) url('@/assets/art/paper.jpg') repeat;
+  background-size: 512px;
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior-y: none;
+}
+
+.serif {
+  font-family: var(--font-serif);
+}
+
+/* 页面内容区：底下留出标签栏的高度 */
+.m-page {
+  padding: 14px 14px calc(76px + env(safe-area-inset-bottom));
+  box-sizing: border-box;
+}
+
+.m-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+}
+
+.m-title {
+  font-family: var(--font-serif);
+  font-weight: 700;
+  color: var(--forest);
+  letter-spacing: 0.5px;
+}
+
+.m-muted {
+  color: var(--ink-3);
+  font-size: 13px;
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* 麦穗金按钮：最重要的那个操作 */
+.van-button.btn-wheat {
+  background: linear-gradient(180deg, #ecc778, #d9a748);
+  border-color: #c8953a;
+  color: #3b2a0c;
+  font-weight: 600;
+}
+
+.van-button--primary:not(.van-button--plain) {
+  background: linear-gradient(180deg, #357a5a, #2b6449);
+  font-weight: 600;
+}
+
+.van-nav-bar__title {
+  font-family: var(--font-serif);
+  font-weight: 700;
+  letter-spacing: 1px;
+}

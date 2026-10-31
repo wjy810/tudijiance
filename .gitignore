@@ -14,3 +14,4 @@ server/data/
 client/dist/
 client/dist-electron/
 client/release/
+client/dist-mobile/

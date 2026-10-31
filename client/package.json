@@ -14,9 +14,20 @@
     "test": "vitest run",
     "electron": "electron .",
     "dist:win": "pnpm build && node scripts/dist-win.mjs",
-    "dist:dir": "pnpm build && electron-builder --dir"
+    "dist:dir": "pnpm build && electron-builder --dir",
+    "dev:mobile": "vite --config vite.mobile.config.ts",
+    "build:mobile": "vite build --config vite.mobile.config.ts",
+    "android:sync": "pnpm build:mobile && cap sync android",
+    "android:apk": "pnpm android:sync && cd android && ./gradlew assembleDebug"
   },
   "devDependencies": {
+    "@capacitor/android": "8.6.0",
+    "@capacitor/app": "8.1.2",
+    "@capacitor/cli": "8.6.0",
+    "@capacitor/core": "8.6.0",
+    "@capacitor/network": "8.0.1",
+    "@capacitor/splash-screen": "8.0.2",
+    "@capacitor/status-bar": "8.0.4",
     "@element-plus/icons-vue": "^2.3.2",
     "@fontsource/noto-serif-sc": "5.3.1",
     "@tsconfig/node24": "^24.0.5",
@@ -28,16 +39,19 @@
     "axios": "^1.21.0",
     "concurrently": "^9.2.1",
     "cross-env": "^10.1.0",
+    "dexie": "4.4.7",
     "echarts": "^6.1.0",
     "electron": "^45.1.0",
     "electron-builder": "^26.18.0",
     "element-plus": "^2.14.7",
+    "fake-indexeddb": "^6.2.7",
     "jsdom": "^30.0.1",
     "konva": "^10.9.0",
     "npm-run-all2": "^9.0.3",
     "pinia": "^4.0.3",
     "resedit": "3.1.0",
     "typescript": "~6.0.0",
+    "vant": "4.10.2",
     "vite": "^8.2.2",
     "vitest": "^4.1.11",
     "vue": "^3.5.42",
@@ -98,6 +112,5 @@
       "esbuild",
       "vue-demi"
     ]
-  },
-  "dependencies": {}
+  }
 }

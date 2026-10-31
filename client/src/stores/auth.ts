@@ -58,8 +58,8 @@ export const useAuthStore = defineStore('auth', () => {
     return role.value === 'SYS_ADMIN' ? '/users' : '/home'
   })
 
-  async function login(username: string, password: string): Promise<void> {
-    const res = await authApi.login(username, password)
+  async function login(username: string, password: string, client?: 'MOBILE'): Promise<void> {
+    const res = await authApi.login(username, password, client)
     session.value = { token: res.token, expiresAt: res.expiresAt, user: res.user }
     setToken(res.token)
     saveSession(session.value)

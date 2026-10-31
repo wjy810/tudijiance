@@ -1,45 +1,11 @@
+@import './tokens.css';
+
 /*
  * 全局样式："麦田手记"。
  * 米色纸张做底，深林绿做骨架，麦穗金点缀；标题用思源宋体，正文用系统黑体。
  * 先定颜色、字体、圆角、阴影这些变量，再统一页面骨架、卡片、表格和 Element Plus 组件的样子。
  */
 :root {
-  /* 纸张和墨色 */
-  --paper: #f4efe3;
-  --paper-deep: #ebe3d1;
-  --surface: #fffdf8;
-  --surface-2: #f8f3e8;
-  --line: #e6ddca;
-  --line-strong: #d5c8ab;
-  --ink: #1f2a22;
-  --ink-2: #5c5b4d;
-  --ink-3: #978f7a;
-
-  /* 田野绿 */
-  --forest: #1c4231;
-  --forest-2: #23513d;
-  --green: #2e6b4f;
-  --green-2: #3d8463;
-  --green-soft: #e3eee5;
-
-  /* 麦穗金、陶土、天青 */
-  --wheat: #b98227;
-  --wheat-bright: #e2b65a;
-  --wheat-soft: #f5e8cc;
-  --clay: #b0543a;
-  --clay-soft: #f6e0d6;
-  --sky: #4b7a93;
-  --sky-soft: #e1ecf1;
-
-  --radius: 14px;
-  --radius-sm: 9px;
-  --shadow: 0 1px 2px rgba(70, 52, 20, 0.05), 0 8px 24px -14px rgba(70, 52, 20, 0.22);
-  --shadow-lift: 0 2px 4px rgba(70, 52, 20, 0.06), 0 18px 40px -18px rgba(70, 52, 20, 0.35);
-
-  --font-serif: 'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', 'STSong', serif;
-  --font-sans: 'Microsoft YaHei UI', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans CJK SC', 'Noto Sans SC',
-    system-ui, sans-serif;
-
   /* 旧变量名，页面里的局部样式还在用 */
   --app-bg: var(--paper);
   --app-surface: var(--surface);

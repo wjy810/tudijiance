@@ -42,13 +42,14 @@ import type {
 } from './types'
 
 export * from './types'
-export { setToken, setUnauthorizedHandler } from './http'
+export { ApiError, isNetworkError, setToken, setUnauthorizedHandler } from './http'
 
 const data = <T>(p: Promise<{ data: T }>) => p.then((r) => r.data)
 
 export const authApi = {
-  login: (username: string, password: string) =>
-    data<LoginResponse>(http.post('/api/auth/login', { username, password })),
+  /** client 填 MOBILE 时是手机端登录，令牌有效期更长 */
+  login: (username: string, password: string, client?: 'MOBILE') =>
+    data<LoginResponse>(http.post('/api/auth/login', { username, password, client })),
   me: () => data<UserView>(http.get('/api/auth/me')),
   changePassword: (oldPassword: string, newPassword: string) =>
     data<void>(http.put('/api/auth/password', { oldPassword, newPassword })),
