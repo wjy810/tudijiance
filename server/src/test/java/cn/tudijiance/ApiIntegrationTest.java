@@ -404,13 +404,14 @@ class ApiIntegrationTest {
                 List.of(3, "新品种B-导入", "II", "10.12", "abc", "9级", ""),
                 List.of(99, "周麦18-测试", "I", "10月12日", 70),
                 List.of(6, "周麦18-测试", "I", "10月12日", 70)));
-        Map<String, Object> mapping = new HashMap<>(Map.of("trialId", s.trialId, "sheet", 0, "headerRow", 2,
-                "plotCodeCol", 0, "varietyCol", 1, "replicateCol", 2, "observedOn", "2026-06-10",
-                "assignLayout", true, "createVarieties", true, "dryRun", true));
-        mapping.put("columns", List.of(Map.of("col", 3, "traitId", traitId("sowing_date")),
-                Map.of("col", 4, "traitId", traitId("plant_height")),
-                Map.of("col", 5, "traitId", traitId("lodging_final_grade")),
-                Map.of("col", 6, "traitId", traitId("yield_per_mu"))));
+        // 选中 A2:G7，每列一个字段
+        Map<String, Object> mapping = mapping(s.trialId, range(1, 0, 6, 6), "COLUMNS", List.of(
+                field(0, "PLOT_CODE", null), field(1, "VARIETY", null), field(2, "REPLICATE", null),
+                field(3, "TRAIT", traitId("sowing_date")), field(4, "TRAIT", traitId("plant_height")),
+                field(5, "TRAIT", traitId("lodging_final_grade")), field(6, "TRAIT", traitId("yield_per_mu"))));
+        mapping.put("observedOn", "2026-06-10");
+        mapping.put("assignLayout", true);
+        mapping.put("createVarieties", true);
 
         // 学生不能导入
         mvc.perform(multipart("/api/imports/run").file(file(xlsx)).file(part(mapping))
@@ -418,20 +419,31 @@ class ApiIntegrationTest {
 
         JsonNode check = importRun(xlsx, mapping);
         assertThat(check.get("dryRun").asBoolean()).isTrue();
-        assertThat(check.get("rows").asInt()).isEqualTo(5);
+        assertThat(check.get("records").asInt()).isEqualTo(5);
         assertThat(check.get("created").asInt()).isEqualTo(9);
         assertThat(check.get("errorCount").asInt()).isEqualTo(4);
         assertThat(check.get("newVarieties").get(0).asString()).isEqualTo("新品种B-导入");
         List<String> where = new ArrayList<>();
         check.get("errors").forEach(e -> where.add(e.get("row").asInt() + e.get("col").asString()));
         assertThat(where).containsExactly("5E", "5F", "6A", "7A");
+        // 出错的格子带工作表里的行列号（从 0 开始），页面上用来定位
+        assertThat(check.get("errors").get(0).get("r").asInt()).isEqualTo(4);
+        assertThat(check.get("errors").get(0).get("c").asInt()).isEqualTo(4);
         // 检查时什么都不写
         assertThat(call(teacher, get("/api/observations?trialId=" + s.trialId), null, status().isOk())
                 .get("total").asInt()).isZero();
 
+        // 在页面上把 E5 的 "abc" 改成 81，F5 的 "9级" 清空
+        mapping.put("edits", List.of(Map.of("row", 4, "col", 4, "value", "81"), Map.of("row", 4, "col", 5, "value", "")));
+        JsonNode fixed = importRun(xlsx, mapping);
+        assertThat(fixed.get("errorCount").asInt()).isEqualTo(2);
+        assertThat(fixed.get("created").asInt()).isEqualTo(10);
+
         mapping.put("dryRun", false);
+        mapping.put("rememberHeaders", true);
         JsonNode done = importRun(xlsx, mapping);
-        assertThat(done.get("created").asInt()).isEqualTo(9);
+        assertThat(done.get("created").asInt()).isEqualTo(10);
+        assertThat(done.get("aliasesRemembered").asInt()).isEqualTo(4);
         JsonNode yields = call(teacher, get("/api/observations?trialId=" + s.trialId + "&traitId="
                 + traitId("plot_yield") + "&plotId=" + s.plots.get(0)), null, status().isOk());
         // 亩产 500 × 面积 13.3 ÷ 666.7 = 9.97 kg
@@ -443,25 +455,43 @@ class ApiIntegrationTest {
         JsonNode plot3 = find(layout.get("plantings"), p -> p.get("plotId").asLong() == s.plots.get(2));
         assertThat(plot3.get("replicateNo").asInt()).isEqualTo(2);
         assertThat(plot3.get("varietyId").asLong()).isNotEqualTo(s.ckVariety);
+        // 表头记成了录入项目的别名（规范化后的写法）
+        JsonNode height = find(call(teacher, get("/api/traits"), null, status().isOk()),
+                t -> t.get("trait").get("code").asString().equals("plant_height"));
+        assertThat(height.get("aliases").toString()).contains("株高(cm)");
 
         // 同一份表格再导一次不会重复
         JsonNode again = importRun(xlsx, mapping);
         assertThat(again.get("created").asInt()).isZero();
-        assertThat(again.get("duplicates").asInt()).isEqualTo(9);
+        assertThat(again.get("duplicates").asInt()).isEqualTo(10);
 
-        // 没有小区编号时按品种 + 重复找小区
-        byte[] byVariety = workbook(List.of(List.of("品种", "重复", "千粒重"), List.of("周麦18-测试", "I", 45.2)));
-        Map<String, Object> m2 = new HashMap<>(Map.of("trialId", s.trialId, "sheet", 0, "headerRow", 1,
-                "varietyCol", 0, "replicateCol", 1, "observedOn", "2026-06-20", "assignLayout", false,
-                "createVarieties", false, "dryRun", false));
-        m2.put("columns", List.of(Map.of("col", 2, "traitId", traitId("thousand_grain_weight"))));
-        assertThat(importRun(byVariety, m2).get("created").asInt()).isEqualTo(1);
+        // 每行一个字段：第一列是表头，右边每列是一条记录；没有小区编号时按品种 + 重复找小区
+        byte[] byRows = workbook(List.of(
+                List.of("品种", "周麦18-测试", "新品系A-测试"),
+                List.of("重复", "I", "I"),
+                List.of("千粒重", 45.2, 47.1)));
+        Map<String, Object> m2 = mapping(s.trialId, range(0, 0, 2, 2), "ROWS", List.of(
+                field(0, "VARIETY", null), field(1, "REPLICATE", null), field(2, "TRAIT", traitId("thousand_grain_weight"))));
+        m2.put("observedOn", "2026-06-20");
+        m2.put("dryRun", false);
+        JsonNode rowsResult = importRun(byRows, m2);
+        assertThat(rowsResult.get("records").asInt()).isEqualTo(2);
+        assertThat(rowsResult.get("created").asInt()).isEqualTo(2);
 
-        // 预览和模板
+        // 范围超出表格、字段重复都要报错
+        Map<String, Object> bad = mapping(s.trialId, range(0, 0, 9, 2), "ROWS", List.of(field(0, "VARIETY", null),
+                field(2, "TRAIT", traitId("thousand_grain_weight"))));
+        importExpect(byRows, bad, status().isBadRequest());
+        Map<String, Object> twice = mapping(s.trialId, range(0, 0, 2, 2), "ROWS", List.of(field(0, "VARIETY", null),
+                field(0, "TRAIT", traitId("thousand_grain_weight"))));
+        importExpect(byRows, twice, status().isBadRequest());
+
+        // 预览给出整张表；模板
         JsonNode preview = json.readTree(mvc.perform(multipart("/api/imports/preview").file(file(xlsx))
                         .header("Authorization", "Bearer " + teacher))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8));
         assertThat(preview.get("sheets").get(0).get("rows").get(1).get(0).asString()).isEqualTo("小区编号");
+        assertThat(preview.get("sheets").get(0).get("rows").size()).isEqualTo(7);
         byte[] template = mvc.perform(get("/api/imports/template?trialId=" + s.trialId)
                         .header("Authorization", "Bearer " + teacher))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsByteArray();
@@ -469,6 +499,139 @@ class ApiIntegrationTest {
             assertThat(wb.getSheetAt(0).getRow(0).getCell(0).getStringCellValue()).isEqualTo("小区编号");
             assertThat(wb.getSheetAt(0).getLastRowNum()).isEqualTo(5);
         }
+    }
+
+    @Test
+    void traitAliasesAreEditableAndUnique() throws Exception {
+        long height = traitId("plant_height");
+        long spikes = traitId("effective_spikes");
+        JsonNode saved = call(teacher, put("/api/traits/" + height + "/aliases"),
+                Map.of("aliases", List.of("高度 （CM）", "高度(cm)", " ")), status().isOk());
+        // 全角转半角、去空白、小写，重复的合并
+        assertThat(saved.size()).isEqualTo(1);
+        assertThat(saved.get(0).asString()).isEqualTo("高度(cm)");
+        // 同一个写法不能给两个项目
+        call(teacher, put("/api/traits/" + spikes + "/aliases"), Map.of("aliases", List.of("高度(cm)")), status().isConflict());
+        call(student, put("/api/traits/" + spikes + "/aliases"), Map.of("aliases", List.of("穗数")), status().isForbidden());
+        // 新建自定义项目时可以一起记下表头
+        JsonNode custom = call(teacher, post("/api/traits"), Map.of("name", "穗长-别名测试", "dataType", "NUMBER",
+                "unit", "cm", "aliases", List.of("穗长（cm）")), status().isOk());
+        assertThat(custom.get("aliases").get(0).asString()).isEqualTo("穗长(cm)");
+        call(teacher, put("/api/traits/" + height + "/aliases"), Map.of("aliases", List.of()), status().isOk());
+    }
+
+    @Test
+    void selfServiceAnalysisAndSavedCharts() throws Exception {
+        Setup s = setup("分析试验田");
+        String url = "/api/trials/" + s.trialId + "/plantings";
+        call(teacher, put(url), Map.of("plotIds", s.plots.subList(0, 2), "attribute", "REPLICATE", "value", 1), status().isOk());
+        call(teacher, put(url), Map.of("plotIds", s.plots.subList(2, 4), "attribute", "REPLICATE", "value", 2), status().isOk());
+        // 对照（第 0、2 个小区）10、11 kg，品系 A（第 1、3 个小区）都是 12 kg；小区面积 13.3 平方米
+        double[] yields = {10, 12, 11, 12};
+        for (int i = 0; i < 4; i++) {
+            entry(student, s.trialId, "plot_yield", List.of(s.plots.get(i)), Map.of("valueNum", yields[i]), status().isOk());
+        }
+        entry(student, s.trialId, "lodging_final_grade", s.plots.subList(0, 2), Map.of("valueNum", 1), status().isOk());
+        entry(student, s.trialId, "lodging_final_grade", List.of(s.plots.get(2)), Map.of("valueNum", 3), status().isOk());
+
+        // 按品种：折合亩产平均、小区数、小区产量的变异系数
+        JsonNode byVariety = analysis(student, Map.of("fieldId", s.fieldId,
+                "dimensions", List.of(Map.of("type", "VARIETY")),
+                "measures", List.of(Map.of("traitId", traitId("yield_per_mu"), "agg", "AVG"),
+                        Map.of("agg", "COUNT"), Map.of("traitId", traitId("plot_yield"), "agg", "CV"))), status().isOk());
+        assertThat(byVariety.get("columns").get(1).get("label").asString()).isEqualTo("折合亩产 · 平均");
+        assertThat(byVariety.get("records").asInt()).isEqualTo(4);
+        JsonNode ck = find(byVariety.get("rows"), r -> r.get(0).asString().equals("周麦18-测试"));
+        // (501.278 + 551.406) ÷ 2，和"按品种汇总"的结果一致
+        assertThat(ck.get(1).decimalValue()).isEqualByComparingTo("526.3");
+        assertThat(ck.get(2).asInt()).isEqualTo(2);
+        assertThat(ck.get(3).decimalValue()).isEqualByComparingTo("6.7");
+        JsonNode lineA = find(byVariety.get("rows"), r -> r.get(0).asString().equals("新品系A-测试"));
+        assertThat(lineA.get(1).decimalValue()).isEqualByComparingTo("601.5");
+
+        // 按分级项目的取值分组，数小区
+        JsonNode byGrade = analysis(teacher, Map.of("fieldId", s.fieldId,
+                "dimensions", List.of(Map.of("type", "TRAIT", "traitId", traitId("lodging_final_grade"))),
+                "measures", List.of(Map.of("agg", "COUNT"))), status().isOk());
+        assertThat(byGrade.get("rows").size()).isEqualTo(2);
+        assertThat(byGrade.get("rows").get(0).get(0).asString()).isEqualTo("1 级");
+        assertThat(byGrade.get("rows").get(0).get(1).asInt()).isEqualTo(2);
+
+        // 不分组：每个小区一行；按品种、重复筛选
+        JsonNode detail = analysis(teacher, Map.of("fieldId", s.fieldId, "dimensions", List.of(),
+                "measures", List.of(Map.of("traitId", traitId("plot_yield"), "agg", "AVG"))), status().isOk());
+        assertThat(detail.get("rows").size()).isEqualTo(4);
+        JsonNode filtered = analysis(teacher, Map.of("fieldId", s.fieldId, "varietyIds", List.of(s.ckVariety),
+                "replicates", List.of(2), "dimensions", List.of(Map.of("type", "REPLICATE")),
+                "measures", List.of(Map.of("traitId", traitId("plot_yield"), "agg", "MAX"))), status().isOk());
+        assertThat(filtered.get("rows").size()).isEqualTo(1);
+        assertThat(filtered.get("rows").get(0).get(0).asString()).isEqualTo("重复 II");
+        assertThat(filtered.get("rows").get(0).get(1).decimalValue()).isEqualByComparingTo("11");
+
+        // 文字、日期类项目不能求平均；数值项目不能用来分组；游客不能用
+        analysis(teacher, Map.of("dimensions", List.of(), "measures",
+                List.of(Map.of("traitId", traitId("sowing_date"), "agg", "AVG"))), status().isBadRequest());
+        analysis(teacher, Map.of("dimensions", List.of(Map.of("type", "TRAIT", "traitId", traitId("plant_height"))),
+                "measures", List.of(Map.of("agg", "COUNT"))), status().isBadRequest());
+        analysis(guest, Map.of("dimensions", List.of(), "measures", List.of(Map.of("agg", "COUNT"))), status().isForbidden());
+
+        // 导出 Excel
+        byte[] xlsx = mvc.perform(post("/api/analysis/export").header("Authorization", "Bearer " + teacher)
+                        .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of("fieldId", s.fieldId,
+                                "dimensions", List.of(Map.of("type", "VARIETY")),
+                                "measures", List.of(Map.of("traitId", traitId("yield_per_mu"), "agg", "AVG"))))))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsByteArray();
+        try (Workbook wb = new XSSFWorkbook(new ByteArrayInputStream(xlsx))) {
+            var header = wb.getSheetAt(0).getRow(0);
+            assertThat(header.getCell(0).getStringCellValue()).isEqualTo("品种");
+            assertThat(header.getCell(1).getStringCellValue()).isEqualTo("折合亩产 · 平均（kg）");
+        }
+
+        // 保存图表：学生建的，老师可以改；学生不能删老师的
+        JsonNode chart = call(student, post("/api/analysis/charts"), Map.of("name", "各品种亩产",
+                "config", Map.of("chartType", "bar", "fieldId", s.fieldId)), status().isOk());
+        long chartId = chart.get("id").asLong();
+        assertThat(chart.get("config").get("chartType").asString()).isEqualTo("bar");
+        call(teacher, put("/api/analysis/charts/" + chartId), Map.of("name", "各品种亩产（改）",
+                "config", Map.of("chartType", "line")), status().isOk());
+        JsonNode teacherChart = call(teacher, post("/api/analysis/charts"), Map.of("name", "老师的图",
+                "config", Map.of("chartType", "pie")), status().isOk());
+        call(student, delete("/api/analysis/charts/" + teacherChart.get("id").asLong()), null, status().isForbidden());
+        call(teacher, post("/api/analysis/charts"), Map.of("name", "格式不对", "config", List.of(1, 2)), status().isBadRequest());
+        JsonNode list = call(student, get("/api/analysis/charts"), null, status().isOk());
+        JsonNode mine = find(list, c -> c.get("id").asLong() == chartId);
+        assertThat(mine.get("name").asString()).isEqualTo("各品种亩产（改）");
+        assertThat(mine.get("createdByName").asString()).isEqualTo("张同学");
+        call(student, delete("/api/analysis/charts/" + chartId), null, status().isOk());
+        call(teacher, delete("/api/analysis/charts/" + teacherChart.get("id").asLong()), null, status().isOk());
+    }
+
+    private JsonNode analysis(String token, Map<String, Object> query, ResultMatcher expected) throws Exception {
+        return call(token, post("/api/analysis/query"), query, expected);
+    }
+
+    private static Map<String, Object> range(int top, int left, int bottom, int right) {
+        return Map.of("top", top, "left", left, "bottom", bottom, "right", right);
+    }
+
+    private static Map<String, Object> field(int index, String role, Long traitId) {
+        Map<String, Object> f = new HashMap<>(Map.of("index", index, "role", role));
+        if (traitId != null) {
+            f.put("traitId", traitId);
+        }
+        return f;
+    }
+
+    private static Map<String, Object> mapping(long trialId, Map<String, Object> range, String orientation,
+                                               List<Map<String, Object>> fields) {
+        return new HashMap<>(Map.of("trialId", trialId, "sheet", 0, "range", range, "orientation", orientation,
+                "fields", fields, "assignLayout", false, "createVarieties", false, "rememberHeaders", false,
+                "dryRun", true));
+    }
+
+    private void importExpect(byte[] xlsx, Map<String, Object> mapping, ResultMatcher expected) throws Exception {
+        mvc.perform(multipart("/api/imports/run").file(file(xlsx)).file(part(mapping))
+                .header("Authorization", "Bearer " + teacher)).andExpect(expected);
     }
 
     private JsonNode importRun(byte[] xlsx, Map<String, Object> mapping) throws Exception {

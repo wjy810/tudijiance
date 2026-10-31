@@ -73,22 +73,7 @@ public class ComputedTraits {
 
     /** 试验里每个种植记录（plantingId）这个项目的值，没有值的不在结果里。 */
     public Map<Long, BigDecimal> values(TrialContext ctx, TraitDef trait) {
-        if (ctx.plantingsById().isEmpty()) {
-            return Map.of();
-        }
-        List<String> codes = isSupported(trait) ? SOURCES.get(trait.getCode()) : List.of(trait.getCode());
-        Map<Long, TraitDef> byId = codes.stream().map(catalog::byCode)
-                .collect(Collectors.toMap(TraitDef::getId, t -> t));
-        List<Observation> list = observationMapper.selectList(Wrappers.<Observation>lambdaQuery()
-                .in(Observation::getPlantingId, ctx.plantingsById().keySet())
-                .in(Observation::getTraitId, byId.keySet())
-                .eq(Observation::getDeleted, false)
-                .orderByDesc(Observation::getObservedOn).orderByDesc(Observation::getId));
-        Map<Long, Map<String, Observation>> latest = new HashMap<>();
-        for (Observation o : list) {
-            latest.computeIfAbsent(o.getPlantingId(), k -> new HashMap<>())
-                    .putIfAbsent(byId.get(o.getTraitId()).getCode(), o);
-        }
+        Map<Long, Map<String, Observation>> latest = latest(ctx.plantingsById().keySet(), List.of(trait));
         Map<Long, BigDecimal> result = new HashMap<>();
         latest.forEach((plantingId, byCode) -> {
             Plot plot = ctx.plots().get(ctx.plantingsById().get(plantingId).getPlotId());
@@ -98,6 +83,36 @@ public class ComputedTraits {
             }
         });
         return result;
+    }
+
+    /** 计算项目用到哪些录入项目；不是计算项目时就是它自己 */
+    public static List<String> sourceCodes(TraitDef trait) {
+        return isSupported(trait) ? SOURCES.get(trait.getCode()) : List.of(trait.getCode());
+    }
+
+    /**
+     * 一批种植记录在这些项目上最近一次的记录（一次查询）：plantingId → (项目编码 → 记录)。
+     * 计算项目换成它用到的录入项目，结果交给 {@link #compute} 算值。
+     */
+    public Map<Long, Map<String, Observation>> latest(Collection<Long> plantingIds, Collection<TraitDef> traits) {
+        if (plantingIds.isEmpty() || traits.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, TraitDef> byCode = catalog.all().values().stream()
+                .collect(Collectors.toMap(TraitDef::getCode, t -> t));
+        Map<Long, TraitDef> byId = traits.stream().flatMap(t -> sourceCodes(t).stream()).distinct()
+                .map(byCode::get).collect(Collectors.toMap(TraitDef::getId, t -> t));
+        List<Observation> list = observationMapper.selectList(Wrappers.<Observation>lambdaQuery()
+                .in(Observation::getPlantingId, plantingIds)
+                .in(Observation::getTraitId, byId.keySet())
+                .eq(Observation::getDeleted, false)
+                .orderByDesc(Observation::getObservedOn).orderByDesc(Observation::getId));
+        Map<Long, Map<String, Observation>> latest = new HashMap<>();
+        for (Observation o : list) {
+            latest.computeIfAbsent(o.getPlantingId(), k -> new HashMap<>())
+                    .putIfAbsent(byId.get(o.getTraitId()).getCode(), o);
+        }
+        return latest;
     }
 
     /**

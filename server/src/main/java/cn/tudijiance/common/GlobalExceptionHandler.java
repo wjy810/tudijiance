@@ -12,9 +12,14 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.ErrorResponse;
 import org.springframework.web.bind.MissingRequestHeaderException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
 
 /**
  * 把异常统一转成 {"message": "..."} 的形式返回给客户端。
@@ -37,9 +42,16 @@ public class GlobalExceptionHandler {
         return body(HttpStatus.BAD_REQUEST, message);
     }
 
-    @ExceptionHandler({HttpMessageNotReadableException.class, MissingRequestHeaderException.class})
+    @ExceptionHandler({HttpMessageNotReadableException.class, MissingRequestHeaderException.class,
+            MissingServletRequestParameterException.class, MissingServletRequestPartException.class,
+            MethodArgumentTypeMismatchException.class})
     public ResponseEntity<Map<String, String>> handleBadRequest(Exception e) {
         return body(HttpStatus.BAD_REQUEST, "请求格式不正确");
+    }
+
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<Map<String, String>> handleTooLarge(MaxUploadSizeExceededException e) {
+        return body(HttpStatus.CONTENT_TOO_LARGE, "文件太大，最大 20 MB");
     }
 
     @ExceptionHandler(DuplicateKeyException.class)
@@ -55,7 +67,18 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(AccessDeniedException.class)
     public ResponseEntity<Map<String, String>> handleAccessDenied(AccessDeniedException e) {
-        return body(HttpStatus.FORBIDDEN, "没有权限，需要管理员账号");
+        return body(HttpStatus.FORBIDDEN, "当前账号没有权限做这个操作");
+    }
+
+    /** 其它异常：Spring 自己定了状态码的（404、405 等）照用；真正的程序错误记日志，返回 500，不把内部信息带给客户端 */
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<Map<String, String>> handleOther(Exception e) {
+        if (e instanceof ErrorResponse er) {
+            HttpStatus status = HttpStatus.resolve(er.getStatusCode().value());
+            return body(status == null ? HttpStatus.BAD_REQUEST : status, "请求失败（" + er.getStatusCode().value() + "）");
+        }
+        log.error("未处理的异常", e);
+        return body(HttpStatus.INTERNAL_SERVER_ERROR, "服务器出错了，请稍后再试");
     }
 
     private static ResponseEntity<Map<String, String>> body(HttpStatus status, String message) {
