@@ -85,6 +85,10 @@ public class ObservationService {
 
         List<Long> savedIds = new ArrayList<>();
         Set<Long> seenPlots = new HashSet<>();
+        // 手机离线后重复上传：已经存过的客户端编号直接返回原来那条（一次查出来，不逐条查）
+        Map<String, Observation> existingByUuid = observationMapper.selectList(Wrappers.<Observation>lambdaQuery()
+                        .in(Observation::getClientUuid, req.items().stream().map(EntryItem::clientUuid).toList()))
+                .stream().collect(Collectors.toMap(Observation::getClientUuid, o -> o));
         for (EntryItem item : req.items()) {
             if (!seenPlots.add(item.plotId())) {
                 continue;
@@ -96,8 +100,7 @@ public class ObservationService {
             if (!Plot.KIND_PLOT.equals(plot.getKind())) {
                 throw ApiException.badRequest("小区 " + plot.getCode() + " 是保护区或走道，不能录入");
             }
-            Observation existing = observationMapper.selectOne(Wrappers.<Observation>lambdaQuery()
-                    .eq(Observation::getClientUuid, item.clientUuid()));
+            Observation existing = existingByUuid.get(item.clientUuid());
             if (existing != null) {
                 savedIds.add(existing.getId());
                 continue;

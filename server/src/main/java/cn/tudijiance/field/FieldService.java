@@ -70,11 +70,13 @@ public class FieldService {
         field.setUpdatedAt(now);
         fieldMapper.insert(field);
         int seq = 1;
+        List<Plot> plots = new ArrayList<>();
         for (int r = 1; r <= req.rowCount(); r++) {
             for (int c = 1; c <= req.colCount(); c++) {
-                insertPlot(field.getId(), r, c, String.valueOf(seq++), req);
+                plots.add(newPlot(field.getId(), r, c, String.valueOf(seq++), req));
             }
         }
+        insertPlots(plots);
         return detail(field.getId());
     }
 
@@ -99,13 +101,15 @@ public class FieldService {
             }
             plotMapper.deleteByIds(ids);
         }
+        List<Plot> added = new ArrayList<>();
         for (int r = 1; r <= req.rowCount(); r++) {
             for (int c = 1; c <= req.colCount(); c++) {
                 if (r > oldRows || c > oldCols) {
-                    insertPlot(id, r, c, null, req);
+                    added.add(newPlot(id, r, c, null, req));
                 }
             }
         }
+        insertPlots(added);
         return detail(id);
     }
 
@@ -211,7 +215,14 @@ public class FieldService {
         return found;
     }
 
-    private void insertPlot(Long fieldId, int row, int col, String code, FieldRequest req) {
+    /** 每 500 个小区一条 INSERT，几百上千个小区也不用一个个发 SQL */
+    private void insertPlots(List<Plot> plots) {
+        for (int i = 0; i < plots.size(); i += 500) {
+            plotMapper.insertAll(plots.subList(i, Math.min(i + 500, plots.size())));
+        }
+    }
+
+    private static Plot newPlot(Long fieldId, int row, int col, String code, FieldRequest req) {
         Plot plot = new Plot();
         plot.setFieldId(fieldId);
         plot.setRowNo(row);
@@ -220,7 +231,7 @@ public class FieldService {
         plot.setKind(Plot.KIND_PLOT);
         plot.setLengthM(req.plotLengthM());
         plot.setWidthM(req.plotWidthM());
-        plotMapper.insert(plot);
+        return plot;
     }
 
     private static void apply(Field field, FieldRequest req) {
