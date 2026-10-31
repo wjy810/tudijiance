@@ -755,16 +755,16 @@ function onFieldCreated(detail: FieldDetail) {
   border-radius: var(--radius-pill);
   background: rgba(255, 253, 248, 0.82);
   font-size: var(--fs-xs);
-  color: var(--forest);
-  opacity: 0;
-  transform: translateY(-2px);
-  transition: opacity var(--dur), transform var(--dur);
+  color: var(--ink-2);
+  box-shadow: 0 0 0 1px rgba(120, 100, 60, 0.12);
+  transition: color var(--dur), background var(--dur), box-shadow var(--dur);
 }
 
 .hero-map:hover .map-open,
 .hero-map:focus-visible .map-open {
-  opacity: 1;
-  transform: none;
+  color: var(--forest);
+  background: var(--surface);
+  box-shadow: 0 0 0 1px rgba(120, 100, 60, 0.18), var(--shadow-xs);
 }
 
 .hero-skeleton {
