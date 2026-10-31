@@ -1,23 +1,37 @@
 <script setup lang="ts">
-// 录入项目：标准项目（NY/T 1301—2025）和自定义项目。老师可以停用不用的项目、新增和删除自定义项目
+// 录入项目：标准项目（NY/T 1301—2025）和自定义项目。老师可以停用不用的项目、新增和删除自定义项目，
+// 还可以维护"导入时的表头"（别名）：导入历史表格时，表头是这些写法的列自动对应到这个项目
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus } from '@element-plus/icons-vue'
+import { EditPen, Plus, Search, Upload } from '@element-plus/icons-vue'
+import { useRouter } from 'vue-router'
 
 import { traitApi, type TraitCategory, type TraitView } from '@/shared/api'
 import { TRAIT_CATEGORY, TRAIT_DATA_TYPE } from '@/shared/labels'
 import { useAuthStore } from '@/stores/auth'
 import { useCatalogStore } from '@/stores/catalog'
 import CustomTraitDialog from '@/desktop/components/CustomTraitDialog.vue'
+import { aliasKey } from '@/shared/importGuess'
 
 const auth = useAuthStore()
 const catalog = useCatalogStore()
 const loading = ref(false)
 const tab = ref<TraitCategory>('OPERATION')
 const customOpen = ref(false)
+const router = useRouter()
+const keyword = ref('')
 
 const categories = computed(() => (Object.keys(TRAIT_CATEGORY) as TraitCategory[]))
-const rows = computed(() => catalog.traits.filter((t) => t.trait.category === tab.value))
+/** 有搜索词时在全部分类里按名称和表头别名找，否则显示当前分类 */
+const rows = computed(() => {
+  const kw = keyword.value.trim()
+  if (!kw) {
+    return catalog.traits.filter((t) => t.trait.category === tab.value)
+  }
+  const key = aliasKey(kw)
+  return catalog.traits.filter((t) => t.trait.name.includes(kw) || t.aliases.some((a) => a.includes(key)))
+})
+const aliasCount = computed(() => catalog.traits.reduce((n, t) => n + t.aliases.length, 0))
 const counts = computed(() => {
   const map = new Map<TraitCategory, number>()
   for (const t of catalog.traits) {
@@ -72,6 +86,32 @@ async function remove(t: TraitView) {
   }
 }
 
+// ---------- 导入时的表头（别名） ----------
+
+const aliasTarget = ref<TraitView | null>(null)
+const aliasDraft = ref<string[]>([])
+const aliasSaving = ref(false)
+
+function editAliases(t: TraitView) {
+  aliasTarget.value = t
+  aliasDraft.value = [...t.aliases]
+}
+
+async function saveAliases() {
+  const t = aliasTarget.value
+  if (!t) return
+  aliasSaving.value = true
+  try {
+    t.aliases = await traitApi.setAliases(t.trait.id, aliasDraft.value)
+    ElMessage.success(`已保存"${t.trait.name}"的表头写法`)
+    aliasTarget.value = null
+  } catch (e) {
+    ElMessage.error((e as Error).message)
+  } finally {
+    aliasSaving.value = false
+  }
+}
+
 async function onCreated() {
   await load()
   tab.value = 'CUSTOM'
@@ -85,7 +125,20 @@ async function onCreated() {
         <h2>录入项目</h2>
         <div class="page-desc">标准项目按 NY/T 1301—2025《农作物品种试验规范 小麦》；不够用时老师可以新增自定义项目。停用的项目录入时不显示。</div>
       </div>
-      <el-button v-if="auth.isTeacher" type="primary" :icon="Plus" @click="customOpen = true">新增自定义项目</el-button>
+      <div class="page-actions">
+        <el-input v-model="keyword" :prefix-icon="Search" clearable placeholder="按名称或表头找项目" class="search" />
+        <el-button v-if="auth.isTeacher" type="primary" :icon="Plus" @click="customOpen = true">新增自定义项目</el-button>
+      </div>
+    </div>
+
+    <div class="link-card panel">
+      <span class="link-icon"><el-icon><Upload /></el-icon></span>
+      <div class="link-text">
+        <b>和导入历史表格联动</b>
+        <span>导入表格时，表头是"导入时的表头"里这些写法的列会自动对应到这个项目；导入时确认过的对应关系也会自动记到这里。
+          现在一共记了 <b class="num">{{ aliasCount }}</b> 种写法。</span>
+      </div>
+      <el-button v-if="auth.isTeacher" @click="router.push('/import')">去导入</el-button>
     </div>
 
     <div class="layout">
@@ -101,6 +154,7 @@ async function onCreated() {
           <span>{{ TRAIT_CATEGORY[c] }}</span>
           <span class="count">{{ counts.get(c) ?? 0 }}</span>
         </button>
+        <div v-if="keyword.trim()" class="search-note">正在全部分类里找"{{ keyword.trim() }}"，找到 {{ rows.length }} 个</div>
       </nav>
 
       <div class="panel table-panel">
@@ -130,7 +184,17 @@ async function onCreated() {
               </div>
             </template>
           </el-table-column>
-          <el-table-column label="调查时间 / 说明" min-width="200" show-overflow-tooltip>
+          <el-table-column label="导入时的表头" min-width="190">
+            <template #default="{ row }">
+              <div class="tags">
+                <span v-for="a in row.aliases.slice(0, 3)" :key="a" class="chip wheat">{{ a }}</span>
+                <span v-if="row.aliases.length > 3" class="muted small">等 {{ row.aliases.length }} 种</span>
+                <span v-if="row.aliases.length === 0" class="muted small">—</span>
+                <el-button v-if="auth.isTeacher" link :icon="EditPen" class="alias-edit" @click="editAliases(row)" />
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column label="调查时间 / 说明" min-width="180" show-overflow-tooltip>
             <template #default="{ row }"><span class="muted">{{ row.trait.surveyTime }}</span></template>
           </el-table-column>
           <el-table-column label="启用" width="70" align="center">
@@ -153,6 +217,20 @@ async function onCreated() {
     </div>
 
     <CustomTraitDialog v-model="customOpen" @created="onCreated" />
+
+    <el-dialog :model-value="!!aliasTarget" :title="`导入时的表头：${aliasTarget?.trait.name ?? ''}`" width="480px"
+      @update:model-value="(v: boolean) => { if (!v) aliasTarget = null }">
+      <div class="hint">历史表格里这个项目的表头可能有不同写法，比如"株高(cm)""高度"。输入一种写法后按回车。
+        全角半角、空格、大小写不影响识别。</div>
+      <el-select v-model="aliasDraft" multiple filterable allow-create default-first-option :reserve-keyword="false"
+        placeholder="输入表头写法，按回车添加" class="alias-select" no-data-text="输入后按回车">
+        <el-option v-for="a in aliasDraft" :key="a" :value="a" :label="a" />
+      </el-select>
+      <template #footer>
+        <el-button @click="aliasTarget = null">取消</el-button>
+        <el-button type="primary" :loading="aliasSaving" @click="saveAliases">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -189,7 +267,65 @@ async function onCreated() {
 }
 
 .cat:hover {
-  background: #f3f6f2;
+  background: var(--surface-2);
+}
+
+.search {
+  width: 220px;
+}
+
+.search-note {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-top: 1px dashed var(--line);
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+.link-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 18px;
+  margin-bottom: 16px;
+  background: linear-gradient(90deg, #fbf3df, var(--surface) 60%);
+}
+
+.link-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  color: var(--wheat);
+  background: var(--wheat-soft);
+  flex-shrink: 0;
+}
+
+.link-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+.link-text > b {
+  color: var(--forest);
+  font-family: var(--font-serif);
+  font-size: 14px;
+}
+
+.alias-edit {
+  margin-left: 2px;
+}
+
+.alias-select {
+  width: 100%;
+  margin-top: 12px;
 }
 
 .cat.active {
@@ -225,8 +361,8 @@ async function onCreated() {
 }
 
 .opt {
-  background: #f3f5f1;
-  border: 1px solid var(--app-border);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
   border-radius: 4px;
   padding: 0 6px;
   font-size: 12px;

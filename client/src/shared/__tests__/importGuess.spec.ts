@@ -1,15 +1,19 @@
 import { describe, expect, it } from 'vitest'
 
 import type { TraitView } from '@/shared/api'
-import { columnLetter, guessHeaderRow, guessTarget, normalizeHeader } from '@/shared/importGuess'
+import {
+  aliasKey, columnLetter, fieldsOf, guessHeaderRow, guessOrientation, guessRange, guessTarget, normalizeHeader, rangeText,
+  suggestCustomTrait, unitOf,
+} from '@/shared/importGuess'
 
-function trait(id: number, code: string, name: string, isComputed = false): TraitView {
+function trait(id: number, code: string, name: string, isComputed = false, aliases: string[] = []): TraitView {
   return {
     trait: {
       id, code, name, category: 'YIELD', dataType: 'NUMBER', unit: null, precisionDigits: 1, aggMethod: 'AVG',
       surveyTime: null, stdClause: null, isStandard: true, isComputed, enabled: true, sortOrder: id, description: null,
     },
     options: [],
+    aliases,
   }
 }
 
@@ -19,6 +23,7 @@ const traits = [
   trait(3, 'yield_per_mu', '折合亩产', true),
   trait(4, 'whole_growth_days', '全生育期', true),
   trait(5, 'effective_spikes', '有效穗数'),
+  trait(6, 'custom_spike_len', '穗长', false, ['穗长(cm)', '穗子长度']),
 ]
 
 describe('normalizeHeader', () => {
@@ -43,6 +48,11 @@ describe('guessTarget', () => {
     expect(guessTarget('穗数', traits)).toEqual({ kind: 'trait', traitId: 5 })
   })
 
+  it('prefers aliases remembered in the trait catalog', () => {
+    expect(guessTarget('穗长（CM）', traits)).toEqual({ kind: 'trait', traitId: 6 })
+    expect(guessTarget(' 穗子 长度 ', traits)).toEqual({ kind: 'trait', traitId: 6 })
+  })
+
   it('does not map computed traits other than yield per mu', () => {
     expect(guessTarget('全生育期', traits)).toEqual({ kind: 'ignore' })
     expect(guessTarget('备注', traits)).toEqual({ kind: 'ignore' })
@@ -64,5 +74,73 @@ describe('columnLetter', () => {
     expect(columnLetter(0)).toBe('A')
     expect(columnLetter(25)).toBe('Z')
     expect(columnLetter(26)).toBe('AA')
+  })
+})
+
+describe('aliasKey and unitOf', () => {
+  it('normalizes like the server: full width to half width, no spaces, lower case', () => {
+    expect(aliasKey(' 株高 （CM） ')).toBe('株高(cm)')
+    expect(aliasKey('ＡＢｃ')).toBe('abc')
+  })
+
+  it('reads the unit in brackets', () => {
+    expect(unitOf('株高（cm）')).toBe('cm')
+    expect(unitOf('穗数【万/亩】')).toBe('万/亩')
+    expect(unitOf('品种')).toBeNull()
+  })
+})
+
+describe('orientation and range', () => {
+  const byColumns = [
+    ['2025 年记载表'],
+    ['', '小区号', '品种', '株高'],
+    ['', '101', '济麦22', '78'],
+    ['', '102', '周麦36', '80'],
+    [],
+  ]
+  const byRows = [
+    ['品种', '济麦22', '周麦36', '百农207'],
+    ['重复', 'I', 'I', 'I'],
+    ['株高', '78', '80', '76'],
+  ]
+
+  it('detects column and row oriented tables', () => {
+    expect(guessOrientation(byColumns)).toBe('COLUMNS')
+    expect(guessOrientation(byRows)).toBe('ROWS')
+  })
+
+  it('finds the data range from the header to the last filled row', () => {
+    const r = guessRange(byColumns, 'COLUMNS')
+    expect(r).toEqual({ top: 1, left: 1, bottom: 3, right: 3 })
+    expect(rangeText(r)).toBe('B2:D4')
+    expect(guessRange(byRows, 'ROWS')).toEqual({ top: 0, left: 0, bottom: 2, right: 3 })
+  })
+
+  it('lists fields with their headers and samples in either direction', () => {
+    const cols = fieldsOf(byColumns, { top: 1, left: 1, bottom: 3, right: 3 }, 'COLUMNS')
+    expect(cols.map((f) => f.header)).toEqual(['小区号', '品种', '株高'])
+    expect(cols[2]!.samples).toEqual(['78', '80'])
+    const rows = fieldsOf(byRows, { top: 0, left: 0, bottom: 2, right: 3 }, 'ROWS')
+    expect(rows.map((f) => f.header)).toEqual(['品种', '重复', '株高'])
+    expect(rows[0]!.samples).toEqual(['济麦22', '周麦36', '百农207'])
+  })
+})
+
+describe('suggestCustomTrait', () => {
+  it('suggests numbers with precision and the unit from the header', () => {
+    expect(suggestCustomTrait('穗长（cm）', ['8.5', '9.25', '9'])).toMatchObject({
+      name: '穗长', dataType: 'NUMBER', unit: 'cm', precisionDigits: 2,
+    })
+  })
+
+  it('does not mistake decimals for month.day dates', () => {
+    expect(suggestCustomTrait('穗长（cm）', ['7.8', '8.6', '8', '9.2']).dataType).toBe('NUMBER')
+    expect(suggestCustomTrait('拔节期', ['3.5', '3.6', '3.8']).dataType).toBe('DATE')
+  })
+
+  it('suggests dates, options and text', () => {
+    expect(suggestCustomTrait('拔节期', ['3月5日', '2025-03-06']).dataType).toBe('DATE')
+    expect(suggestCustomTrait('长势', ['好', '中', '好', '差'])).toMatchObject({ dataType: 'OPTION', options: ['好', '中', '差'] })
+    expect(suggestCustomTrait('备注', ['叶片发黄', '有积水']).dataType).toBe('TEXT')
   })
 })

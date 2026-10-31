@@ -35,7 +35,11 @@ const CELL_W = 104
 const CELL_H = 70
 const HEADER = 30
 const PAD = 10
-const FONT = "'Microsoft YaHei', 'PingFang SC', 'WenQuanYi Zen Hei', sans-serif"
+const FONT = "'Microsoft YaHei UI', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans CJK SC', sans-serif"
+const INK = '#1f2a22'
+const FOREST = '#1c4231'
+/** 导出种植图时画白底（jpg 没有透明通道）；平时透明，露出页面的土壤底纹 */
+const exporting = ref(false)
 
 const stageRef = ref<{ getNode: () => Konva.Stage } | null>(null)
 
@@ -294,8 +298,13 @@ async function exportJpeg(filename: string) {
     return
   }
   hover.value = null
+  exporting.value = true
   await nextTick()
-  saveFile(stage.toDataURL({ mimeType: 'image/jpeg', quality: 0.92, pixelRatio: 2 / props.zoom }), filename)
+  try {
+    saveFile(stage.toDataURL({ mimeType: 'image/jpeg', quality: 0.92, pixelRatio: 2 / props.zoom }), filename)
+  } finally {
+    exporting.value = false
+  }
 }
 
 defineExpose({ exportJpeg })
@@ -313,15 +322,14 @@ defineExpose({ exportJpeg })
     @dblclick="onDblClick"
   >
     <v-layer>
-      <!-- 白色背景：jpg 没有透明通道 -->
-      <v-rect :config="{ x: 0, y: 0, width, height, fill: '#ffffff' }" />
+      <v-rect v-if="exporting" :config="{ x: 0, y: 0, width, height, fill: '#ffffff' }" />
 
       <v-text
         v-for="c in colHeaders"
         :key="'c' + c"
         :config="{
           x: cellX(c), y: PAD, width: cellW(c), height: HEADER, text: String(c),
-          align: 'center', verticalAlign: 'middle', fontSize: 13, fill: '#6b7570', fontFamily: FONT,
+          align: 'center', verticalAlign: 'middle', fontSize: 12, fontStyle: 'bold', fill: '#9a8f74', fontFamily: FONT,
         }"
       />
       <v-text
@@ -329,36 +337,65 @@ defineExpose({ exportJpeg })
         :key="'r' + r"
         :config="{
           x: PAD, y: cellY(r), width: HEADER, height: cellH(r), text: String(r),
-          align: 'center', verticalAlign: 'middle', fontSize: 13, fill: '#6b7570', fontFamily: FONT,
+          align: 'center', verticalAlign: 'middle', fontSize: 12, fontStyle: 'bold', fill: '#9a8f74', fontFamily: FONT,
         }"
       />
 
       <v-group v-for="c in cells" :key="c.plotId">
         <v-rect
           :config="{
-            x: cellX(c.colNo) + 2, y: cellY(c.rowNo) + 2, width: cellW(c.colNo) - 4, height: cellH(c.rowNo) - 4,
-            fill: c.fill, cornerRadius: 4,
-            stroke: selectedSet.has(c.plotId) ? '#1c64d6' : '#c9d3cc',
+            x: cellX(c.colNo) + 3, y: cellY(c.rowNo) + 3, width: cellW(c.colNo) - 6, height: cellH(c.rowNo) - 6,
+            fill: c.fill, cornerRadius: 7,
+            stroke: selectedSet.has(c.plotId) ? FOREST : 'rgba(90, 70, 30, 0.22)',
             strokeWidth: selectedSet.has(c.plotId) ? 3 : 1,
+            shadowColor: '#e2b65a', shadowBlur: selectedSet.has(c.plotId) ? 10 : 0,
+            shadowOpacity: selectedSet.has(c.plotId) ? 0.9 : 0, shadowEnabled: selectedSet.has(c.plotId),
+          }"
+        />
+        <!-- 上沿一道高光，像一块有厚度的田 -->
+        <v-line
+          :config="{
+            points: [cellX(c.colNo) + 10, cellY(c.rowNo) + 4.5, cellX(c.colNo) + cellW(c.colNo) - 10, cellY(c.rowNo) + 4.5],
+            stroke: 'rgba(255,255,255,0.65)', strokeWidth: 1, listening: false,
           }"
         />
         <v-text
           :config="{
-            x: cellX(c.colNo) + 4, y: cellY(c.rowNo) + 8, width: cellW(c.colNo) - 8, height: cellH(c.rowNo) - 12,
-            text: c.lines.join('\n'), align: 'center', fontSize: 12, lineHeight: 1.35,
-            fill: '#1f2a24', fontFamily: FONT, wrap: 'none', ellipsis: true,
+            x: cellX(c.colNo) + 6, y: cellY(c.rowNo) + 9, width: cellW(c.colNo) - 12, text: c.lines[0] ?? '',
+            align: 'center', fontSize: 12, fontStyle: 'bold', fill: '#6b6450', fontFamily: FONT,
+            wrap: 'none', ellipsis: true, listening: false,
           }"
         />
         <v-text
+          :config="{
+            x: cellX(c.colNo) + 6, y: cellY(c.rowNo) + 26, width: cellW(c.colNo) - 12, height: cellH(c.rowNo) - 30,
+            text: c.lines.slice(1).join('\n'), align: 'center', fontSize: 12.5, lineHeight: 1.35,
+            fill: INK, fontFamily: FONT, wrap: 'none', ellipsis: true, listening: false,
+          }"
+        />
+        <v-label
           v-if="c.badge"
-          :config="{
-            x: cellX(c.colNo) + cellW(c.colNo) - 34, y: cellY(c.rowNo) + 5, width: 28, text: c.badge,
-            align: 'right', fontSize: 11, fontStyle: 'bold', fill: c.badgeColor ?? '#c92a2a', fontFamily: FONT,
-          }"
-        />
+          :config="{ x: cellX(c.colNo) + cellW(c.colNo) - 8, y: cellY(c.rowNo) + 7, listening: false }"
+        >
+          <v-tag
+            :config="{
+              fill: c.badge.includes('!') ? '#b0543a' : '#d9a748', cornerRadius: 6,
+              pointerDirection: 'right', pointerWidth: 0, pointerHeight: 0,
+            }"
+          />
+          <v-text
+            :config="{
+              text: c.badge, fontSize: 10, fontStyle: 'bold', padding: 3,
+              fill: c.badge.includes('!') ? '#fff6ee' : '#3b2a0c', fontFamily: FONT,
+            }"
+          />
+        </v-label>
         <v-circle
           v-if="c.marker"
-          :config="{ x: cellX(c.colNo) + 10, y: cellY(c.rowNo) + cellH(c.rowNo) - 10, radius: 4, fill: '#1c7ed6' }"
+          :config="{
+            x: cellX(c.colNo) + 12, y: cellY(c.rowNo) + cellH(c.rowNo) - 12, radius: 3.5,
+            fill: '#2e6b4f', stroke: '#ffffff', strokeWidth: 1.5, listening: false,
+          }"
         />
       </v-group>
 
@@ -366,31 +403,31 @@ defineExpose({ exportJpeg })
         v-for="r in linkRings"
         :key="'ring' + r.plotId"
         :config="{
-          x: r.x + 1, y: r.y + 1, width: r.w - 2, height: r.h - 2, cornerRadius: 5, listening: false,
-          stroke: '#d9480f', strokeWidth: r.control ? 2.5 : 1.5, dash: r.control ? undefined : [5, 4],
+          x: r.x + 1, y: r.y + 1, width: r.w - 2, height: r.h - 2, cornerRadius: 8, listening: false,
+          stroke: '#c0562f', strokeWidth: r.control ? 2.5 : 1.5, dash: r.control ? undefined : [5, 4],
         }"
       />
       <v-line
         v-for="l in linkLines"
         :key="l.key"
-        :config="{ points: l.points, stroke: '#d9480f', strokeWidth: 2, dash: [8, 6], lineCap: 'round', listening: false }"
+        :config="{ points: l.points, stroke: '#c0562f', strokeWidth: 2, dash: [8, 6], lineCap: 'round', listening: false }"
       />
       <v-label v-for="l in linkLabels" :key="l.key" :config="{ x: l.x, y: l.y, listening: false }">
-        <v-tag :config="{ fill: '#fff4e6', stroke: '#d9480f', cornerRadius: 3, pointerDirection: 'down', pointerWidth: 8, pointerHeight: 5 }" />
-        <v-text :config="{ text: l.text, fontSize: 11, padding: 3, fill: '#c2410c', fontFamily: FONT }" />
+        <v-tag :config="{ fill: '#fff4ea', stroke: '#c0562f', cornerRadius: 5, pointerDirection: 'down', pointerWidth: 8, pointerHeight: 5 }" />
+        <v-text :config="{ text: l.text, fontSize: 11, padding: 4, fill: '#a3431f', fontFamily: FONT }" />
       </v-label>
 
       <v-group v-for="d in deviceShapes" :key="'d' + d.id">
         <v-circle :config="{ x: d.x, y: d.y, radius: 8, fill: d.color, stroke: '#ffffff', strokeWidth: 2 }" />
         <v-label :config="{ x: d.x + 10, y: d.y - 8 }">
-          <v-tag :config="{ fill: '#ffffff', opacity: 0.9, cornerRadius: 3 }" />
-          <v-text :config="{ text: d.label, fontSize: 11, padding: 2, fill: '#1f2a24', fontFamily: FONT }" />
+          <v-tag :config="{ fill: '#fffdf8', opacity: 0.92, cornerRadius: 4 }" />
+          <v-text :config="{ text: d.label, fontSize: 11, padding: 3, fill: INK, fontFamily: FONT }" />
         </v-label>
       </v-group>
 
-      <v-label v-if="hover" :config="{ x: hover.x, y: hover.y }">
-        <v-tag :config="{ fill: '#1f2a24', opacity: 0.88, cornerRadius: 4 }" />
-        <v-text :config="{ text: hover.text, fontSize: 12, padding: 6, lineHeight: 1.4, fill: '#ffffff', fontFamily: FONT }" />
+      <v-label v-if="hover" :config="{ x: hover.x, y: hover.y, listening: false }">
+        <v-tag :config="{ fill: '#183a2b', opacity: 0.94, cornerRadius: 8, shadowColor: '#000', shadowBlur: 12, shadowOpacity: 0.25 }" />
+        <v-text :config="{ text: hover.text, fontSize: 12, padding: 9, lineHeight: 1.5, fill: '#f6efdc', fontFamily: FONT }" />
       </v-label>
 
       <v-rect
@@ -398,7 +435,7 @@ defineExpose({ exportJpeg })
         :config="{
           x: Math.min(band.x1, band.x2), y: Math.min(band.y1, band.y2),
           width: Math.abs(band.x2 - band.x1), height: Math.abs(band.y2 - band.y1),
-          fill: 'rgba(28, 100, 214, 0.08)', stroke: '#1c64d6', strokeWidth: 1, dash: [4, 4],
+          fill: 'rgba(46, 107, 79, 0.10)', stroke: '#2e6b4f', strokeWidth: 1.5, dash: [5, 4], listening: false,
         }"
       />
     </v-layer>

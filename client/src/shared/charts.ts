@@ -1,10 +1,14 @@
 // 图表的配色和样式。分类色按固定顺序分配（已经过色盲区分度检查），浅色用于普通页面，深色用于大屏
 import { use } from 'echarts/core'
-import { BarChart, LineChart } from 'echarts/charts'
-import { DataZoomComponent, GridComponent, LegendComponent, MarkLineComponent, TooltipComponent } from 'echarts/components'
+import { BarChart, HeatmapChart, LineChart, PieChart, RadarChart, ScatterChart } from 'echarts/charts'
+import {
+  DataZoomComponent, GridComponent, LegendComponent, MarkLineComponent, RadarComponent, TooltipComponent,
+  VisualMapComponent,
+} from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 
-use([BarChart, LineChart, GridComponent, TooltipComponent, LegendComponent, DataZoomComponent, MarkLineComponent, CanvasRenderer])
+use([BarChart, LineChart, PieChart, ScatterChart, RadarChart, HeatmapChart, GridComponent, TooltipComponent,
+  LegendComponent, DataZoomComponent, MarkLineComponent, RadarComponent, VisualMapComponent, CanvasRenderer])
 
 export interface ChartTheme {
   surface: string
@@ -21,35 +25,39 @@ export interface ChartTheme {
 }
 
 export const LIGHT: ChartTheme = {
-  surface: '#ffffff',
-  textPrimary: '#0b0b0b',
-  textSecondary: '#52514e',
-  textMuted: '#898781',
-  grid: '#e1e0d9',
-  axis: '#c3c2b7',
-  reference: '#a3a29b',
-  series: ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#6250d6', '#e34948'],
-  tooltipBg: '#ffffff',
-  tooltipBorder: 'rgba(11,11,11,0.10)',
+  surface: '#fffdf8',
+  textPrimary: '#1f2a22',
+  textSecondary: '#5c5b4d',
+  textMuted: '#978f7a',
+  grid: '#ece4d3',
+  axis: '#d5c8ab',
+  reference: '#b3aa94',
+  // 田野绿、麦穗金、石板蓝、陶土、橄榄、梅紫、青绿、玫瑰：彼此色相、明度都拉开
+  series: ['#2e6b4f', '#d09a2c', '#4b7a93', '#b0543a', '#8a9a2e', '#7d5a9e', '#3a9c8c', '#c46a86'],
+  tooltipBg: '#fffdf8',
+  tooltipBorder: 'rgba(120,100,60,0.18)',
 }
 
 export const DARK: ChartTheme = {
-  surface: '#1a1a19',
-  textPrimary: '#f0efec',
-  textSecondary: '#c3c2b7',
-  textMuted: '#898781',
-  grid: '#2c2c2a',
-  axis: '#383835',
-  reference: '#6f6e69',
-  series: ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9', '#e66767'],
-  tooltipBg: '#262624',
-  tooltipBorder: 'rgba(255,255,255,0.10)',
+  surface: '#0f1d16',
+  textPrimary: '#f3ead2',
+  textSecondary: '#c9bf9f',
+  textMuted: '#8d8670',
+  grid: 'rgba(226,182,90,0.10)',
+  axis: 'rgba(226,182,90,0.22)',
+  reference: '#7b7663',
+  // 大屏：麦穗金为主，配亮一些的绿、蓝、陶土
+  series: ['#e2b65a', '#5fbf8a', '#6fa8c8', '#e0815f', '#b8c45a', '#a98bd0', '#4fc1b0', '#e08aa6'],
+  tooltipBg: '#132219',
+  tooltipBorder: 'rgba(226,182,90,0.35)',
 }
 
 /** 同时显示的系列最多 8 个，再多颜色就分不清了 */
 export const MAX_SERIES = 8
 
-export const FONT = "system-ui, -apple-system, 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', sans-serif"
+export const FONT = "'Microsoft YaHei UI', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans CJK SC', system-ui, sans-serif"
+/** 图表标题、大数字用的宋体 */
+export const SERIF = "'Noto Serif SC', 'Songti SC', serif"
 
 export function axisStyle(t: ChartTheme) {
   return {
@@ -67,7 +75,7 @@ export function tooltipStyle(t: ChartTheme) {
     borderColor: t.tooltipBorder,
     borderWidth: 1,
     textStyle: { color: t.textPrimary, fontFamily: FONT, fontSize: 12 },
-    extraCssText: 'box-shadow: 0 4px 14px rgba(0,0,0,0.12); border-radius: 6px;',
+    extraCssText: 'box-shadow: 0 8px 24px -8px rgba(60,45,20,0.3); border-radius: 10px; padding: 8px 12px;',
   }
 }
 

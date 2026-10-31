@@ -43,6 +43,10 @@ const router = createRouter({
           meta: { roles: RECORDERS },
         },
         {
+          path: 'analysis', name: 'analysis', component: () => import('@/desktop/views/AnalysisView.vue'),
+          meta: { roles: RECORDERS },
+        },
+        {
           path: 'varieties', name: 'varieties', component: () => import('@/desktop/views/VarietiesView.vue'),
           meta: { roles: RECORDERS },
         },

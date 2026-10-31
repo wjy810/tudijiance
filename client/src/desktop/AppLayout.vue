@@ -3,14 +3,15 @@ import { computed, reactive, ref, type Component } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
-  ArrowDown, Collection, Cpu, DataAnalysis, Document, HomeFilled, Monitor, Tickets, Upload, User,
+  ArrowDown, Collection, Cpu, DataAnalysis, Document, HomeFilled, Monitor, PieChart, Tickets, Upload, User,
 } from '@element-plus/icons-vue'
 
 import { authApi, type Role } from '@/shared/api'
 import { ROLE } from '@/shared/labels'
 import { useAuthStore } from '@/stores/auth'
 import { getServerUrl } from '@/shared/settings'
-import BrandMark from '@/desktop/components/BrandMark.vue'
+import appIcon from '@/assets/art/app-icon.webp'
+import wheatArt from '@/assets/art/sidebar-wheat.webp'
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -32,6 +33,7 @@ const GROUPS: { title: string; items: MenuItem[] }[] = [
       { path: '/home', label: '首页', icon: HomeFilled, roles: RECORDERS },
       { path: '/data', label: '数据查看', icon: Document, roles: RECORDERS },
       { path: '/stats', label: '统计分析', icon: DataAnalysis, roles: RECORDERS },
+      { path: '/analysis', label: '自助分析', icon: PieChart, roles: RECORDERS },
     ],
   },
   {
@@ -105,8 +107,9 @@ async function savePassword() {
 <template>
   <div class="layout">
     <aside class="aside">
+      <img class="aside-art" :src="wheatArt" alt="" draggable="false" />
       <div class="brand">
-        <BrandMark :size="30" color="#e6c36a" />
+        <img class="brand-icon" :src="appIcon" alt="" />
         <div>
           <div class="brand-title">小麦实验田</div>
           <div class="brand-sub">品种试验数据平台</div>
@@ -186,90 +189,139 @@ async function savePassword() {
 }
 
 .aside {
-  width: 212px;
+  position: relative;
+  width: 224px;
   flex-shrink: 0;
-  background: linear-gradient(180deg, #17402d 0%, #123323 100%);
-  color: #d4e3d9;
+  overflow: hidden;
+  color: #d9e4d6;
   display: flex;
   flex-direction: column;
+  background:
+    radial-gradient(120% 60% at 0% 0%, rgba(226, 182, 90, 0.10), transparent 60%),
+    linear-gradient(180deg, #1f4836 0%, #183a2b 55%, #132f22 100%);
+  box-shadow: 1px 0 0 rgba(0, 0, 0, 0.12), 6px 0 24px -12px rgba(20, 40, 30, 0.5);
+  z-index: 2;
+}
+
+/* 底部的线描麦穗，压暗一点，不抢菜单 */
+.aside-art {
+  position: absolute;
+  left: -18px;
+  bottom: 40px;
+  width: 250px;
+  opacity: 0.22;
+  pointer-events: none;
+  user-select: none;
+  mask-image: linear-gradient(180deg, transparent 0%, #000 35%, #000 100%);
 }
 
 .brand {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 22px 20px 18px;
+  gap: 11px;
+  padding: 22px 20px 20px;
+  margin-bottom: 4px;
+}
+
+.brand::after {
+  content: '';
+  position: absolute;
+  left: 20px;
+  right: 20px;
+  bottom: 0;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(226, 182, 90, 0.5), rgba(226, 182, 90, 0));
+}
+
+.brand-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  box-shadow: 0 0 0 1px rgba(226, 182, 90, 0.35), 0 4px 10px rgba(0, 0, 0, 0.3);
 }
 
 .brand-title {
-  font-size: 17px;
-  font-weight: 600;
-  color: #ffffff;
-  letter-spacing: 1px;
+  font-family: var(--font-serif);
+  font-size: 18px;
+  font-weight: 700;
+  color: #fbf3df;
+  letter-spacing: 2px;
 }
 
 .brand-sub {
-  font-size: 12px;
-  color: #8fb09c;
-  margin-top: 2px;
+  font-size: 11.5px;
+  color: #9db8a6;
+  margin-top: 3px;
+  letter-spacing: 1px;
 }
 
 .nav {
+  position: relative;
   flex: 1;
   overflow: auto;
-  padding: 4px 12px;
+  padding: 14px 12px 4px;
 }
 
 .nav-group {
-  margin-bottom: 14px;
+  margin-bottom: 16px;
 }
 
 .nav-group-title {
-  font-size: 12px;
-  color: #6f9580;
-  padding: 0 10px 6px;
-  letter-spacing: 2px;
+  font-size: 11px;
+  color: #c9a85e;
+  opacity: 0.8;
+  padding: 0 12px 7px;
+  letter-spacing: 4px;
 }
 
 .nav-item {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 11px;
   height: 40px;
   padding: 0 12px;
-  margin-bottom: 2px;
-  border-radius: 8px;
-  color: #d4e3d9;
+  margin-bottom: 3px;
+  border-radius: 10px;
+  color: #d4e1d2;
   text-decoration: none;
   font-size: 14px;
   position: relative;
-  transition: background 0.15s;
+  transition: background 0.15s, color 0.15s;
 }
 
 .nav-item:hover {
-  background: rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.06);
   color: #ffffff;
 }
 
 .nav-item.active {
-  background: rgba(255, 255, 255, 0.13);
-  color: #ffffff;
+  background: linear-gradient(90deg, rgba(226, 182, 90, 0.22), rgba(226, 182, 90, 0.06));
+  color: #fff6dd;
   font-weight: 600;
+  box-shadow: inset 0 0 0 1px rgba(226, 182, 90, 0.18);
 }
 
 .nav-item.active::before {
   content: '';
   position: absolute;
   left: -12px;
-  top: 10px;
-  bottom: 10px;
+  top: 9px;
+  bottom: 9px;
   width: 3px;
   border-radius: 0 3px 3px 0;
-  background: #e6c36a;
+  background: var(--wheat-bright);
+  box-shadow: 0 0 8px rgba(226, 182, 90, 0.6);
 }
 
 .nav-item .el-icon {
   font-size: 16px;
+  opacity: 0.85;
+}
+
+.nav-item.active .el-icon {
+  color: var(--wheat-bright);
+  opacity: 1;
 }
 
 .user-dropdown {
@@ -277,27 +329,31 @@ async function savePassword() {
 }
 
 .user {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 10px;
-  margin: 8px 12px 14px;
+  margin: 8px 12px 16px;
   padding: 10px 12px;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.06);
+  border-radius: 12px;
+  background: rgba(10, 30, 20, 0.45);
+  border: 1px solid rgba(226, 182, 90, 0.16);
+  backdrop-filter: blur(4px);
   cursor: pointer;
-  width: 164px;
+  width: 174px;
 }
 
 .user:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(10, 30, 20, 0.6);
 }
 
 .avatar {
   width: 34px;
   height: 34px;
   border-radius: 50%;
-  background: #e6c36a;
-  color: #17402d;
+  background: linear-gradient(160deg, #f0cf83, #c8953a);
+  color: #2a2008;
+  font-family: var(--font-serif);
   font-weight: 700;
   display: flex;
   align-items: center;
@@ -311,7 +367,7 @@ async function savePassword() {
 }
 
 .user-name {
-  color: #ffffff;
+  color: #fbf3df;
   font-size: 14px;
   white-space: nowrap;
   overflow: hidden;
@@ -319,18 +375,18 @@ async function savePassword() {
 }
 
 .user-role {
-  color: #8fb09c;
+  color: #9db8a6;
   font-size: 12px;
 }
 
 .user-arrow {
-  color: #8fb09c;
+  color: #9db8a6;
 }
 
 .server {
   padding: 8px 16px 4px;
   font-size: 12px;
-  color: var(--app-text-muted);
+  color: var(--ink-3);
 }
 
 .main {

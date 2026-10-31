@@ -6,6 +6,17 @@ import { ElMessage } from 'element-plus'
 import { traitApi, type CustomTraitRequest, type TraitView } from '@/shared/api'
 
 const visible = defineModel<boolean>({ required: true })
+const props = defineProps<{
+  /** 导入表格时按某个表头新建：预先填好名称、类型、单位、选项，表头记成这个项目的别名 */
+  preset?: {
+    header: string
+    name: string
+    dataType: CustomTraitRequest['dataType']
+    unit: string | null
+    precisionDigits: number | null
+    options: string[]
+  } | null
+}>()
 const emit = defineEmits<{ created: [trait: TraitView] }>()
 
 const TYPES: { value: CustomTraitRequest['dataType']; label: string; hint: string }[] = [
@@ -26,9 +37,16 @@ const form = reactive({
 const saving = ref(false)
 
 watch(visible, (open) => {
-  if (open) {
-    Object.assign(form, { name: '', dataType: 'OPTION', unit: '', precisionDigits: 1, options: ['', ''], description: '' })
+  if (!open) {
+    return
   }
+  const p = props.preset
+  Object.assign(form, p
+    ? {
+        name: p.name, dataType: p.dataType, unit: p.unit ?? '', precisionDigits: p.precisionDigits ?? 1,
+        options: p.options.length >= 2 ? [...p.options] : ['', ''], description: '',
+      }
+    : { name: '', dataType: 'OPTION', unit: '', precisionDigits: 1, options: ['', ''], description: '' })
 })
 
 async function save() {
@@ -51,6 +69,7 @@ async function save() {
       precisionDigits: form.dataType === 'NUMBER' ? form.precisionDigits : null,
       options: form.dataType === 'OPTION' ? options : [],
       description: form.description.trim() || null,
+      aliases: props.preset?.header ? [props.preset.header] : [],
     })
     ElMessage.success(`已新增项目"${name}"`)
     visible.value = false
@@ -64,7 +83,11 @@ async function save() {
 </script>
 
 <template>
-  <el-dialog v-model="visible" title="新增自定义项目" width="520px" append-to-body>
+  <el-dialog v-model="visible" :title="preset ? '按表头新建录入项目' : '新增自定义项目'" width="520px" append-to-body>
+    <div v-if="preset" class="preset-hint">
+      表格里的"<b>{{ preset.header }}</b>"还没有对应的录入项目。已按表头和数据猜好了类型，确认后新建，
+      这个表头会记下来，下次导入自动认出。
+    </div>
     <el-form label-width="80px">
       <el-form-item label="名称" required>
         <el-input v-model="form.name" maxlength="50" placeholder="例如：田间积水情况" />
@@ -108,6 +131,17 @@ async function save() {
 </template>
 
 <style scoped>
+.preset-hint {
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--wheat-soft);
+  border: 1px solid #ead5a8;
+  color: #6b5216;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
 .full {
   width: 100%;
 }

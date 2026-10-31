@@ -38,12 +38,13 @@ const gap = computed(() => (props.cols > 20 ? 1 : 3))
 
 .cell {
   aspect-ratio: 1.5;
-  border-radius: 2px;
+  border-radius: 3px;
   min-width: 0;
+  box-shadow: inset 0 0 0 1px rgba(80, 60, 20, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.5);
 }
 
 .cell.alert {
-  outline: 1.5px solid #c94040;
+  outline: 1.5px solid var(--clay);
   outline-offset: -1.5px;
 }
 </style>

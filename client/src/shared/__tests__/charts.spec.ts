@@ -39,17 +39,17 @@ describe('format', () => {
 
 describe('sequentialColor', () => {
   it('maps the ends of the range to the lightest and darkest step', () => {
-    expect(sequentialColor(0)).toBe('#e6f0fc')
-    expect(sequentialColor(1)).toBe('#3987e5')
+    expect(sequentialColor(0)).toBe('#f4eedc')
+    expect(sequentialColor(1)).toBe('#77ad7c')
   })
 
   it('clamps values outside 0..1 and treats NaN as 0', () => {
-    expect(sequentialColor(-2)).toBe('#e6f0fc')
-    expect(sequentialColor(5)).toBe('#3987e5')
-    expect(sequentialColor(Number.NaN)).toBe('#e6f0fc')
+    expect(sequentialColor(-2)).toBe('#f4eedc')
+    expect(sequentialColor(5)).toBe('#77ad7c')
+    expect(sequentialColor(Number.NaN)).toBe('#f4eedc')
   })
 
   it('interpolates between steps', () => {
-    expect(sequentialColor(0.5)).toBe('#9ec5f4')
+    expect(sequentialColor(0.5)).toBe('#c3d9a6')
   })
 })

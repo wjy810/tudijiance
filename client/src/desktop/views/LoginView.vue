@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Lock, Setting, User } from '@element-plus/icons-vue'
 
 import { useAuthStore } from '@/stores/auth'
 import { getServerUrl, setServerUrl } from '@/shared/settings'
-import BrandMark from '@/desktop/components/BrandMark.vue'
+import heroArt from '@/assets/art/login-hero.webp'
+import appIcon from '@/assets/art/app-icon.webp'
+import divider from '@/assets/art/divider-wheat.webp'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -34,47 +36,46 @@ async function submit() {
   }
 }
 
-// 左侧装饰：一块实验田的网格，颜色表示不同状态
-const COLORS = ['#3e8f63', '#4f9f72', '#5aa97c', '#e6c36a', '#3e8f63', '#d9a441', '#4f9f72', '#6fb58c']
-const cells = computed(() =>
-  Array.from({ length: 6 * 9 }, (_, i) => ({
-    i,
-    color: COLORS[(i * 7 + Math.floor(i / 9) * 3) % COLORS.length],
-    delay: `${(i % 9) * 60 + Math.floor(i / 9) * 90}ms`,
-  })),
-)
+const FEATURES = [
+  { title: '点选小区就能录', desc: '生育期、病害、产量按国家标准记载，能选的都做成按钮' },
+  { title: '历史表格一键导入', desc: '按行按列对应字段，和录入项目自动对上' },
+  { title: '自己选字段做图表', desc: '折线、柱状、饼图，品种对比、历年变化一目了然' },
+]
 </script>
 
 <template>
   <div class="login-page">
-    <section class="hero">
+    <section class="hero" :style="{ backgroundImage: `url(${heroArt})` }">
+      <div class="hero-shade" />
       <div class="hero-brand">
-        <BrandMark :size="40" color="#e6c36a" />
+        <img :src="appIcon" alt="" class="hero-icon" />
         <div>
           <div class="hero-name">小麦实验田</div>
           <div class="hero-sub">品种试验数据平台</div>
         </div>
       </div>
 
-      <div class="field-art" aria-hidden="true">
-        <div v-for="c in cells" :key="c.i" class="plot" :style="{ background: c.color, animationDelay: c.delay }" />
-      </div>
-
       <div class="hero-copy">
-        <h1>在平面图上记录每一个小区</h1>
-        <ul>
-          <li>选中小区直接录入，生育期、病害、产量按国家标准记载</li>
-          <li>自动按品种汇总，算出比对照增减和位次</li>
-          <li>历年数据对比，数据大屏实时展示</li>
-        </ul>
+        <div class="eyebrow">WHEAT VARIETY TRIALS</div>
+        <h1>一块田，<br />每一个小区都有记录</h1>
+        <div class="features">
+          <div v-for="(f, i) in FEATURES" :key="f.title" class="feature">
+            <span class="feature-no">0{{ i + 1 }}</span>
+            <div>
+              <div class="feature-title">{{ f.title }}</div>
+              <div class="feature-desc">{{ f.desc }}</div>
+            </div>
+          </div>
+        </div>
       </div>
-      <div class="hero-foot">按 NY/T 1301—2025《农作物品种试验规范 小麦》记载</div>
+      <div class="hero-foot">按 NY/T 1301—2025《农作物品种试验与信息化技术规程 小麦》记载</div>
     </section>
 
     <section class="form-side">
       <div class="form-box">
-        <h2>登录</h2>
-        <p class="muted">用老师分配的账号登录</p>
+        <h2>欢迎回来</h2>
+        <img :src="divider" alt="" class="divider" />
+        <p class="lead">用老师分配的账号登录</p>
         <el-form label-position="top" size="large" @submit.prevent="submit">
           <el-form-item label="用户名">
             <el-input v-model="form.username" :prefix-icon="User" autocomplete="username" placeholder="例如学号或工号" />
@@ -102,149 +103,188 @@ const cells = computed(() =>
 .login-page {
   height: 100%;
   display: flex;
-  background: var(--app-surface);
 }
 
 .hero {
-  flex: 1.15;
-  background: radial-gradient(circle at 20% 15%, #24573c 0%, #17402d 45%, #102e20 100%);
-  color: #e5efe8;
+  position: relative;
+  flex: 1.2;
+  min-width: 0;
+  overflow: hidden;
   padding: 44px 56px;
   display: flex;
   flex-direction: column;
+  color: #f6efdc;
+  background-size: cover;
+  background-position: center 30%;
+}
+
+/* 从左下的深绿渐到透明，文字压得住，又能看到麦田 */
+.hero-shade {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(180deg, rgba(14, 36, 26, 0.55) 0%, rgba(14, 36, 26, 0.05) 30%, rgba(14, 36, 26, 0.15) 55%, rgba(12, 30, 22, 0.92) 100%),
+    linear-gradient(90deg, rgba(12, 30, 22, 0.55) 0%, rgba(12, 30, 22, 0) 60%);
+}
+
+.hero > *:not(.hero-shade) {
   position: relative;
-  overflow: hidden;
-  min-width: 0;
 }
 
 .hero-brand {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
+}
+
+.hero-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  box-shadow: 0 0 0 1px rgba(226, 182, 90, 0.4), 0 6px 18px rgba(0, 0, 0, 0.35);
 }
 
 .hero-name {
-  font-size: 22px;
-  font-weight: 600;
-  color: #fff;
-  letter-spacing: 2px;
+  font-family: var(--font-serif);
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: 3px;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
 }
 
 .hero-sub {
+  margin-top: 3px;
   font-size: 13px;
-  color: #9fc1ad;
+  letter-spacing: 2px;
+  color: #e6d7ad;
 }
 
-.field-art {
-  margin: 56px 0 40px;
-  display: grid;
-  grid-template-columns: repeat(9, 1fr);
-  gap: 6px;
-  max-width: 520px;
-  transform: perspective(900px) rotateX(28deg) rotateZ(-6deg);
-  transform-origin: left center;
+.hero-copy {
+  margin-top: auto;
+  max-width: 560px;
 }
 
-.plot {
-  aspect-ratio: 1.6;
-  border-radius: 4px;
-  opacity: 0;
-  animation: grow 0.6s ease-out forwards;
+.eyebrow {
+  font-size: 11px;
+  letter-spacing: 5px;
+  color: var(--wheat-bright);
+  margin-bottom: 12px;
 }
 
-@keyframes grow {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 0.92;
-    transform: none;
-  }
+h1 {
+  margin: 0 0 26px;
+  font-family: var(--font-serif);
+  font-weight: 700;
+  font-size: 40px;
+  line-height: 1.35;
+  letter-spacing: 2px;
+  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.45);
 }
 
-.hero-copy h1 {
-  font-size: 30px;
+.features {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.feature {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.feature-no {
+  font-family: var(--font-serif);
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--wheat-bright);
+  padding-top: 1px;
+  width: 22px;
+}
+
+.feature-title {
   font-weight: 600;
-  color: #fff;
-  margin: 0 0 18px;
-  letter-spacing: 1px;
-}
-
-.hero-copy ul {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.hero-copy li {
-  padding: 6px 0 6px 22px;
-  position: relative;
-  color: #c9dccf;
   font-size: 15px;
 }
 
-.hero-copy li::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 14px;
-  width: 8px;
-  height: 8px;
-  border-radius: 2px;
-  background: #e6c36a;
+.feature-desc {
+  margin-top: 2px;
+  font-size: 13px;
+  color: rgba(246, 239, 220, 0.72);
 }
 
 .hero-foot {
-  margin-top: auto;
+  margin-top: 34px;
   font-size: 12px;
-  color: #7fa58f;
+  color: rgba(246, 239, 220, 0.55);
 }
 
 .form-side {
   flex: 1;
+  min-width: 420px;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 40px;
-  min-width: 420px;
+  background: radial-gradient(90% 70% at 70% 20%, rgba(255, 253, 248, 0.9), rgba(244, 239, 227, 0));
 }
 
 .form-box {
-  width: 360px;
+  width: 380px;
+  padding: 38px 36px 30px;
+  border-radius: 20px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-lift);
 }
 
-.form-box h2 {
+h2 {
   margin: 0;
+  text-align: center;
+  font-family: var(--font-serif);
   font-size: 26px;
-  font-weight: 600;
+  font-weight: 700;
+  color: var(--forest);
+  letter-spacing: 3px;
 }
 
-.form-box > .muted {
-  margin: 8px 0 28px;
+.divider {
+  display: block;
+  width: 220px;
+  margin: 10px auto 6px;
+  opacity: 0.9;
+}
+
+.lead {
+  margin: 0 0 22px;
+  text-align: center;
+  color: var(--ink-2);
+  font-size: 13px;
 }
 
 .submit {
   width: 100%;
+  height: 46px;
   margin-top: 8px;
-  height: 44px;
   font-size: 16px;
+  letter-spacing: 6px;
+  border-radius: 10px;
 }
 
 .server-toggle {
-  margin-top: 18px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 18px auto 0;
+  padding: 0;
   border: none;
   background: none;
-  color: var(--app-text-muted);
   font-size: 12px;
+  color: var(--ink-3);
   cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 0;
 }
 
 .server-toggle:hover {
-  color: var(--app-accent);
+  color: var(--green);
 }
 </style>

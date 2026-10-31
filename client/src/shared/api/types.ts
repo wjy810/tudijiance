@@ -155,6 +155,8 @@ export interface TraitOption {
 export interface TraitView {
   trait: TraitDef
   options: TraitOption[]
+  /** 表头别名（规范化后的写法）：导入表格时按它认出这一列是这个项目 */
+  aliases: string[]
 }
 
 export interface SensorMetric {
@@ -233,6 +235,8 @@ export interface CustomTraitRequest {
   precisionDigits?: number | null
   options?: string[]
   description?: string | null
+  /** 同时记下的表头别名 */
+  aliases?: string[]
 }
 
 // ---------- 录入的数据 ----------
@@ -454,7 +458,7 @@ export interface ImportPreviewSheet {
   name: string
   rowCount: number
   colCount: number
-  /** 前 40 行，每个格子都是文字 */
+  /** 整张表，每个格子都是文字 */
   rows: string[][]
 }
 
@@ -462,35 +466,115 @@ export interface ImportPreview {
   sheets: ImportPreviewSheet[]
 }
 
-/** 列号从 0 开始，表头行从 1 开始 */
+/** COLUMNS：每列一个字段，第一行是表头；ROWS：每行一个字段，第一列是表头 */
+export type ImportOrientation = 'COLUMNS' | 'ROWS'
+
+export type ImportRole = 'PLOT_CODE' | 'VARIETY' | 'REPLICATE' | 'OBSERVED_ON' | 'TRAIT'
+
+/** 选中的区域，行号、列号都从 0 开始，含首尾 */
+export interface ImportRange {
+  top: number
+  left: number
+  bottom: number
+  right: number
+}
+
+/** 区域里第 index 个字段的用途 */
+export interface ImportFieldMapping {
+  index: number
+  role: ImportRole
+  traitId?: number | null
+}
+
+/** 页面上改过的格子（工作表里的行号、列号，从 0 开始） */
+export interface CellEdit {
+  row: number
+  col: number
+  value: string
+}
+
 export interface ImportMapping {
   trialId: number
   sheet: number
-  headerRow: number
-  plotCodeCol: number | null
-  varietyCol: number | null
-  replicateCol: number | null
-  observedOnCol: number | null
+  range: ImportRange
+  orientation: ImportOrientation
+  fields: ImportFieldMapping[]
   observedOn: string | null
   assignLayout: boolean
   createVarieties: boolean
-  columns: { col: number; traitId: number }[]
+  edits: CellEdit[]
+  rememberHeaders: boolean
   dryRun: boolean
 }
 
 export interface ImportCellError {
+  /** Excel 行号（从 1 开始）和列字母 */
   row: number
   col: string
+  /** 工作表里的行号、列号（从 0 开始），用来定位格子 */
+  r: number
+  c: number
   message: string
 }
 
 export interface ImportResult {
   dryRun: boolean
-  rows: number
+  records: number
   created: number
   duplicates: number
   errorCount: number
   errors: ImportCellError[]
   newVarieties: string[]
   layoutChanges: number
+  aliasesRemembered: number
+}
+
+// ---------- 自助分析 ----------
+
+export type AnalysisDimension = 'VARIETY' | 'YEAR' | 'REPLICATE' | 'PLOT' | 'FIELD' | 'TRAIT'
+export type AnalysisAgg = 'AVG' | 'SUM' | 'MAX' | 'MIN' | 'MEDIAN' | 'COUNT' | 'CV'
+
+export interface AnalysisDimensionSpec {
+  type: AnalysisDimension
+  traitId?: number | null
+}
+
+export interface AnalysisMeasureSpec {
+  /** 不填且汇总方式是 COUNT 时数小区个数 */
+  traitId?: number | null
+  agg: AnalysisAgg
+}
+
+export interface AnalysisQuery {
+  fieldId?: number | null
+  years?: number[]
+  trialIds?: number[]
+  varietyIds?: number[]
+  replicates?: number[]
+  plotIds?: number[]
+  dimensions: AnalysisDimensionSpec[]
+  measures: AnalysisMeasureSpec[]
+}
+
+export interface AnalysisColumn {
+  key: string
+  label: string
+  unit: string | null
+  kind: 'DIMENSION' | 'MEASURE'
+}
+
+export interface AnalysisResult {
+  columns: AnalysisColumn[]
+  /** 每行先是各分组的名称，再是各统计值（没有数据时为 null） */
+  rows: (string | number | null)[][]
+  records: number
+}
+
+export interface SavedChart<C = unknown> {
+  id: number
+  name: string
+  config: C
+  createdBy: number
+  createdByName: string | null
+  updatedAt: string
 }

@@ -30,6 +30,13 @@ onBeforeUnmount(() => {
   observer?.disconnect()
   chart.value?.dispose()
 })
+
+/** 导出图片用：图表画成 png 的 data URL */
+function toDataURL(background = '#fffdf8'): string | null {
+  return chart.value?.getDataURL({ type: 'png', pixelRatio: 2, backgroundColor: background }) ?? null
+}
+
+defineExpose({ toDataURL })
 </script>
 
 <template>

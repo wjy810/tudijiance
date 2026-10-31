@@ -7,7 +7,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  ArrowDown, ArrowLeft, Close, EditPen, QuestionFilled, Rank, Setting, Warning, ZoomIn, ZoomOut,
+  ArrowDown, ArrowLeft, Close, EditPen, PieChart, QuestionFilled, Rank, Setting, Warning, ZoomIn, ZoomOut,
 } from '@element-plus/icons-vue'
 
 import {
@@ -16,7 +16,7 @@ import {
   type TrialStatus,
 } from '@/shared/api'
 import { PLOT_KIND, PLOT_STATUS, TRAIT_CATEGORY, replicateLabel } from '@/shared/labels'
-import { SEQUENTIAL_GRADIENT, sequentialColor } from '@/shared/colors'
+import { REPLICATE_COLORS, SEQUENTIAL_GRADIENT, VARIETY_COLORS, sequentialColor } from '@/shared/colors'
 import { rememberTrial } from '@/shared/composables/useTrialPicker'
 import { useAuthStore } from '@/stores/auth'
 import { useCatalogStore } from '@/stores/catalog'
@@ -201,9 +201,6 @@ function fitWidth() {
   zoom.value = Math.max(0.5, Math.min(1, Math.floor(((el.clientWidth - 8) / gridWidth) * 100) / 100))
 }
 
-const VARIETY_COLORS = ['#cfe3f6', '#f7dcc8', '#c9eadb', '#f6e7b5', '#f2d3e1', '#d5ebcb', '#ddd7f3', '#f4d1d1',
-  '#d3e9ee', '#ece3cf', '#e3e8d0', '#e2e2e2']
-const REPLICATE_COLORS = ['#cfe3f6', '#c9eadb', '#f7dcc8', '#ddd7f3', '#f6e7b5', '#f2d3e1']
 
 const varietyColor = computed(() => {
   const ids = [...new Set((layout.value?.plantings ?? []).map((p) => p.varietyId).filter((v): v is number => !!v))]
@@ -246,7 +243,7 @@ function metricFill(plotId: number): string {
   const v = traitValues.value.get(plotId)
   const r = metricRange.value
   if (!v || !r) {
-    return '#f6f7f4'
+    return '#f1ebdd'
   }
   return sequentialColor(r.max === r.min ? 1 : (v.value - r.min) / (r.max - r.min))
 }
@@ -264,14 +261,14 @@ function fillOf(p: Plot): string {
     return PLOT_STATUS[plotStatus(p)].color
   }
   if (display.value.view === 'variety') {
-    return planting?.varietyId ? varietyColor.value.get(planting.varietyId)! : '#f6f7f4'
+    return planting?.varietyId ? varietyColor.value.get(planting.varietyId)! : '#f1ebdd'
   }
   if (display.value.view === 'trait') {
     return metricFill(p.id)
   }
   return planting?.replicateNo
     ? REPLICATE_COLORS[(planting.replicateNo - 1) % REPLICATE_COLORS.length]!
-    : '#f6f7f4'
+    : '#f1ebdd'
 }
 
 const cells = computed<GridCell[]>(() =>
@@ -465,6 +462,14 @@ const drawerRef = ref<InstanceType<typeof PlotDetailDrawer> | null>(null)
 const entryOpen = ref(false)
 const entryPlots = ref<Plot[]>([])
 const entryTraitId = ref<number | null>(null)
+
+/** 用选中的小区做图表：带着实验田、试验和小区去自助分析 */
+function analyzeSelection() {
+  router.push({
+    path: '/analysis',
+    query: { fieldId: String(fieldId.value), trialId: trialId.value ? String(trialId.value) : undefined, plots: selected.value.join(',') },
+  })
+}
 
 function openDetail(plotId: number) {
   if (!trialId.value) {
@@ -873,6 +878,7 @@ const metricGroups = computed(() => {
                 <el-button :icon="Warning" @click="toggleAbnormal(selectedPlots)">{{ allAbnormal ? '取消异常' : '标记异常' }}</el-button>
               </template>
               <el-button v-if="selected.length === 1" @click="openDetail(selected[0]!)">查看详情</el-button>
+              <el-button v-if="selected.length > 1" :icon="PieChart" @click="analyzeSelection">做图表</el-button>
             </template>
             <template v-else>
               <el-button type="primary" @click="openLayoutDialog('variety')">分配品种</el-button>
@@ -899,7 +905,7 @@ const metricGroups = computed(() => {
               <div class="ramp-labels num"><span>{{ metricRange.min }}</span><span>{{ metricRange.max }}</span></div>
             </template>
             <div v-else class="hint">这个试验还没有这项数据</div>
-            <div class="legend-row"><span class="swatch" style="background: #f6f7f4" />无数据</div>
+            <div class="legend-row"><span class="swatch" style="background: #f1ebdd" />无数据</div>
           </template>
           <template v-else>
             <div v-for="l in legend" :key="l.label" class="legend-row">
@@ -910,7 +916,7 @@ const metricGroups = computed(() => {
           <div class="legend-sep" />
           <div class="legend-row"><span class="dot" />今天录过数据</div>
           <div class="legend-row"><b class="ck">CK</b>对照品种</div>
-          <div class="legend-row"><b class="ck">!</b>有异常</div>
+          <div class="legend-row"><b class="ck alert">!</b>有异常</div>
         </section>
 
         <section v-if="trial" class="panel panel-pad">
@@ -1020,8 +1026,11 @@ const metricGroups = computed(() => {
 
 .head h2 {
   margin: 0;
-  font-size: 22px;
-  font-weight: 600;
+  font-family: var(--font-serif);
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--forest);
+  letter-spacing: 1px;
 }
 
 .head-right {
@@ -1061,8 +1070,10 @@ const metricGroups = computed(() => {
 }
 
 .stat-value {
-  font-size: 22px;
-  font-weight: 600;
+  font-family: var(--font-serif);
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--forest);
   display: flex;
   align-items: center;
   gap: 4px;
@@ -1085,12 +1096,14 @@ const metricGroups = computed(() => {
 .stage-badge {
   align-self: flex-start;
   margin-top: 3px;
-  background: var(--app-wheat-soft);
-  color: #8a6416;
+  background: linear-gradient(180deg, #f8ebc9, #f0dca9);
+  border: 1px solid #e5c98a;
+  color: #7d5814;
   border-radius: 999px;
-  padding: 3px 14px;
+  padding: 3px 16px;
+  font-family: var(--font-serif);
   font-size: 15px;
-  font-weight: 600;
+  font-weight: 700;
 }
 
 /* 平面图 */
@@ -1115,7 +1128,8 @@ const metricGroups = computed(() => {
   align-items: center;
   gap: 10px;
   padding: 10px 14px;
-  border-bottom: 1px solid var(--app-border);
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-2);
   flex-wrap: wrap;
 }
 
@@ -1139,10 +1153,11 @@ const metricGroups = computed(() => {
   flex: 1;
   overflow: auto;
   min-height: 0;
-  padding-bottom: 72px;
-  background:
-    linear-gradient(90deg, rgba(47, 125, 85, 0.03) 1px, transparent 1px) 0 0 / 24px 24px,
-    linear-gradient(rgba(47, 125, 85, 0.03) 1px, transparent 1px) 0 0 / 24px 24px;
+  padding: 8px 8px 76px;
+  /* 小区之间露出田埂的土色 */
+  background: #e9e1cd url('@/assets/art/soil.jpg') repeat;
+  background-size: 256px;
+  box-shadow: inset 0 2px 10px rgba(80, 60, 20, 0.12);
 }
 
 .grid-scroll.panning {
@@ -1157,11 +1172,12 @@ const metricGroups = computed(() => {
   display: flex;
   align-items: center;
   gap: 8px;
-  background: #1f3a2b;
-  color: #fff;
-  border-radius: 12px;
+  background: linear-gradient(180deg, #24513d, #1a3e2e);
+  border: 1px solid rgba(226, 182, 90, 0.35);
+  color: #fbf3df;
+  border-radius: 14px;
   padding: 8px 10px 8px 18px;
-  box-shadow: 0 8px 24px rgba(16, 46, 32, 0.25);
+  box-shadow: 0 14px 34px -10px rgba(16, 46, 32, 0.55);
   white-space: nowrap;
 }
 
@@ -1174,8 +1190,9 @@ const metricGroups = computed(() => {
 }
 
 .action-bar .sel b {
-  color: #e6c36a;
-  font-size: 16px;
+  color: var(--wheat-bright);
+  font-family: var(--font-serif);
+  font-size: 18px;
 }
 
 .action-bar .clear {
@@ -1187,12 +1204,13 @@ const metricGroups = computed(() => {
   left: 50%;
   bottom: 18px;
   transform: translateX(-50%);
-  color: var(--app-text-muted);
+  color: var(--ink-2);
   font-size: 13px;
-  background: rgba(255, 255, 255, 0.9);
-  padding: 6px 14px;
+  background: rgba(255, 253, 248, 0.92);
+  padding: 7px 16px;
   border-radius: 999px;
-  border: 1px dashed var(--app-border);
+  border: 1px solid var(--line-strong);
+  box-shadow: var(--shadow);
 }
 
 .rise-enter-active,
@@ -1286,19 +1304,34 @@ const metricGroups = computed(() => {
   border: 1px solid rgba(0, 0, 0, 0.08);
 }
 
+.swatch {
+  border-radius: 4px;
+}
+
 .dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #1c7ed6;
+  background: var(--green);
+  box-shadow: 0 0 0 1.5px #fff, 0 0 0 2.5px rgba(46, 107, 79, 0.25);
   margin: 0 5px;
 }
 
+/* 和平面图上的角标一样：金色小牌子 */
 .ck {
-  color: #c92a2a;
-  font-size: 12px;
-  width: 18px;
+  min-width: 18px;
+  padding: 0 3px;
+  border-radius: 5px;
+  background: #d9a748;
+  color: #3b2a0c;
+  font-size: 10px;
+  line-height: 16px;
   text-align: center;
+}
+
+.ck.alert {
+  background: var(--clay);
+  color: #fff6ee;
 }
 
 .link-row {

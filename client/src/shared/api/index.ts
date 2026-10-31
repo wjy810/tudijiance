@@ -1,5 +1,7 @@
-import { download, http } from './http'
+import { download, downloadPost, http } from './http'
 import type {
+  AnalysisQuery,
+  AnalysisResult,
   Bucket,
   CustomTraitRequest,
   EntryRequest,
@@ -11,6 +13,7 @@ import type {
   ObservationQuery,
   ObservationView,
   PageResult,
+  SavedChart,
   PlotDetail,
   PlotValue,
   Screen,
@@ -87,6 +90,7 @@ export const traitApi = {
   setEnabled: (id: number, enabled: boolean) => data<void>(http.put(`/api/traits/${id}/enabled`, { enabled })),
   createCustom: (req: CustomTraitRequest) => data<TraitView>(http.post('/api/traits', req)),
   removeCustom: (id: number) => data<void>(http.delete(`/api/traits/${id}`)),
+  setAliases: (id: number, aliases: string[]) => data<string[]>(http.put(`/api/traits/${id}/aliases`, { aliases })),
 }
 
 export const observationApi = {
@@ -130,6 +134,16 @@ export const importApi = {
     return data<ImportResult>(http.post('/api/imports/run', form, { timeout: 300000 }))
   },
   template: (trialId: number, filename: string) => download('/api/imports/template', { trialId }, filename),
+}
+
+export const analysisApi = {
+  query: (q: AnalysisQuery) => data<AnalysisResult>(http.post('/api/analysis/query', q, { timeout: 60000 })),
+  exportExcel: (q: AnalysisQuery, filename: string) => downloadPost('/api/analysis/export', q, filename),
+  charts: <C>() => data<SavedChart<C>[]>(http.get('/api/analysis/charts')),
+  createChart: <C>(name: string, config: C) => data<SavedChart<C>>(http.post('/api/analysis/charts', { name, config })),
+  updateChart: <C>(id: number, name: string, config: C) =>
+    data<SavedChart<C>>(http.put(`/api/analysis/charts/${id}`, { name, config })),
+  removeChart: (id: number) => data<void>(http.delete(`/api/analysis/charts/${id}`)),
 }
 
 export const userApi = {

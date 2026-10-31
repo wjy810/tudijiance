@@ -56,19 +56,30 @@ export function saveFile(data: Blob | string, filename: string): void {
  */
 export async function download(url: string, params: object, filename: string): Promise<void> {
   const res = await http.get<Blob>(url, { params, responseType: 'blob', validateStatus: () => true })
-  if (res.status !== 200) {
-    if (res.status === 401 && onUnauthorized) {
+  await saveDownload(res.status, res.data, filename)
+}
+
+/** 和 download 一样，只是参数放在请求体里（查询条件比较复杂时） */
+export async function downloadPost(url: string, body: object, filename: string): Promise<void> {
+  const res = await http.post<Blob>(url, body, { responseType: 'blob', validateStatus: () => true, timeout: 60000 })
+  await saveDownload(res.status, res.data, filename)
+}
+
+/** 状态码不是 200 时，服务器返回的是 JSON，读出其中的提示文字 */
+async function saveDownload(status: number, data: Blob, filename: string): Promise<void> {
+  if (status !== 200) {
+    if (status === 401 && onUnauthorized) {
       onUnauthorized()
     }
-    let message = `下载失败（${res.status}）`
+    let message = `下载失败（${status}）`
     try {
-      message = (JSON.parse(await res.data.text()) as { message?: string }).message ?? message
+      message = (JSON.parse(await data.text()) as { message?: string }).message ?? message
     } catch {
       // 不是 JSON，用默认提示
     }
     throw new Error(message)
   }
-  saveFile(res.data, filename)
+  saveFile(data, filename)
 }
 
 function errorMessage(error: AxiosError<{ message?: string }>): string {

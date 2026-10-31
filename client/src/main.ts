@@ -1,4 +1,5 @@
 import 'element-plus/dist/index.css'
+import './fonts.css'
 import './styles.css'
 
 import { createApp } from 'vue'
