@@ -1,0 +1,3 @@
+#!/bin/sh
+# 在 Linux、macOS 上打 Windows 安装包时，代替 wine 的小脚本，见 extract-uninstaller.cjs
+exec node "$(dirname "$0")/extract-uninstaller.cjs" "$@"

@@ -643,14 +643,14 @@ function setChartType(t: ChartType) {
 
 .types {
   display: flex;
+  flex-wrap: wrap;
   gap: 4px;
   padding: 6px;
-  overflow-x: auto;
 }
 
 .type {
   flex: 1;
-  min-width: 64px;
+  min-width: 56px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -863,5 +863,32 @@ function setChartType(t: ChartType) {
   display: flex;
   gap: 6px;
   padding: 0 4px;
+}
+
+/* 窗口窄的时候（例如 1440 宽以下），右边的常用分析、保存的图表移到图的下面 */
+@media (max-width: 1500px) {
+  .analysis {
+    grid-template-columns: 236px minmax(0, 1fr);
+    height: auto;
+    min-height: 100%;
+  }
+
+  .left {
+    max-height: calc(100vh - 44px);
+    position: sticky;
+    top: 22px;
+  }
+
+  .right {
+    grid-column: 2;
+    display: grid;
+    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+    align-items: start;
+    overflow: visible;
+  }
+
+  .tip {
+    grid-column: 1 / -1;
+  }
 }
 </style>
