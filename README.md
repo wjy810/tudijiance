@@ -4,6 +4,14 @@
 
 需求详见 [docs/需求分析.md](docs/需求分析.md)。
 
+## 当前进度
+
+第一期的后端和电脑端大部分已完成，包括平面图录入、布置试验、数据查看、统计、大屏和历史表格导入。
+
+还没做的有：手机 APP（主要录入端）和离线上传、土壤和气象数据录入、功能模块管理、系统维护、部署配置。
+
+逐项对照见[技术选型第 10 节](docs/技术选型.md#10-当前进度)。
+
 ## 目录
 
 ```
@@ -40,3 +48,13 @@ cd client && pnpm install && pnpm dev:electron
 只在浏览器里看用 `pnpm dev`，打开 http://localhost:5173 。打 Windows 安装包用 `pnpm dist:win`。
 
 登录后先用管理员新建老师、学生、游客账号：老师建实验田和试验、分配品种；老师和学生在平面图上选中小区录入数据；游客只能看数据大屏。
+
+## 测试
+
+```bash
+cd server && mvn test
+```
+
+```bash
+cd client && pnpm test && pnpm type-check
+```
