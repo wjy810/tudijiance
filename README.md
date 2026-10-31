@@ -9,7 +9,9 @@
 第一期的后端和电脑端大部分已完成：平面图录入、布置试验、数据查看、统计、自助分析（自己选字段做折线、柱状、饼图等）、数据大屏，
 以及历史表格导入（框选区域、按行或按列、对应到录入项目，表头会记成录入项目的别名）。界面按"麦田手记"风格做了改版。
 
-还没做的有：手机 APP（主要录入端）和离线上传、土壤和气象数据录入、功能模块管理、系统维护、部署配置。
+手机端（安卓 APP）有了第一版：触屏选小区录入，没信号时先存在手机上，联网后自动上传。
+
+还没做的有：土壤和气象数据录入、功能模块管理、系统维护、部署配置；手机端还要在真机上测试。
 
 逐项对照见[技术选型第 10 节](docs/技术选型.md#10-当前进度)。
 
@@ -24,7 +26,7 @@ docs/
   老师需求聊天记录.webp                        原始需求（微信聊天截图）
   参考论文_农用大棚环境监控设备综合管理系统.docx   参考论文
 server/                                       后端（Spring Boot 4 + MyBatis-Plus + MySQL）
-client/                                       电脑端（Vue 3 + Element Plus + Electron）
+client/                                       电脑端（Vue 3 + Element Plus + Electron）和手机端（Vant + Capacitor，src/mobile、android/）
 scripts/seed-demo.mjs                         本地演示数据（实验田、品种、4 个年度的试验和数据）
 reference-code/                               参考论文对应的代码，仅供参考
   final-iot-web/                              前端：Vue 3 + Element Plus + ECharts
@@ -62,6 +64,18 @@ cd client && pnpm dist:win
 ```
 
 安装后第一次登录时，在登录页的"服务器设置"里填上服务器地址。
+
+手机端在浏览器里看（手机尺寸），打开 http://localhost:5174 ：
+
+```bash
+cd client && pnpm dev:mobile
+```
+
+打安卓 APK（需要 JDK 21 和 Android SDK，`client/android/local.properties` 里写 `sdk.dir=Android SDK 的路径`），输出 `client/android/app/build/outputs/apk/debug/app-debug.apk`：
+
+```bash
+cd client && pnpm android:apk
+```
 
 登录后先用管理员新建老师、学生、游客账号：老师建实验田和试验、分配品种；老师和学生在平面图上选中小区录入数据；游客只能看数据大屏。
 
