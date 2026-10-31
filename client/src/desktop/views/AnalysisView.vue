@@ -874,7 +874,7 @@ function setChartType(t: ChartType) {
   }
 
   .left {
-    max-height: calc(100vh - 44px);
+    max-height: calc(100vh - 44px - var(--topbar-h, 0px));
     position: sticky;
     top: 22px;
   }

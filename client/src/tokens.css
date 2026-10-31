@@ -1,38 +1,121 @@
-/* 两端共用的设计变量："麦田手记"的颜色、字体、圆角、阴影。电脑端 styles.css 和手机端 mobile.css 都引入它 */
+/*
+ * 设计令牌："麦田手记"。电脑端 styles.css 和手机端 mobile.css 都引入它。
+ * 用法和取值说明见 docs/界面设计规范.md。
+ * 手机端也在用这些名字：只加新名字，已有的名字不要删、不要改含义。
+ */
 :root {
-  /* 纸张和墨色 */
-  --paper: #f4efe3;
-  --paper-deep: #ebe3d1;
-  --surface: #fffdf8;
-  --surface-2: #f8f3e8;
-  --line: #e6ddca;
-  --line-strong: #d5c8ab;
-  --ink: #1f2a22;
-  --ink-2: #5c5b4d;
-  --ink-3: #978f7a;
+  /* ---------- 颜色：纸张和墨色 ---------- */
+  --paper: #f4efe3; /* 页面底色 */
+  --paper-deep: #ebe3d1; /* 凹下去的底：分段控件、进度条轨道 */
+  --surface: #fffdf8; /* 卡片 */
+  --surface-2: #f8f3e8; /* 卡片里的次级区域：表头、筛选条、悬停 */
+  --surface-3: #f2ecdf; /* 再深一级：选中行、按下 */
+  --line: #e6ddca; /* 卡片边框、分隔线 */
+  --line-soft: #efe8da; /* 卡片内部的细分隔 */
+  --line-strong: #d5c8ab; /* 输入框边框、虚线 */
+  --ink: #1f2a22; /* 正文 */
+  --ink-2: #5c5b4d; /* 次要文字 */
+  --ink-3: #8a826d; /* 辅助文字：说明、时间、单位 */
+  --ink-4: #b4ac97; /* 占位文字、禁用 */
 
-  /* 田野绿 */
-  --forest: #1c4231;
+  /* ---------- 颜色：田野绿（主色） ---------- */
+  --forest: #1c4231; /* 标题、侧栏 */
   --forest-2: #23513d;
-  --green: #2e6b4f;
+  --green: #2e6b4f; /* 主按钮、链接、正常状态 */
   --green-2: #3d8463;
   --green-soft: #e3eee5;
+  --green-wash: #f1f6f0; /* 很浅的绿底：成功提示、选中 */
 
-  /* 麦穗金、陶土、天青 */
+  /* ---------- 颜色：麦穗金（强调）、陶土（异常）、天青（信息） ---------- */
   --wheat: #b98227;
   --wheat-bright: #e2b65a;
   --wheat-soft: #f5e8cc;
+  --wheat-wash: #fbf4e3;
+  --wheat-ink: #8a6118; /* 浅金底上的文字 */
   --clay: #b0543a;
   --clay-soft: #f6e0d6;
+  --clay-wash: #fbf0ea;
   --sky: #4b7a93;
   --sky-soft: #e1ecf1;
+  --sky-wash: #f0f5f7;
 
-  --radius: 14px;
-  --radius-sm: 9px;
-  --shadow: 0 1px 2px rgba(70, 52, 20, 0.05), 0 8px 24px -14px rgba(70, 52, 20, 0.22);
-  --shadow-lift: 0 2px 4px rgba(70, 52, 20, 0.06), 0 18px 40px -18px rgba(70, 52, 20, 0.35);
+  /* 语义色：页面里优先用这几个，不直接写色值 */
+  --color-success: var(--green);
+  --color-warning: var(--wheat);
+  --color-danger: var(--clay);
+  --color-info: var(--sky);
 
+  /* 深色侧栏 */
+  --nav-bg-top: #1f4836;
+  --nav-bg-bottom: #122d21;
+  --nav-ink: #d4e1d2;
+  --nav-ink-2: #93ae9c;
+  --nav-accent: var(--wheat-bright);
+
+  /* ---------- 字体 ---------- */
   --font-serif: 'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', 'STSong', serif;
   --font-sans: 'Microsoft YaHei UI', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans CJK SC', 'Noto Sans SC',
     system-ui, sans-serif;
+  --font-mono: Consolas, 'SF Mono', 'Cascadia Mono', 'Courier New', monospace;
+
+  /* 字号阶梯：正文 14，说明 12–13，卡片标题 16–17，页面标题 24，首页大字 30 */
+  --fs-xs: 12px;
+  --fs-sm: 13px;
+  --fs-base: 14px;
+  --fs-md: 15px;
+  --fs-lg: 17px;
+  --fs-xl: 20px;
+  --fs-2xl: 24px;
+  --fs-3xl: 30px;
+  --lh-tight: 1.3;
+  --lh: 1.6;
+  --lh-loose: 1.8;
+
+  /* ---------- 间距：4 的倍数 ---------- */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-10: 40px;
+  --sp-12: 48px;
+
+  /* ---------- 圆角 ---------- */
+  --radius-xs: 6px; /* 标签、小按钮 */
+  --radius-sm: 9px; /* 按钮、输入框、列表项 */
+  --radius: 14px; /* 卡片 */
+  --radius-lg: 18px; /* 大卡片、对话框 */
+  --radius-pill: 999px;
+
+  /* ---------- 阴影：只给浮起来、能点的东西用 ---------- */
+  --shadow-xs: 0 1px 2px rgba(70, 52, 20, 0.06);
+  --shadow: 0 1px 2px rgba(70, 52, 20, 0.05), 0 8px 24px -14px rgba(70, 52, 20, 0.22);
+  --shadow-lift: 0 2px 4px rgba(70, 52, 20, 0.06), 0 18px 40px -18px rgba(70, 52, 20, 0.35);
+  --shadow-pop: 0 0 0 1px rgba(70, 52, 20, 0.06), 0 16px 48px -12px rgba(40, 30, 10, 0.32);
+  --ring: 0 0 0 3px rgba(46, 107, 79, 0.16); /* 键盘焦点光圈 */
+
+  /* ---------- 动效 ---------- */
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-fast: 120ms;
+  --dur: 200ms;
+  --dur-slow: 320ms;
+
+  /* ---------- 布局 ---------- */
+  --sidebar-w: 224px;
+  --sidebar-w-collapsed: 68px;
+  --topbar-h: 56px;
+  --page-max: 1520px;
+  --page-pad-x: 32px;
+  --page-pad-y: 24px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 0ms;
+    --dur: 0ms;
+    --dur-slow: 0ms;
+  }
 }

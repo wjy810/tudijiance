@@ -4,16 +4,17 @@ import fieldArt from '@/assets/art/empty-field.webp'
 import chartArt from '@/assets/art/empty-chart.webp'
 import dataArt from '@/assets/art/empty-data.webp'
 import importArt from '@/assets/art/empty-import.webp'
+import doneArt from '@/assets/art/empty-done.webp'
 
 const props = withDefaults(defineProps<{
-  art?: 'field' | 'chart' | 'data' | 'import'
+  art?: 'field' | 'chart' | 'data' | 'import' | 'done'
   title: string
   desc?: string
   /** 插画高度（像素） */
   size?: number
 }>(), { art: 'data', desc: undefined, size: 120 })
 
-const ART = { field: fieldArt, chart: chartArt, data: dataArt, import: importArt }
+const ART = { field: fieldArt, chart: chartArt, data: dataArt, import: importArt, done: doneArt }
 </script>
 
 <template>
