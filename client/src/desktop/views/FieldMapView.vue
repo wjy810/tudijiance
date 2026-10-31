@@ -148,8 +148,6 @@ interface Display {
   view: ViewMode
   cellW: number
   cellH: number
-  /** 一直显示对照虚线；不勾时只在选中相关小区时显示 */
-  showAllLinks: boolean
   /** "按指标"着色时用的项目 */
   traitId: number | null
 }
@@ -157,9 +155,15 @@ interface Display {
 const DISPLAY_KEY = 'tudijiance.mapDisplay.v2'
 
 function loadDisplay(): Display {
-  const fallback: Display = { view: 'status', cellW: 108, cellH: 72, showAllLinks: false, traitId: null }
+  const fallback: Display = { view: 'status', cellW: 108, cellH: 72, traitId: null }
   try {
-    return { ...fallback, ...JSON.parse(localStorage.getItem(DISPLAY_KEY) || '{}') }
+    const saved = JSON.parse(localStorage.getItem(DISPLAY_KEY) || '{}') as Partial<Display>
+    return {
+      view: saved.view ?? fallback.view,
+      cellW: saved.cellW ?? fallback.cellW,
+      cellH: saved.cellH ?? fallback.cellH,
+      traitId: saved.traitId ?? fallback.traitId,
+    }
   } catch {
     return fallback
   }
@@ -305,13 +309,34 @@ const cells = computed<GridCell[]>(() =>
   }),
 )
 
-const highlightedLink = ref<number | null>(null)
+// 在右侧"对照关系"里点了哪一组；再点一次取消
+const pinnedLink = ref<number | null>(null)
 
-// 点到有对照关系的小区时才画虚线，免得虚线和文字挤在一起
+function togglePinnedLink(id: number) {
+  pinnedLink.value = pinnedLink.value === id ? null : id
+  if (pinnedLink.value !== null) {
+    selected.value = []
+  }
+}
+
+// 平时不画对照虚线。只有单击了一个有对照关系的小区，或者在右侧点了某一组时，才画出这一组。
+// 框选、多选小区（准备录入）时不画，免得虚线挡住小区
 const visibleLinks = computed(() => {
-  const sel = new Set(selected.value)
-  return (layout.value?.links ?? []).filter((link) => display.value.showAllLinks
-    || link.id === highlightedLink.value || link.plots.some((p) => sel.has(p.plotId)))
+  const links = layout.value?.links ?? []
+  if (pinnedLink.value !== null) {
+    return links.filter((link) => link.id === pinnedLink.value)
+  }
+  if (selected.value.length !== 1) {
+    return []
+  }
+  const focus = selected.value[0]
+  return links.filter((link) => link.plots.some((p) => p.plotId === focus))
+})
+
+watch(selected, (ids) => {
+  if (ids.length > 0) {
+    pinnedLink.value = null
+  }
 })
 
 const gridLinks = computed<GridLink[]>(() =>
@@ -327,7 +352,7 @@ const gridLinks = computed<GridLink[]>(() =>
         Math.hypot(c.rowNo - p.rowNo, c.colNo - p.colNo) < Math.hypot(best.rowNo - p.rowNo, best.colNo - p.colNo) ? c : best)
       return [{ from: nearest.id, to: p.id }]
     })
-    return { id: link.id, label: link.label, segments, highlighted: link.id === highlightedLink.value }
+    return { id: link.id, label: link.label, segments, controlPlotIds: controls.map((c) => c.id) }
   }),
 )
 
@@ -798,7 +823,6 @@ const metricGroups = computed(() => {
                 <span>高</span>
                 <el-slider v-model="display.cellH" :min="48" :max="160" :step="2" />
               </div>
-              <el-checkbox v-model="display.showAllLinks">一直显示对照虚线</el-checkbox>
             </div>
           </el-popover>
           <el-popover placement="bottom-end" :width="300" trigger="hover">
@@ -898,8 +922,8 @@ const metricGroups = computed(() => {
             v-for="l in layout?.links ?? []"
             :key="l.id"
             class="link-row"
-            @mouseenter="highlightedLink = l.id"
-            @mouseleave="highlightedLink = null"
+            :class="{ active: pinnedLink === l.id }"
+            @click="togglePinnedLink(l.id)"
           >
             <div>
               <div class="link-label">{{ l.label }}</div>
@@ -908,9 +932,9 @@ const metricGroups = computed(() => {
                 比较 {{ linkPlotsText(l.plots.filter((p) => !p.control).map((p) => p.plotId)) }}
               </div>
             </div>
-            <el-button v-if="auth.isTeacher && mode === 'layout'" link type="danger" size="small" @click="removeLink(l.id, l.label)">删除</el-button>
+            <el-button v-if="auth.isTeacher && mode === 'layout'" link type="danger" size="small" @click.stop="removeLink(l.id, l.label)">删除</el-button>
           </div>
-          <div v-if="layout?.links.length" class="hint link-tip">选中相关小区或鼠标移到这里时，平面图上显示虚线。</div>
+          <div v-if="layout?.links.length" class="hint link-tip">单击有对照关系的小区，或点上面的某一组，平面图上才显示这一组的虚线。</div>
         </section>
       </aside>
     </div>
@@ -1286,7 +1310,12 @@ const metricGroups = computed(() => {
   border-radius: 6px;
 }
 
-.link-row:hover {
+.link-row {
+  cursor: pointer;
+}
+
+.link-row:hover,
+.link-row.active {
   background: #fff4e6;
 }
 

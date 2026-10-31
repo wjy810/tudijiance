@@ -24,7 +24,8 @@ export interface GridLink {
   id: number
   label: string
   segments: GridLinkSegment[]
-  highlighted: boolean
+  /** 对照小区：标签画在它上方 */
+  controlPlotIds: number[]
 }
 
 export interface GridDevice {

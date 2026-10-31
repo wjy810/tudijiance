@@ -61,6 +61,7 @@ const cellY = (row: number) => PAD + HEADER + (rowOffsets.value[row - 1] ?? 0)
 const cellW = (col: number) => props.colWidths?.[col - 1] ?? CELL_W
 const cellH = (row: number) => props.rowHeights?.[row - 1] ?? CELL_H
 const center = (c: GridCell) => ({ x: cellX(c.colNo) + cellW(c.colNo) / 2, y: cellY(c.rowNo) + cellH(c.rowNo) / 2 })
+const linkAnchor = (c: GridCell) => ({ x: cellX(c.colNo) + cellW(c.colNo) / 2, y: cellY(c.rowNo) + cellH(c.rowNo) - 9 })
 
 /** 位置落在第几格（从 1 开始），不在网格里返回 0 */
 function indexAt(pos: number, offs: number[]): number {
@@ -75,7 +76,8 @@ function indexAt(pos: number, offs: number[]): number {
 const colHeaders = computed(() => Array.from({ length: props.cols }, (_, i) => i + 1))
 const rowHeaders = computed(() => Array.from({ length: props.rows }, (_, i) => i + 1))
 
-const linkShapes = computed(() =>
+// 对照虚线：对照小区连到各个比较的小区
+const linkLines = computed(() =>
   props.links.flatMap((link) =>
     link.segments.flatMap((s, i) => {
       const a = cellByPlot.value.get(s.from)
@@ -83,20 +85,40 @@ const linkShapes = computed(() =>
       if (!a || !b) {
         return []
       }
-      const p1 = center(a)
-      const p2 = center(b)
-      return [
-        {
-          key: `${link.id}-${i}`,
-          points: [p1.x, p1.y, p2.x, p2.y],
-          label: link.label,
-          mid: { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 },
-          highlighted: link.highlighted,
-        },
-      ]
+      // 连在小区下沿的空白处，不压住小区里的文字
+      const p1 = linkAnchor(a)
+      const p2 = linkAnchor(b)
+      return [{ key: `${link.id}-${i}`, points: [p1.x, p1.y, p2.x, p2.y] }]
     }),
   ),
 )
+
+// 每组只标一次，标在对照小区的上沿
+const linkLabels = computed(() =>
+  props.links.flatMap((link) =>
+    link.controlPlotIds.flatMap((plotId) => {
+      const c = cellByPlot.value.get(plotId)
+      return c ? [{ key: `${link.id}-${plotId}`, text: `${link.label}（对照）`, x: center(c).x, y: cellY(c.rowNo) - 9 }] : []
+    }),
+  ),
+)
+
+// 和显示中的对照关系有关的小区画一圈描边：对照小区实线，比较的小区虚线
+const linkRings = computed(() => {
+  const rings = new Map<number, boolean>()
+  for (const link of props.links) {
+    for (const s of link.segments) {
+      rings.set(s.to, rings.get(s.to) ?? false)
+    }
+    for (const id of link.controlPlotIds) {
+      rings.set(id, true)
+    }
+  }
+  return [...rings].flatMap(([plotId, control]) => {
+    const c = cellByPlot.value.get(plotId)
+    return c ? [{ plotId, control, x: cellX(c.colNo), y: cellY(c.rowNo), w: cellW(c.colNo), h: cellH(c.rowNo) }] : []
+  })
+})
 
 const DEVICE_COLORS: Record<string, string> = { ONLINE: '#2f9e44', OFFLINE: '#868e96', NEVER: '#f08c00' }
 
@@ -340,20 +362,23 @@ defineExpose({ exportJpeg })
         />
       </v-group>
 
-      <v-group v-for="l in linkShapes" :key="l.key">
-        <v-line
-          :config="{
-            points: l.points, stroke: l.highlighted ? '#d9480f' : '#f0a070',
-            strokeWidth: l.highlighted ? 2.5 : 1.5, dash: [8, 6], lineCap: 'round',
-          }"
-        />
-        <v-label :config="{ x: l.mid.x, y: l.mid.y - 10 }">
-          <v-tag :config="{ fill: '#fff4e6', stroke: '#f0a070', cornerRadius: 3 }" />
-          <v-text
-            :config="{ text: l.label, fontSize: 11, padding: 3, fill: '#d9480f', fontFamily: FONT }"
-          />
-        </v-label>
-      </v-group>
+      <v-rect
+        v-for="r in linkRings"
+        :key="'ring' + r.plotId"
+        :config="{
+          x: r.x + 1, y: r.y + 1, width: r.w - 2, height: r.h - 2, cornerRadius: 5, listening: false,
+          stroke: '#d9480f', strokeWidth: r.control ? 2.5 : 1.5, dash: r.control ? undefined : [5, 4],
+        }"
+      />
+      <v-line
+        v-for="l in linkLines"
+        :key="l.key"
+        :config="{ points: l.points, stroke: '#d9480f', strokeWidth: 2, dash: [8, 6], lineCap: 'round', listening: false }"
+      />
+      <v-label v-for="l in linkLabels" :key="l.key" :config="{ x: l.x, y: l.y, listening: false }">
+        <v-tag :config="{ fill: '#fff4e6', stroke: '#d9480f', cornerRadius: 3, pointerDirection: 'down', pointerWidth: 8, pointerHeight: 5 }" />
+        <v-text :config="{ text: l.text, fontSize: 11, padding: 3, fill: '#c2410c', fontFamily: FONT }" />
+      </v-label>
 
       <v-group v-for="d in deviceShapes" :key="'d' + d.id">
         <v-circle :config="{ x: d.x, y: d.y, radius: 8, fill: d.color, stroke: '#ffffff', strokeWidth: 2 }" />
