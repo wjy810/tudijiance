@@ -21,8 +21,17 @@ public record AppProperties(
         return ZoneId.of(zone);
     }
 
-    /** 登录令牌。secret 为空时启动时随机生成，重启后已登录的用户要重新登录。 */
-    public record Jwt(String secret, Duration ttl) {
+    /**
+     * 登录令牌。secret 为空时启动时随机生成，重启后已登录的用户要重新登录。
+     *
+     * @param ttl       电脑端令牌的有效期
+     * @param mobileTtl 手机端令牌的有效期：田里可能几天没信号，要能一直离线录、回来再上传，所以长一些；不配置时和 ttl 一样
+     */
+    public record Jwt(String secret, Duration ttl, Duration mobileTtl) {
+
+        public Duration ttlFor(boolean mobile) {
+            return mobile && mobileTtl != null ? mobileTtl : ttl;
+        }
     }
 
     /** 首次启动时创建的管理员账号 admin 的密码。为空时随机生成并打印到日志。 */

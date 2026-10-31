@@ -38,7 +38,7 @@ public class AuthController {
                 || !userService.passwordMatches(user, req.password())) {
             throw ApiException.unauthorized("用户名或密码不正确");
         }
-        JwtService.IssuedToken token = jwtService.issue(user);
+        JwtService.IssuedToken token = jwtService.issue(user, "MOBILE".equals(req.client()));
         return new LoginResponse(token.token(), token.expiresAt(), UserView.of(user));
     }
 
@@ -64,7 +64,8 @@ public class AuthController {
         return user;
     }
 
-    public record LoginRequest(@NotBlank String username, @NotBlank String password) {
+    /** @param client 客户端类型：MOBILE 表示手机端（令牌有效期更长），不填表示电脑端 */
+    public record LoginRequest(@NotBlank String username, @NotBlank String password, String client) {
     }
 
     public record LoginResponse(String token, Instant expiresAt, UserView user) {

@@ -38,6 +38,8 @@ app:
   jwt:
     secret: ${JWT_SECRET:}
     ttl: PT24H
+    # 手机端：田里可能几天没信号，令牌有效期长一些
+    mobile-ttl: ${JWT_MOBILE_TTL:P30D}
   admin:
     initial-password: ${ADMIN_INITIAL_PASSWORD:}
   device:

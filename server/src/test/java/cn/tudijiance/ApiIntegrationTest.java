@@ -11,6 +11,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -82,6 +84,24 @@ class ApiIntegrationTest {
         mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"username\":\"admin\",\"password\":\"wrong\"}"))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void mobileLoginGetsALongerToken() throws Exception {
+        JsonNode desktop = login(Map.of("username", "student1", "password", "secret123"));
+        JsonNode mobile = login(Map.of("username", "student1", "password", "secret123", "client", "MOBILE"));
+        Instant now = Instant.now();
+        assertThat(Duration.between(now, Instant.parse(desktop.get("expiresAt").asString())).toHours()).isBetween(23L, 24L);
+        assertThat(Duration.between(now, Instant.parse(mobile.get("expiresAt").asString())).toDays()).isBetween(29L, 30L);
+        // 手机端的令牌一样能用
+        call(mobile.get("token").asString(), get("/api/auth/me"), null, status().isOk());
+    }
+
+    private JsonNode login(Map<String, Object> body) throws Exception {
+        String response = mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
+                        .content(json.writeValueAsString(body)))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        return json.readTree(response);
     }
 
     @Test

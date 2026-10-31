@@ -28,8 +28,13 @@ public class JwtService {
     }
 
     public IssuedToken issue(User user) {
+        return issue(user, false);
+    }
+
+    /** @param mobile 手机端登录，令牌有效期用 app.jwt.mobile-ttl */
+    public IssuedToken issue(User user, boolean mobile) {
         Instant now = clock.instant();
-        Instant expiresAt = now.plus(properties.jwt().ttl());
+        Instant expiresAt = now.plus(properties.jwt().ttlFor(mobile));
         JwtClaimsSet claims = JwtClaimsSet.builder()
                 .issuer("tudijiance")
                 .issuedAt(now)
