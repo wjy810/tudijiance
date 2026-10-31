@@ -220,7 +220,7 @@ async function exportExcel() {
       <el-empty v-if="!picker.trialId.value && !loading" description="先选择实验田和试验" />
       <template v-else>
         <el-table v-loading="loading" :data="rows" class="table" empty-text="没有符合条件的数据">
-          <el-table-column prop="observedOn" label="调查日期" width="110" />
+          <el-table-column prop="observedOn" label="调查日期" width="126" class-name="num" />
           <el-table-column label="小区" width="140">
             <template #default="{ row }">
               <div><b>{{ row.plotCode }}</b><span v-if="row.replicateNo" class="muted rep">重复 {{ replicateLabel(row.replicateNo) }}</span></div>

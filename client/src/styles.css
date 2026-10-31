@@ -463,3 +463,14 @@ code.inline {
 .el-empty__description p {
   color: var(--ink-3);
 }
+
+/* Element Plus 的空状态换成线描插画（所有用 el-empty 的地方都生效） */
+.el-empty__image {
+  aspect-ratio: 1.4;
+  background: url('@/assets/art/empty-data.webp') center / contain no-repeat;
+  opacity: 0.9;
+}
+
+.el-empty__image svg {
+  display: none;
+}

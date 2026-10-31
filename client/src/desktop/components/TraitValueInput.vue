@@ -58,25 +58,25 @@ const gradeValue = computed({
       <el-button text size="small" @click="setDate(today())">今天</el-button>
     </template>
 
-    <!-- 分级、带档位的数值：按钮选择；有分级标准的，标准直接列在下面，点哪一条也能选 -->
+    <!-- 分级、带档位的数值：有分级标准的做成大块的牌子，级别下面直接写标准，点哪块选哪级 -->
     <template v-else-if="def.dataType === 'GRADE' || (def.dataType === 'NUMBER' && options.length > 0)">
-      <el-radio-group v-model="gradeValue" class="choices">
-        <el-radio-button v-for="o in options" :key="o.id" :value="o.valueCode">{{ o.label }}</el-radio-button>
-      </el-radio-group>
-      <div v-if="hasStandards" class="standards">
-        <div class="std-title">分级标准</div>
+      <div v-if="hasStandards" class="grade-tiles">
         <button
           v-for="o in options"
           :key="o.id"
           type="button"
-          class="std-row"
+          class="grade-tile"
           :class="{ active: gradeValue === o.valueCode }"
           @click="gradeValue = o.valueCode"
         >
-          <span class="std-label">{{ o.label }}</span>
-          <span class="std-desc">{{ o.description || '—' }}</span>
+          <span class="grade-no">{{ def.dataType === 'GRADE' ? `${o.valueCode} 级` : o.label }}</span>
+          <span v-if="def.dataType === 'GRADE' && o.label !== o.valueCode && !o.label.startsWith(o.valueCode)" class="grade-name">{{ o.label }}</span>
+          <span class="grade-desc">{{ o.description || '—' }}</span>
         </button>
       </div>
+      <el-radio-group v-else v-model="gradeValue" class="choices">
+        <el-radio-button v-for="o in options" :key="o.id" :value="o.valueCode">{{ o.label }}</el-radio-button>
+      </el-radio-group>
     </template>
 
     <template v-else-if="def.dataType === 'NUMBER'">
@@ -163,53 +163,67 @@ const gradeValue = computed({
   width: 180px;
 }
 
-.standards {
+.grade-tiles {
   width: 100%;
-  border: 1px solid var(--app-border);
-  border-radius: 8px;
-  overflow: hidden;
-  margin-top: 4px;
-}
-
-.std-title {
-  font-size: 12px;
-  color: var(--app-text-secondary);
-  background: #f6f8f5;
-  padding: 6px 12px;
-}
-
-.std-row {
   display: grid;
-  grid-template-columns: 96px 1fr;
-  gap: 10px;
-  width: 100%;
-  text-align: left;
-  border: none;
-  border-top: 1px solid var(--app-border);
-  background: #fff;
-  padding: 7px 12px;
-  font-size: 13px;
-  line-height: 1.5;
-  color: var(--app-text);
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+}
+
+.grade-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 12px 10px 10px;
+  border-radius: 12px;
+  border: 1px solid var(--line-strong);
+  background: linear-gradient(180deg, #fffefb, var(--surface-2));
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.8) inset, 0 2px 6px -4px rgba(70, 52, 20, 0.3);
+  font: inherit;
+  color: var(--ink);
   cursor: pointer;
-  font-family: inherit;
+  text-align: center;
+  transition: transform 0.12s, box-shadow 0.12s, background 0.12s;
 }
 
-.std-row:hover {
-  background: #f6faf7;
+.grade-tile:hover {
+  border-color: #d9c48f;
+  transform: translateY(-1px);
 }
 
-.std-row.active {
-  background: var(--app-accent-soft);
+.grade-no {
+  font-family: var(--font-serif);
+  font-weight: 700;
+  font-size: 18px;
+  color: var(--forest);
 }
 
-.std-row.active .std-label {
-  color: var(--app-accent);
+.grade-name {
+  font-size: 12.5px;
   font-weight: 600;
+  color: var(--ink-2);
 }
 
-.std-desc {
-  color: var(--app-text-secondary);
+.grade-desc {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-3);
+}
+
+.grade-tile.active {
+  background: linear-gradient(180deg, #2b6449, #1e4836);
+  border-color: #1c4231;
+  box-shadow: 0 0 0 3px rgba(226, 182, 90, 0.35), 0 8px 18px -8px rgba(28, 66, 49, 0.7);
+}
+
+.grade-tile.active .grade-no {
+  color: #f6e1a8;
+}
+
+.grade-tile.active .grade-name,
+.grade-tile.active .grade-desc {
+  color: rgba(251, 243, 223, 0.85);
 }
 
 .unit {

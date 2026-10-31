@@ -1185,6 +1185,23 @@ const metricGroups = computed(() => {
   margin-left: 0;
 }
 
+/* 深色操作条上的按钮：主操作用麦穗金，其它是半透明的 */
+.action-bar .el-button:not(.el-button--primary):not(.is-text) {
+  --el-button-bg-color: rgba(255, 255, 255, 0.08);
+  --el-button-text-color: #fbf3df;
+  --el-button-border-color: rgba(226, 182, 90, 0.28);
+  --el-button-hover-bg-color: rgba(255, 255, 255, 0.16);
+  --el-button-hover-text-color: #ffffff;
+  --el-button-hover-border-color: rgba(226, 182, 90, 0.55);
+}
+
+.action-bar .el-button--primary {
+  background: linear-gradient(180deg, #ecc778, #d9a748) !important;
+  border-color: #c8953a !important;
+  color: #3b2a0c !important;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.4) inset !important;
+}
+
 .action-bar .sel {
   margin-right: 8px;
 }

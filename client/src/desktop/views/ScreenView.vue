@@ -4,12 +4,15 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import type { EChartsCoreOption } from 'echarts/core'
+import { CircleCheck, EditPen, Goods, Grid, Notebook, Sunrise, Warning } from '@element-plus/icons-vue'
 
 import { fieldApi, statsApi, type Field, type PlotStatusCode, type Screen } from '@/shared/api'
 import { PLOT_STATUS } from '@/shared/labels'
 import { DARK, FONT, axisStyle, formatNumber, formatPercent, tooltipStyle } from '@/shared/charts'
 import { useAuthStore } from '@/stores/auth'
 import EChart from '@/desktop/components/EChart.vue'
+import bgArt from '@/assets/art/screen-bg.webp'
+import appIcon from '@/assets/art/app-icon.webp'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -21,14 +24,14 @@ const fieldId = ref<number | null>(null)
 const error = ref('')
 const now = ref(new Date())
 
-// 深色背景上的小区状态色：和平面图同一套含义，只是调暗
+// 深色背景上的小区状态色：和平面图同一套含义，换成夜里看得清的祖母绿、麦金、陶土
 const STATUS_DARK: Record<PlotStatusCode, string> = {
-  NONE: '#2c2c2a',
-  GROWING: '#1f5c3a',
-  ABNORMAL: '#8a2b2b',
-  HARVESTED: '#7a5d12',
-  GUARD: '#353533',
-  PATH: '#232321',
+  NONE: '#26352c',
+  GROWING: '#2c7550',
+  ABNORMAL: '#a3472f',
+  HARVESTED: '#b8892f',
+  GUARD: '#2f3a2c',
+  PATH: '#1b2620',
 }
 
 async function load() {
@@ -85,13 +88,13 @@ const tiles = computed(() => {
     return []
   }
   return [
-    { label: '试验小区', value: String(i.totalPlots) },
-    { label: '已种植', value: String(i.planted) },
-    { label: '今天已录', value: String(i.enteredToday) },
-    { label: '本周录入', value: String(i.weekEntries), unit: '条' },
-    { label: '有异常', value: String(i.abnormal), alert: i.abnormal > 0 },
-    { label: '已收获', value: String(i.harvested) },
-    { label: '当前生育期', value: i.currentStage ?? '—' },
+    { label: '试验小区', value: String(i.totalPlots), unit: '个', icon: Grid },
+    { label: '已种植', value: String(i.planted), unit: '个', icon: CircleCheck },
+    { label: '今天已录', value: String(i.enteredToday), unit: '个', icon: EditPen },
+    { label: '本周录入', value: String(i.weekEntries), unit: '条', icon: Notebook },
+    { label: '有异常', value: String(i.abnormal), unit: '个', alert: i.abnormal > 0, icon: Warning },
+    { label: '已收获', value: String(i.harvested), unit: '个', icon: Goods },
+    { label: '当前生育期', value: i.currentStage ?? '—', icon: Sunrise, wide: true },
   ]
 })
 
@@ -142,7 +145,12 @@ const barOption = computed<EChartsCoreOption>(() => {
       barMaxWidth: 16,
       data: rows.map((r) => ({
         value: r.value,
-        itemStyle: { color: r.control ? t.reference : t.series[0], borderRadius: [0, 4, 4, 0] },
+        itemStyle: {
+          color: r.control
+            ? t.reference
+            : { type: 'linear', x: 0, y: 0, x2: 1, y2: 0, colorStops: [{ offset: 0, color: 'rgba(226,182,90,0.25)' }, { offset: 1, color: '#e9c46a' }] },
+          borderRadius: [0, 6, 6, 0],
+        },
       })),
       label: {
         show: true,
@@ -181,9 +189,11 @@ const trendOption = computed<EChartsCoreOption>(() => {
       data: trend.map((p) => p.value),
       symbol: 'circle',
       symbolSize: 8,
-      lineStyle: { width: 2, color: t.series[2] },
-      itemStyle: { color: t.series[2], borderColor: t.surface, borderWidth: 2 },
-      areaStyle: { color: t.series[2], opacity: 0.1 },
+      lineStyle: { width: 2.5, color: t.series[0], shadowColor: 'rgba(226,182,90,0.6)', shadowBlur: 10 },
+      itemStyle: { color: t.series[0], borderColor: '#0f1d16', borderWidth: 2 },
+      areaStyle: {
+        color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(226,182,90,0.35)' }, { offset: 1, color: 'rgba(226,182,90,0)' }] },
+      },
       // 只标最后一年
       label: {
         show: true,
@@ -195,19 +205,46 @@ const trendOption = computed<EChartsCoreOption>(() => {
     }],
   }
 })
+
+// ---------- 小区状态占比（环形图） ----------
+
+const statusOption = computed<EChartsCoreOption>(() => {
+  const data = (['GROWING', 'HARVESTED', 'ABNORMAL', 'NONE'] as PlotStatusCode[])
+    .map((k) => ({ name: PLOT_STATUS[k].label, value: statusCounts.value.get(k) ?? 0, itemStyle: { color: STATUS_DARK[k] } }))
+    .filter((d) => d.value > 0)
+  const total = data.reduce((n, d) => n + d.value, 0)
+  return {
+    textStyle: { fontFamily: FONT },
+    tooltip: { trigger: 'item', ...tooltipStyle(t), formatter: '{b}：{c} 个（{d}%）' },
+    legend: { orient: 'vertical', right: 6, top: 'middle', icon: 'roundRect', textStyle: { color: t.textSecondary, fontFamily: FONT } },
+    title: {
+      text: String(total), subtext: '试验小区', left: '33%', top: '38%', textAlign: 'center',
+      textStyle: { color: '#f3d58c', fontSize: 26, fontFamily: "'Noto Serif SC', serif", fontWeight: 700 },
+      subtextStyle: { color: t.textMuted, fontSize: 12 },
+    },
+    series: [{
+      type: 'pie', radius: ['56%', '78%'], center: ['34%', '50%'], data,
+      label: { show: false }, itemStyle: { borderColor: '#0f1d16', borderWidth: 3 },
+    }],
+  }
+})
 </script>
 
 <template>
-  <div class="screen">
+  <div class="screen" :style="{ backgroundImage: `url(${bgArt})` }">
     <header class="head">
-      <div class="title">
-        <div class="name">小麦品种试验田数据大屏</div>
-        <div class="sub">
-          {{ screen?.fieldName ?? '—' }}
-          <template v-if="screen?.trialName"> · {{ screen.seasonYear }} 年 · {{ screen.trialName }}</template>
+      <div class="head-side left">
+        <img :src="appIcon" alt="" class="logo" />
+        <div class="where">
+          <div>{{ screen?.fieldName ?? '—' }}</div>
+          <div v-if="screen?.trialName" class="muted">{{ screen.seasonYear }} 年 · {{ screen.trialName }}</div>
         </div>
       </div>
-      <div class="head-right">
+      <div class="head-center">
+        <div class="name">小麦品种试验田数据大屏</div>
+        <div class="slogan">良种为先 · 数据为证</div>
+      </div>
+      <div class="head-side right">
         <el-select
           v-if="!auth.isGuest && fields.length > 1"
           :model-value="fieldId"
@@ -228,38 +265,42 @@ const trendOption = computed<EChartsCoreOption>(() => {
 
     <template v-if="screen && screen.fieldName">
       <section class="tiles">
-        <div v-for="tile in tiles" :key="tile.label" class="tile">
-          <div class="tile-label">{{ tile.label }}</div>
-          <div class="tile-value">
-            <span v-if="tile.alert" class="alert-icon" aria-hidden="true">!</span>{{ tile.value }}<span v-if="tile.unit" class="tile-unit">{{ tile.unit }}</span>
+        <div v-for="tile in tiles" :key="tile.label" class="tile frame" :class="{ alert: tile.alert, wide: tile.wide }">
+          <span class="tile-icon"><el-icon><component :is="tile.icon" /></el-icon></span>
+          <div>
+            <div class="tile-label">{{ tile.label }}</div>
+            <div class="tile-value">{{ tile.value }}<span v-if="tile.unit" class="tile-unit">{{ tile.unit }}</span></div>
           </div>
         </div>
-        <div v-if="tiles.length === 0" class="tile wide">
+        <div v-if="tiles.length === 0" class="tile frame wide">
           <div class="tile-label">这块地还没有试验</div>
         </div>
       </section>
 
       <section class="body">
-        <div class="panel map-panel">
-          <div class="panel-title">小区状态</div>
-          <div
-            class="map"
-            :style="{
-              gridTemplateColumns: `repeat(${screen.colCount}, minmax(0, 1fr))`,
-              gridTemplateRows: `repeat(${screen.rowCount}, minmax(0, 1fr))`,
-            }"
-          >
+        <div class="frame map-panel">
+          <div class="frame-title">试验田小区分布</div>
+          <div class="map-wrap">
             <div
-              v-for="p in screen.plots"
-              :key="p.plotId"
-              class="cell"
-              :style="{ gridRow: p.rowNo, gridColumn: p.colNo, background: STATUS_DARK[p.status] }"
-              :title="`${p.code ?? ''} ${p.varietyName ?? ''} · ${PLOT_STATUS[p.status].label}`"
+              class="map"
+              :style="{
+                gridTemplateColumns: `repeat(${screen.colCount}, minmax(0, 1fr))`,
+                gridTemplateRows: `repeat(${screen.rowCount}, minmax(0, 1fr))`,
+              }"
             >
-              <template v-if="showText">
-                <span class="cell-code">{{ p.code }}</span>
-                <span class="cell-variety">{{ p.varietyName }}</span>
-              </template>
+              <div
+                v-for="p in screen.plots"
+                :key="p.plotId"
+                class="cell"
+                :class="{ alert: p.status === 'ABNORMAL' }"
+                :style="{ gridRow: p.rowNo, gridColumn: p.colNo, background: STATUS_DARK[p.status] }"
+                :title="`${p.code ?? ''} ${p.varietyName ?? ''} · ${PLOT_STATUS[p.status].label}`"
+              >
+                <template v-if="showText">
+                  <span class="cell-code">{{ p.code }}</span>
+                  <span class="cell-variety">{{ p.varietyName }}</span>
+                </template>
+              </div>
             </div>
           </div>
           <div class="legend">
@@ -271,25 +312,31 @@ const trendOption = computed<EChartsCoreOption>(() => {
         </div>
 
         <div class="side">
-          <div class="panel">
-            <div class="panel-title">{{ screen.yieldYear ? `${screen.yieldYear} 年` : '' }}各品种折合亩产（kg）</div>
+          <div class="frame">
+            <div class="frame-title">{{ screen.yieldYear ? `${screen.yieldYear} 年` : '' }}各品种折合亩产<span>kg</span></div>
             <div v-if="yieldRows.length === 0" class="empty">还没有产量数据</div>
-            <EChart v-else :option="barOption" :height="`${Math.max(140, yieldRows.length * 30 + 16)}px`" />
+            <EChart v-else :option="barOption" :height="`${Math.max(140, yieldRows.length * 28 + 16)}px`" />
           </div>
-          <div class="panel">
-            <div class="panel-title">历年平均折合亩产（kg）</div>
-            <div v-if="screen.trend.length === 0" class="empty">还没有产量数据</div>
-            <EChart v-else :option="trendOption" height="200px" />
+          <div class="side-row">
+            <div class="frame">
+              <div class="frame-title">历年平均折合亩产<span>kg</span></div>
+              <div v-if="screen.trend.length === 0" class="empty">还没有产量数据</div>
+              <EChart v-else :option="trendOption" height="180px" />
+            </div>
+            <div class="frame">
+              <div class="frame-title">小区状态占比</div>
+              <EChart :option="statusOption" height="180px" />
+            </div>
           </div>
         </div>
       </section>
 
-      <section class="panel recent">
-        <div class="panel-title">最新录入</div>
+      <section class="frame recent">
+        <div class="frame-title">实时录入</div>
         <div v-if="screen.recent.length === 0" class="empty">还没有录入</div>
         <div v-for="(r, i) in screen.recent" :key="i" class="recent-row">
           <span class="recent-time">{{ r.at.replace('T', ' ').slice(5, 16) }}</span>
-          <span>{{ r.user }}</span>
+          <span class="recent-user">{{ r.user }}</span>
           <span>{{ r.plotCount > 1 ? `${r.plotCount} 个小区` : `小区 ${r.plotCode}` }}</span>
           <span class="recent-trait">{{ r.traitName }}</span>
           <span class="recent-value">{{ r.value }}</span>
@@ -303,151 +350,257 @@ const trendOption = computed<EChartsCoreOption>(() => {
 
 <style scoped>
 .screen {
+  --gold: #e2b65a;
+  --gold-soft: rgba(226, 182, 90, 0.22);
+  --text: #f3ead2;
+  --text-2: #c9bf9f;
+  --text-3: #8d8670;
   min-height: 100%;
   box-sizing: border-box;
-  background: #0d0d0d;
-  color: #f0efec;
-  padding: 16px 24px 12px;
+  padding: 0 26px 18px;
+  color: var(--text);
+  font-family: var(--font-sans);
+  background-color: #0b1611;
+  background-size: cover;
+  background-position: center top;
   display: flex;
   flex-direction: column;
   gap: 14px;
-  font-family: system-ui, -apple-system, 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', sans-serif;
 }
 
+/* ---------- 页头：中间标题，两边带金线 ---------- */
 .head {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  padding-top: 10px;
+}
+
+.head-side {
   display: flex;
-  justify-content: space-between;
-  align-items: flex-end;
-  border-bottom: 1px solid #2c2c2a;
-  padding-bottom: 12px;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+.head-side.right {
+  justify-content: flex-end;
+}
+
+.logo {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  box-shadow: 0 0 0 1px var(--gold-soft);
+}
+
+.where .muted {
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.head-center {
+  position: relative;
+  text-align: center;
+  padding: 12px 70px 14px;
+}
+
+/* 标题两边的金色斜线，像大屏的"眉" */
+.head-center::before,
+.head-center::after {
+  content: '';
+  position: absolute;
+  bottom: 6px;
+  width: 220px;
+  height: 22px;
+  border-bottom: 1px solid var(--gold-soft);
+}
+
+.head-center::before {
+  right: 100%;
+  border-right: 1px solid var(--gold-soft);
+  transform: skewX(40deg);
+  transform-origin: bottom right;
+  background: linear-gradient(90deg, transparent, rgba(226, 182, 90, 0.08));
+}
+
+.head-center::after {
+  left: 100%;
+  border-left: 1px solid var(--gold-soft);
+  transform: skewX(-40deg);
+  transform-origin: bottom left;
+  background: linear-gradient(270deg, transparent, rgba(226, 182, 90, 0.08));
 }
 
 .name {
-  font-size: 26px;
-  font-weight: 600;
-  letter-spacing: 1px;
+  font-family: var(--font-serif);
+  font-weight: 700;
+  font-size: 32px;
+  letter-spacing: 6px;
+  background: linear-gradient(180deg, #fff3cf 0%, #e9c46a 60%, #b8892f 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 2px 10px rgba(226, 182, 90, 0.25));
 }
 
-.sub {
-  color: #c3c2b7;
-  margin-top: 4px;
-}
-
-.head-right {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
-.field-select {
-  width: 200px;
-}
-
-.field-select :deep(.el-select__wrapper) {
-  background: #1a1a19;
-  box-shadow: 0 0 0 1px #383835 inset;
-}
-
-.field-select :deep(.el-select__selected-item) {
-  color: #f0efec;
+.slogan {
+  margin-top: 2px;
+  font-size: 12px;
+  letter-spacing: 10px;
+  color: var(--text-3);
 }
 
 .clock {
-  color: #c3c2b7;
   font-variant-numeric: tabular-nums;
+  letter-spacing: 1px;
+  color: var(--text-2);
 }
 
 .leave {
-  background: transparent;
-  color: #c3c2b7;
-  border: 1px solid #383835;
+  background: rgba(226, 182, 90, 0.08);
+  color: var(--text);
+  border: 1px solid var(--gold-soft);
   border-radius: 6px;
   padding: 4px 14px;
+  font: inherit;
+  font-size: 13px;
   cursor: pointer;
 }
 
 .leave:hover {
-  color: #f0efec;
-  border-color: #898781;
+  background: rgba(226, 182, 90, 0.18);
 }
 
-.error,
-.empty {
-  color: #898781;
-  padding: 24px 0;
-  text-align: center;
+.field-select {
+  width: 170px;
 }
 
+/* ---------- 带四个金色角标的面板 ---------- */
+.frame {
+  --c: rgba(226, 182, 90, 0.75);
+  position: relative;
+  padding: 14px 16px;
+  border-radius: 4px;
+  border: 1px solid rgba(226, 182, 90, 0.14);
+  background:
+    linear-gradient(var(--c), var(--c)) top left / 16px 2px no-repeat,
+    linear-gradient(var(--c), var(--c)) top left / 2px 16px no-repeat,
+    linear-gradient(var(--c), var(--c)) top right / 16px 2px no-repeat,
+    linear-gradient(var(--c), var(--c)) top right / 2px 16px no-repeat,
+    linear-gradient(var(--c), var(--c)) bottom left / 16px 2px no-repeat,
+    linear-gradient(var(--c), var(--c)) bottom left / 2px 16px no-repeat,
+    linear-gradient(var(--c), var(--c)) bottom right / 16px 2px no-repeat,
+    linear-gradient(var(--c), var(--c)) bottom right / 2px 16px no-repeat,
+    linear-gradient(180deg, rgba(20, 42, 31, 0.78), rgba(10, 24, 17, 0.85));
+  box-shadow: inset 0 0 40px rgba(226, 182, 90, 0.04), 0 10px 30px -18px rgba(0, 0, 0, 0.8);
+  backdrop-filter: blur(2px);
+}
+
+.frame-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding-left: 14px;
+  position: relative;
+  font-family: var(--font-serif);
+  font-weight: 700;
+  font-size: 16px;
+  letter-spacing: 2px;
+  color: #f6e7bf;
+}
+
+.frame-title::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  background: var(--gold);
+  transform: translateY(-50%) rotate(45deg);
+  box-shadow: 0 0 8px rgba(226, 182, 90, 0.8);
+}
+
+.frame-title span {
+  font-family: var(--font-sans);
+  font-weight: normal;
+  font-size: 12px;
+  color: var(--text-3);
+  letter-spacing: 0;
+}
+
+/* ---------- 指标 ---------- */
 .tiles {
   display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr)) minmax(0, 1.3fr);
   gap: 12px;
 }
 
 .tile {
-  background: #1a1a19;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 8px;
-  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
 }
 
-.tile.wide {
-  grid-column: 1 / -1;
+.tile-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  color: var(--gold);
+  background: radial-gradient(circle at 50% 35%, rgba(226, 182, 90, 0.25), rgba(226, 182, 90, 0.05));
+  box-shadow: inset 0 0 0 1px rgba(226, 182, 90, 0.35);
+  flex-shrink: 0;
 }
 
 .tile-label {
-  color: #c3c2b7;
-  font-size: 13px;
+  font-size: 12.5px;
+  color: var(--text-2);
 }
 
 .tile-value {
+  margin-top: 2px;
+  font-family: var(--font-serif);
+  font-weight: 700;
   font-size: 30px;
-  font-weight: 600;
-  margin-top: 4px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  line-height: 1.1;
+  color: #f3d58c;
+  text-shadow: 0 0 18px rgba(226, 182, 90, 0.35);
+  font-variant-numeric: tabular-nums;
+}
+
+.tile.wide .tile-value {
+  font-size: 28px;
 }
 
 .tile-unit {
-  font-size: 14px;
-  color: #c3c2b7;
   margin-left: 4px;
+  font-family: var(--font-sans);
   font-weight: normal;
+  font-size: 12px;
+  color: var(--text-3);
+  text-shadow: none;
 }
 
-.alert-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  background: #d03b3b;
-  color: #fff;
-  font-size: 15px;
-  margin-right: 8px;
-  vertical-align: middle;
+.tile.alert .tile-value,
+.tile.alert .tile-icon {
+  color: #ff9b7a;
 }
 
+/* ---------- 主体 ---------- */
 .body {
-  display: grid;
-  grid-template-columns: minmax(0, 3fr) minmax(360px, 2fr);
-  gap: 14px;
   flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: 14px;
   min-height: 0;
-}
-
-.panel {
-  background: #1a1a19;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 8px;
-  padding: 12px 16px;
-}
-
-.panel-title {
-  font-weight: 600;
-  margin-bottom: 10px;
 }
 
 .map-panel {
@@ -455,45 +608,59 @@ const trendOption = computed<EChartsCoreOption>(() => {
   flex-direction: column;
 }
 
+.map-wrap {
+  flex: 1;
+  padding: 12px;
+  border-radius: 4px;
+  background: rgba(5, 12, 9, 0.55);
+  box-shadow: inset 0 0 0 1px rgba(226, 182, 90, 0.1), inset 0 0 30px rgba(0, 0, 0, 0.5);
+}
+
 .map {
   display: grid;
-  gap: 3px;
-  flex: 1;
-  min-height: 320px;
+  gap: 5px;
+  height: 100%;
+  min-height: 300px;
 }
 
 .cell {
-  border-radius: 3px;
+  border-radius: 4px;
   display: flex;
   flex-direction: column;
-  justify-content: center;
   align-items: center;
+  justify-content: center;
+  gap: 1px;
+  min-width: 0;
   overflow: hidden;
-  padding: 2px;
-  min-height: 0;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), inset 0 0 0 1px rgba(0, 0, 0, 0.25);
+}
+
+.cell.alert {
+  box-shadow: inset 0 0 0 2px #ff9b7a, 0 0 12px rgba(255, 120, 80, 0.5);
 }
 
 .cell-code {
-  font-size: 12px;
-  color: #f0efec;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #fbf3df;
 }
 
 .cell-variety {
-  font-size: 11px;
-  color: #c3c2b7;
+  font-size: 11.5px;
+  color: rgba(251, 243, 223, 0.75);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 100%;
+  max-width: 94%;
 }
 
 .legend {
   display: flex;
   flex-wrap: wrap;
-  gap: 16px;
+  gap: 6px 18px;
   margin-top: 10px;
-  color: #c3c2b7;
-  font-size: 13px;
+  font-size: 12.5px;
+  color: var(--text-2);
 }
 
 .legend-item {
@@ -503,48 +670,85 @@ const trendOption = computed<EChartsCoreOption>(() => {
 }
 
 .legend-item i {
-  width: 14px;
-  height: 10px;
-  border-radius: 2px;
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.15);
 }
 
 .legend-item b {
-  color: #f0efec;
-  font-weight: 600;
+  color: #f3d58c;
+  font-variant-numeric: tabular-nums;
 }
 
 .side {
   display: flex;
   flex-direction: column;
   gap: 14px;
+  min-width: 0;
 }
 
+.side-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  gap: 14px;
+}
+
+.empty {
+  color: var(--text-3);
+  font-size: 13px;
+  padding: 24px 0;
+  text-align: center;
+}
+
+/* ---------- 最新录入 ---------- */
 .recent-row {
   display: grid;
-  grid-template-columns: 100px 90px 110px 160px 1fr;
+  grid-template-columns: 120px 90px 110px 140px 1fr;
   gap: 12px;
-  padding: 6px 0;
-  border-top: 1px solid #2c2c2a;
-  color: #c3c2b7;
+  padding: 7px 4px;
+  font-size: 13.5px;
+  border-top: 1px solid rgba(226, 182, 90, 0.08);
 }
 
 .recent-time {
+  color: var(--text-3);
   font-variant-numeric: tabular-nums;
 }
 
+.recent-user {
+  color: var(--text);
+}
+
 .recent-trait {
-  color: #f0efec;
+  color: var(--text-2);
 }
 
 .recent-value {
-  color: #f0efec;
+  color: #f3d58c;
   font-weight: 600;
 }
 
 .foot {
-  color: #898781;
+  text-align: center;
   font-size: 12px;
-  text-align: right;
+  color: var(--text-3);
+  letter-spacing: 1px;
+}
+
+.error {
+  margin: 80px auto;
+  color: var(--text-2);
+  font-size: 16px;
+}
+</style>
+
+<style>
+/* 大屏上的下拉菜单也用深色 */
+.screen-popper.el-popper {
+  --el-bg-color-overlay: #132219;
+  --el-border-color-light: rgba(226, 182, 90, 0.3);
+  --el-fill-color-light: rgba(226, 182, 90, 0.12);
+  --el-text-color-regular: #f3ead2;
 }
 </style>

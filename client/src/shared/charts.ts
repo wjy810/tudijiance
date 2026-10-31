@@ -2,13 +2,14 @@
 import { use } from 'echarts/core'
 import { BarChart, HeatmapChart, LineChart, PieChart, RadarChart, ScatterChart } from 'echarts/charts'
 import {
-  DataZoomComponent, GridComponent, LegendComponent, MarkLineComponent, RadarComponent, TooltipComponent,
-  VisualMapComponent,
+  DataZoomComponent, GridComponent, LegendComponent, MarkLineComponent, RadarComponent, TitleComponent,
+  TooltipComponent, VisualMapComponent,
 } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 
 use([BarChart, LineChart, PieChart, ScatterChart, RadarChart, HeatmapChart, GridComponent, TooltipComponent,
-  LegendComponent, DataZoomComponent, MarkLineComponent, RadarComponent, VisualMapComponent, CanvasRenderer])
+  LegendComponent, DataZoomComponent, MarkLineComponent, RadarComponent, TitleComponent, VisualMapComponent,
+  CanvasRenderer])
 
 export interface ChartTheme {
   surface: string

@@ -94,6 +94,15 @@ async function loadReport() {
 
 watch(picker.trialId, loadReport)
 
+/** 当前试验还没有数据时（比如今年刚播种），建议看有数据的最近一年 */
+const suggestTrial = computed(() => {
+  const years = multi.value?.years ?? []
+  if (years.length === 0) return null
+  const latest = Math.max(...years)
+  const trial = picker.trials.value.find((tr) => tr.seasonYear === latest)
+  return trial && trial.id !== picker.trialId.value ? trial : null
+})
+
 async function exportReport() {
   if (!report.value) {
     return
@@ -276,8 +285,12 @@ const lineOption = computed<EChartsCoreOption>(() => {
         </el-button>
       </div>
       <div v-loading="loadingReport">
-        <el-empty v-if="!report || report.columns.length === 0" :image-size="60"
-          :description="picker.trialId.value ? '这个试验还没有可以汇总的数据' : '先选择试验'" />
+        <el-empty v-if="!report || report.columns.length === 0" :image-size="90"
+          :description="picker.trialId.value ? '这个试验还没有可以汇总的数据' : '先选择试验'">
+          <el-button v-if="suggestTrial" type="primary" @click="picker.trialId.value = suggestTrial.id">
+            看 {{ suggestTrial.seasonYear }} 年的试验
+          </el-button>
+        </el-empty>
         <el-table v-else :data="report.rows" size="small" border class="report">
           <el-table-column label="位次" width="56" align="center">
             <template #default="{ row }">{{ row.yieldRank ?? '' }}</template>
@@ -314,7 +327,7 @@ const lineOption = computed<EChartsCoreOption>(() => {
         </span>
       </div>
       <div v-loading="loadingSummary">
-        <el-empty v-if="!summary || summary.rows.length === 0" :image-size="60"
+        <el-empty v-if="!summary || summary.rows.length === 0" :image-size="90"
           :description="picker.trialId.value ? '这个项目还没有数据' : '先选择试验'" />
         <div v-else class="summary">
           <EChart :option="barOption" :height="barHeight" class="bar" />
@@ -346,7 +359,7 @@ const lineOption = computed<EChartsCoreOption>(() => {
         <span class="sub">每年一个试验；虚线是对照品种；点品种标签显示或隐藏</span>
       </div>
       <div v-loading="loadingMulti">
-        <el-empty v-if="!multi || multi.years.length === 0" :image-size="60" description="还没有数据" />
+        <el-empty v-if="!multi || multi.years.length === 0" :image-size="90" description="还没有数据" />
         <template v-else>
           <div class="chips">
             <button
