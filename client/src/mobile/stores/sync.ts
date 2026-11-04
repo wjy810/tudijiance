@@ -6,9 +6,11 @@ import { App } from '@capacitor/app'
 import { Capacitor } from '@capacitor/core'
 
 import { useAuthStore } from '@/stores/auth'
+import { OFFLINE_EDITION, mobileStorageKey } from '@/shared/edition'
+import { saveLocalBatch } from '../local'
 import { addBatch, counts, purgeDone, syncPending, type NewBatch, type SyncResult } from '../outbox'
 
-const LAST_SYNC_KEY = 'tudijiance.mobile.lastSync'
+const LAST_SYNC_KEY = mobileStorageKey('lastSync')
 
 export const useSyncStore = defineStore('mobile-sync', () => {
   const auth = useAuthStore()
@@ -36,6 +38,7 @@ export const useSyncStore = defineStore('mobile-sync', () => {
   }
 
   async function sync(): Promise<SyncResult | null> {
+    if (OFFLINE_EDITION) return null
     const uid = auth.user?.id
     if (!uid || syncing.value) {
       return null
@@ -61,6 +64,11 @@ export const useSyncStore = defineStore('mobile-sync', () => {
 
   /** 录完一条：先存本机，再试着上传 */
   async function record(batch: NewBatch): Promise<void> {
+    if (OFFLINE_EDITION) {
+      await saveLocalBatch(batch)
+      syncedTick.value++
+      return
+    }
     await addBatch(batch)
     await refresh()
     void sync()
@@ -72,6 +80,10 @@ export const useSyncStore = defineStore('mobile-sync', () => {
       return
     }
     started = true
+    if (OFFLINE_EDITION) {
+      void refresh()
+      return
+    }
     window.addEventListener('online', () => {
       online.value = true
       void sync()

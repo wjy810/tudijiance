@@ -2,8 +2,8 @@
 import type { CapacitorConfig } from '@capacitor/cli'
 
 const config: CapacitorConfig = {
-  appId: 'cn.tudijiance.mobile',
-  appName: '小麦实验田',
+  appId: process.env.TUDI_OFFLINE === '1' ? 'cn.tudijiance.mobile.offline' : 'cn.tudijiance.mobile',
+  appName: process.env.TUDI_OFFLINE === '1' ? '小麦实验田离线版' : '小麦实验田',
   webDir: 'dist-mobile',
   server: {
     androidScheme: 'https',

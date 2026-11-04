@@ -33,7 +33,7 @@ async function load() {
     error.value = (e as Error).message
   }
   local.value = (await db.outbox.where('trialId').equals(trialId).toArray())
-    .filter((b) => b.status !== 'done' && b.plots.some((p) => p.plotId === plotId))
+    .filter((b) => (b.status === 'pending' || b.status === 'failed') && b.plots.some((p) => p.plotId === plotId))
     .sort((a, b) => b.createdAt - a.createdAt)
 }
 onMounted(load)

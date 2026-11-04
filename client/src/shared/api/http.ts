@@ -1,6 +1,7 @@
 import axios, { AxiosError } from 'axios'
 
 import { getServerUrl } from '@/shared/settings'
+import { OFFLINE_EDITION } from '@/shared/edition'
 
 let token: string | null = null
 let onUnauthorized: (() => void) | null = null
@@ -40,6 +41,7 @@ export function isNetworkError(e: unknown): boolean {
 }
 
 http.interceptors.request.use((config) => {
+  if (OFFLINE_EDITION) throw new ApiError('离线版仅使用本机数据，无需连接服务器', 400)
   config.baseURL = getServerUrl()
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
@@ -50,6 +52,7 @@ http.interceptors.request.use((config) => {
 http.interceptors.response.use(
   (response) => response,
   (error: AxiosError<{ message?: string }>) => {
+    if (error instanceof ApiError) return Promise.reject(error)
     const isLogin = error.config?.url?.includes('/api/auth/login')
     if (error.response?.status === 401 && !isLogin && onUnauthorized) {
       onUnauthorized()

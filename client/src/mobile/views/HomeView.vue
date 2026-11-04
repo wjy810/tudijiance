@@ -4,6 +4,7 @@ import { computed, onActivated, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { useAuthStore } from '@/stores/auth'
+import { OFFLINE_EDITION } from '@/shared/edition'
 import { useFieldStore } from '../stores/field'
 import { useSyncStore } from '../stores/sync'
 import { recent } from '../outbox'
@@ -39,6 +40,7 @@ const percent = computed(() => (ind.value && ind.value.totalPlots ? Math.round((
 const todayPlots = computed(() => todays.value.reduce((n, b) => n + b.plots.length, 0))
 
 const syncText = computed(() => {
+  if (OFFLINE_EDITION) return '已保存在本机'
   if (sync.syncing) return '正在上传…'
   if (sync.failed) return `${sync.failed} 条没传上去`
   if (sync.pending) return sync.online ? `${sync.pending} 条待上传` : `${sync.pending} 条存在手机上`
@@ -52,8 +54,8 @@ const syncText = computed(() => {
       <img :src="wheatArt" alt="" class="art" />
       <div class="date">{{ dateText }}</div>
       <div class="hello serif">{{ greeting }}，{{ auth.user?.displayName || auth.user?.username }}</div>
-      <button type="button" class="sync" :class="{ warn: sync.failed > 0, off: !sync.online }" @click="router.push('/records')">
-        <van-icon :name="sync.syncing ? 'replay' : sync.online ? 'passed' : 'warning-o'" />{{ syncText }}
+      <button type="button" class="sync" :class="{ warn: sync.failed > 0, off: !OFFLINE_EDITION && !sync.online }" @click="router.push('/records')">
+        <van-icon :name="OFFLINE_EDITION ? 'passed' : sync.syncing ? 'replay' : sync.online ? 'passed' : 'warning-o'" />{{ syncText }}
       </button>
     </header>
 
@@ -95,8 +97,8 @@ const syncText = computed(() => {
           </div>
           <div class="entry-sub m-muted">
             {{ b.plots.length > 3 ? `${b.plots.length} 个小区` : b.plots.map((p) => p.code).join('、') }} · {{ timeAgo(b.createdAt) }}
-            <van-tag :type="b.status === 'done' ? 'success' : b.status === 'failed' ? 'danger' : 'warning'" plain round>
-              {{ b.status === 'done' ? '已上传' : b.status === 'failed' ? '没传上去' : '待上传' }}
+            <van-tag :type="b.status === 'done' || b.status === 'local' ? 'success' : b.status === 'failed' ? 'danger' : 'warning'" plain round>
+              {{ b.status === 'local' ? '已存本机' : b.status === 'done' ? '已上传' : b.status === 'failed' ? '没传上去' : '待上传' }}
             </van-tag>
           </div>
         </div>

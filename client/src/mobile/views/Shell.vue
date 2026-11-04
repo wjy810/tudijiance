@@ -5,6 +5,7 @@ import { computed, onMounted, watch } from 'vue'
 import { useSyncStore } from '../stores/sync'
 import { useFieldStore } from '../stores/field'
 import { timeAgo } from '../display'
+import { OFFLINE_EDITION } from '@/shared/edition'
 
 const sync = useSyncStore()
 const field = useFieldStore()
@@ -22,6 +23,7 @@ onMounted(() => {
 })
 
 const notice = computed(() => {
+  if (OFFLINE_EDITION) return '离线版 · 数据保存在本机'
   if (sync.needLogin) return '登录已过期，到"我的"里退出再登录，没传的数据会接着上传'
   if (!sync.online || field.offlineSince) {
     const when = field.offlineSince ? `，看到的是${timeAgo(field.offlineSince)}的数据` : ''

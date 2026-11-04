@@ -8,6 +8,7 @@ import type { Plot, TraitValue, TraitView } from '@/shared/api'
 import { TRAIT_CATEGORY, TRAIT_DATA_TYPE, replicateLabel } from '@/shared/labels'
 import { emptyValue, missingValue, newUuid, normalizeValue, observedOnFor, today } from '@/shared/traitValue'
 import { useAuthStore } from '@/stores/auth'
+import { OFFLINE_EDITION } from '@/shared/edition'
 import { useFieldStore } from '../stores/field'
 import { useSyncStore } from '../stores/sync'
 import { displayValue, plotCode } from '../display'
@@ -147,7 +148,8 @@ async function save(again: boolean) {
     }
     field.rememberTrait(t.trait.id)
     await field.refreshUnsynced()
-    showToast({ type: 'success', message: sync.online ? `已保存 ${count} 个小区` : `已存到手机上，联网后自动上传` })
+    if (OFFLINE_EDITION) await field.loadTrial()
+    showToast({ type: 'success', message: OFFLINE_EDITION ? `已存本机：${count} 个小区` : sync.online ? `已保存 ${count} 个小区` : `已存到手机上，联网后自动上传` })
     emit('saved', count)
     if (again) {
       step.value = 'trait'
@@ -155,6 +157,8 @@ async function save(again: boolean) {
     } else {
       show.value = false
     }
+  } catch (e) {
+    showToast({ message: `保存失败：${(e as Error).message}`, wordBreak: 'break-all' })
   } finally {
     saving.value = false
   }

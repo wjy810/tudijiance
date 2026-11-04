@@ -1,14 +1,17 @@
 apply plugin: 'com.android.application'
 
+def offlineBuild = providers.gradleProperty('offline').map { it.toBoolean() }.getOrElse(false)
+
 android {
     namespace = "cn.tudijiance.mobile"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "cn.tudijiance.mobile"
+        applicationId offlineBuild ? "cn.tudijiance.mobile.offline" : "cn.tudijiance.mobile"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 2
-        versionName "0.2.0"
+        versionName offlineBuild ? "0.2.0-offline" : "0.2.0"
+        manifestPlaceholders = [appLabel: offlineBuild ? '小麦实验田离线版' : '小麦实验田']
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

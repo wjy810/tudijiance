@@ -7,12 +7,13 @@ import type {
   Field, Layout, Plot, PlotStatus, TraitCategory, TraitView, Trial, TrialStatus, Variety,
 } from '@/shared/api'
 import { useAuthStore } from '@/stores/auth'
+import { mobileStorageKey } from '@/shared/edition'
 import { repo, sortTrials } from '../repo'
 import { unsyncedPlots } from '../outbox'
 
-const FIELD_KEY = 'tudijiance.mobile.field'
-const TRIAL_KEY = 'tudijiance.mobile.trial'
-const RECENT_KEY = 'tudijiance.mobile.recentTraits'
+const FIELD_KEY = mobileStorageKey('field')
+const TRIAL_KEY = mobileStorageKey('trial')
+const RECENT_KEY = mobileStorageKey('recentTraits')
 
 const readNum = (k: string) => Number(localStorage.getItem(k)) || null
 

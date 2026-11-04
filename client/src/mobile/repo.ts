@@ -5,6 +5,8 @@ import {
   type Field, type FieldDetail, type Layout, type PlotDetail, type Trial, type TrialStatus, type TraitView, type Variety,
 } from '@/shared/api'
 import { db as defaultDb, type MobileDb } from './db'
+import { OFFLINE_EDITION } from '@/shared/edition'
+import { createLocalRepo } from './local'
 
 export interface Loaded<T> {
   data: T
@@ -32,7 +34,7 @@ export async function cached<T>(key: string, fetcher: () => Promise<T>, database
   }
 }
 
-export const repo = {
+export const repo = OFFLINE_EDITION ? createLocalRepo() : {
   fields: () => cached<Field[]>('fields', fieldApi.list),
   fieldDetail: (fieldId: number) => cached<FieldDetail>(`field:${fieldId}`, () => fieldApi.detail(fieldId)),
   trials: (fieldId: number) => cached<Trial[]>(`trials:${fieldId}`, () => trialApi.list(fieldId)),

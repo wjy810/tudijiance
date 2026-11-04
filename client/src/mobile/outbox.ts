@@ -103,7 +103,7 @@ export async function recent(userId: number, limit = 200, database: MobileDb = d
 /** 某个试验里还没传上去的小区（平面图上标出来） */
 export async function unsyncedPlots(trialId: number, database: MobileDb = defaultDb): Promise<Set<number>> {
   const list = await database.outbox.where('trialId').equals(trialId)
-    .filter((b) => b.status !== 'done').toArray()
+    .filter((b) => b.status === 'pending' || b.status === 'failed').toArray()
   return new Set(list.flatMap((b) => b.plots.map((p) => p.plotId)))
 }
 

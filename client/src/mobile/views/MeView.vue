@@ -1,12 +1,14 @@
 <script setup lang="ts">
 // 我的：账号、服务器地址、下载离线数据、退出登录
-import { ref } from 'vue'
+import { reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { showConfirmDialog, showLoadingToast, showToast, closeToast } from 'vant'
 
 import { useAuthStore } from '@/stores/auth'
 import { ROLE } from '@/shared/labels'
 import { getServerUrl, setServerUrl } from '@/shared/settings'
+import { OFFLINE_EDITION } from '@/shared/edition'
+import { createLocalField } from '../local'
 import { useSyncStore } from '../stores/sync'
 import { useFieldStore } from '../stores/field'
 import { downloadForOffline } from '../repo'
@@ -25,6 +27,26 @@ const downloadedAt = ref(Number(localStorage.getItem(DOWNLOAD_KEY)) || null)
 const server = ref(getServerUrl())
 const serverOpen = ref(false)
 const serverDraft = ref('')
+const localFieldOpen = ref(false)
+const localField = reactive({ name: '', rowCount: 4, colCount: 6, varieties: '' })
+
+async function saveLocalField(action: string): Promise<boolean> {
+  if (action !== 'confirm') return true
+  try {
+    const created = await createLocalField({
+      name: localField.name, rowCount: Number(localField.rowCount), colCount: Number(localField.colCount),
+      varietyNames: localField.varieties.split(/[,，、\n]/),
+    })
+    await field.load()
+    await field.selectField(created.id)
+    showToast('实验田已保存在本机，可以开始录入')
+    await router.push('/map')
+    return true
+  } catch (e) {
+    showToast((e as Error).message)
+    return false
+  }
+}
 
 async function download() {
   const toast = showLoadingToast({ message: '正在下载…', forbidClick: true, duration: 0 })
@@ -63,7 +85,7 @@ async function logout() {
   try {
     await showConfirmDialog({
       title: '退出登录？',
-      message: left ? `还有 ${left} 条没传上去，会留在手机上，下次用这个账号登录后接着上传。` : '退出后要重新输入密码。',
+      message: OFFLINE_EDITION ? '本机记录会保留，下次点“一键进入”即可继续使用。' : left ? `还有 ${left} 条没传上去，会留在手机上，下次用这个账号登录后接着上传。` : '退出后要重新输入密码。',
     })
   } catch {
     return
@@ -79,22 +101,32 @@ async function logout() {
       <div class="avatar serif">{{ (auth.user?.displayName || auth.user?.username || '?').slice(0, 1) }}</div>
       <div>
         <div class="name m-title">{{ auth.user?.displayName || auth.user?.username }}</div>
-        <div class="m-muted">{{ auth.role ? ROLE[auth.role] : '' }} · {{ auth.user?.username }}</div>
+        <div class="m-muted">{{ OFFLINE_EDITION ? '离线版 · 无需账号' : `${auth.role ? ROLE[auth.role] : ''} · ${auth.user?.username}` }}</div>
       </div>
     </section>
 
     <van-cell-group inset title="数据" class="group">
-      <van-cell title="下载离线数据" :label="`去田里之前联网点一下。上次：${timeAgo(downloadedAt)}`" is-link icon="down" @click="download" />
-      <van-cell title="录入记录" :value="sync.pending + sync.failed ? `${sync.pending + sync.failed} 条没传` : '全部已上传'" is-link icon="notes-o" @click="router.push('/records')" />
-      <van-cell title="清除上传过的记录" label="只清手机上的列表，服务器上的数据不动" icon="delete-o" is-link @click="clearDone" />
+      <van-cell v-if="OFFLINE_EDITION" title="新建本机实验田" label="填写名称、行列和品种，直接开始录入" is-link icon="plus" @click="localFieldOpen = true" />
+      <van-cell v-else title="下载离线数据" :label="`去田里之前联网点一下。上次：${timeAgo(downloadedAt)}`" is-link icon="down" @click="download" />
+      <van-cell title="录入记录" :value="OFFLINE_EDITION ? '已存本机' : sync.pending + sync.failed ? `${sync.pending + sync.failed} 条没传` : '全部已上传'" is-link icon="notes-o" @click="router.push('/records')" />
+      <van-cell v-if="OFFLINE_EDITION" title="本机保存" label="记录不会自动清理。卸载应用或清除应用数据会删除本机记录。" icon="info-o" />
+      <van-cell v-else title="清除上传过的记录" label="只清手机上的列表，服务器上的数据不动" icon="delete-o" is-link @click="clearDone" />
     </van-cell-group>
 
-    <van-cell-group inset title="设置" class="group">
+    <van-cell-group v-if="!OFFLINE_EDITION" inset title="设置" class="group">
       <van-cell title="服务器地址" :label="server" is-link icon="setting-o" @click="editServer" />
     </van-cell-group>
 
     <van-button block round plain type="danger" class="logout" @click="logout">退出登录</van-button>
-    <div class="version m-muted">小麦实验田 手机端 {{ APP_VERSION }}</div>
+    <div class="version m-muted">小麦实验田 {{ OFFLINE_EDITION ? '离线版' : '手机端' }} {{ APP_VERSION }}</div>
+
+    <van-dialog v-model:show="localFieldOpen" title="新建本机实验田" show-cancel-button confirm-button-text="创建" :before-close="saveLocalField">
+      <van-field v-model="localField.name" label="名称" placeholder="例如：一号实验田" maxlength="60" />
+      <van-field v-model="localField.rowCount" label="行数" type="digit" placeholder="1—30" />
+      <van-field v-model="localField.colCount" label="列数" type="digit" placeholder="1—30" />
+      <van-field v-model="localField.varieties" label="品种" type="textarea" placeholder="可选，多个品种用逗号分隔" rows="2" maxlength="600" />
+      <p class="local-hint m-muted">品种按填写顺序循环分配到各小区；留空也可录入。</p>
+    </van-dialog>
 
     <van-dialog v-model:show="serverOpen" title="服务器地址" show-cancel-button @confirm="saveServer">
       <van-field v-model="serverDraft" placeholder="http://服务器地址:8080" clearable class="server-field" />
@@ -144,5 +176,11 @@ async function logout() {
 
 .server-field {
   margin: 8px 0;
+}
+
+.local-hint {
+  margin: 8px 18px 18px;
+  font-size: 12px;
+  line-height: 1.6;
 }
 </style>

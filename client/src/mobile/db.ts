@@ -4,6 +4,7 @@
 import Dexie, { type Table } from 'dexie'
 
 import type { TraitValue } from '@/shared/api'
+import { OFFLINE_EDITION } from '@/shared/edition'
 
 export interface CacheRow {
   key: string
@@ -12,7 +13,7 @@ export interface CacheRow {
   savedAt: number
 }
 
-export type OutboxStatus = 'pending' | 'failed' | 'done'
+export type OutboxStatus = 'pending' | 'failed' | 'done' | 'local'
 
 /** 一次录入：同一个项目、同一个值、同一天，给一个或多个小区 */
 export interface OutboxBatch {
@@ -51,4 +52,4 @@ export class MobileDb extends Dexie {
   }
 }
 
-export const db = new MobileDb()
+export const db = new MobileDb(OFFLINE_EDITION ? 'tudijiance-offline' : 'tudijiance')

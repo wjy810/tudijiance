@@ -5,6 +5,7 @@ import { useRouter } from 'vue-router'
 import { showToast } from 'vant'
 
 import type { Plot } from '@/shared/api'
+import { OFFLINE_EDITION, mobileStorageKey } from '@/shared/edition'
 import { PLOT_KIND, PLOT_STATUS, replicateLabel } from '@/shared/labels'
 import { VARIETY_COLORS } from '@/shared/colors'
 import { useFieldStore } from '../stores/field'
@@ -18,8 +19,8 @@ const field = useFieldStore()
 const router = useRouter()
 
 const view = ref<'status' | 'variety'>('status')
-const scale = ref(Number(localStorage.getItem('tudijiance.mobile.scale')) || 1)
-watch(scale, (s) => localStorage.setItem('tudijiance.mobile.scale', String(s)))
+const scale = ref(Number(localStorage.getItem(mobileStorageKey('scale'))) || 1)
+watch(scale, (s) => localStorage.setItem(mobileStorageKey('scale'), String(s)))
 
 const selected = ref(new Set<number>())
 watch(() => field.trialId, () => (selected.value = new Set()))
@@ -118,7 +119,7 @@ const trialActions = computed(() => field.trials.map((t) => ({ name: `${t.season
     <div class="view-switch">
       <button type="button" :class="{ on: view === 'status' }" @click="view = 'status'">看状态</button>
       <button type="button" :class="{ on: view === 'variety' }" @click="view = 'variety'">看品种</button>
-      <span class="legend"><i class="d today" />今天录过 <i class="d unsynced" />待上传</span>
+      <span class="legend"><i class="d today" />今天录过 <template v-if="!OFFLINE_EDITION"><i class="d unsynced" />待上传</template></span>
     </div>
 
     <EmptyState v-if="field.error" art="field" title="打不开平面图" :desc="field.error" :size="120">

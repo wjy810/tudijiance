@@ -4,6 +4,7 @@ import { computed, onActivated, ref, watch } from 'vue'
 import { showConfirmDialog, showToast } from 'vant'
 
 import { useAuthStore } from '@/stores/auth'
+import { OFFLINE_EDITION } from '@/shared/edition'
 import { useSyncStore } from '../stores/sync'
 import { useFieldStore } from '../stores/field'
 import { discard, recent, retry } from '../outbox'
@@ -22,7 +23,7 @@ async function load() {
 onActivated(load)
 void load()
 // 上传完一轮、数量变了就刷新列表
-watch(() => [sync.pending, sync.failed, sync.syncing], load)
+watch(() => [sync.pending, sync.failed, sync.syncing, sync.syncedTick], load)
 
 const groups = computed(() => {
   const map = new Map<string, OutboxBatch[]>()
@@ -52,17 +53,22 @@ async function retryOne(b: OutboxBatch) {
 
 async function remove(b: OutboxBatch) {
   try {
-    await showConfirmDialog({ title: '删掉这条录入？', message: `${b.traitName}：${b.displayValue}，${b.plots.length} 个小区。删掉后不会上传。` })
+    await showConfirmDialog({ title: '删掉这条录入？', message: `${b.traitName}：${b.displayValue}，${b.plots.length} 个小区。${OFFLINE_EDITION ? '这条本机记录将被删除。' : '删掉后不会上传。'}` })
   } catch {
     return
   }
   await discard(b.id!)
   await sync.refresh()
   await field.refreshUnsynced()
+  if (OFFLINE_EDITION) {
+    sync.syncedTick++
+    await field.loadTrial()
+  }
   await load()
 }
 
 const statusText = computed(() => {
+  if (OFFLINE_EDITION) return { icon: 'passed', text: '录入记录已保存在本机', tone: 'good' }
   if (sync.syncing) return { icon: 'replay', text: '正在上传…', tone: 'busy' }
   if (sync.needLogin) return { icon: 'warning-o', text: '登录已过期，重新登录后接着上传', tone: 'bad' }
   if (sync.failed) return { icon: 'warning-o', text: `${sync.failed} 条没传上去，看看下面的原因`, tone: 'bad' }
@@ -77,12 +83,13 @@ const statusText = computed(() => {
       <van-icon :name="statusText.icon" class="status-icon" />
       <div class="status-text">
         <b>{{ statusText.text }}</b>
-        <span class="m-muted">上次全部传完：{{ timeAgo(sync.lastSyncAt) }}<template v-if="sync.others"> · 另有 {{ sync.others }} 条是别的账号录的</template></span>
+        <span v-if="OFFLINE_EDITION" class="m-muted">无需联网，重开应用后仍可查看</span>
+        <span v-else class="m-muted">上次全部传完：{{ timeAgo(sync.lastSyncAt) }}<template v-if="sync.others"> · 另有 {{ sync.others }} 条是别的账号录的</template></span>
       </div>
-      <van-button size="small" round type="primary" :loading="sync.syncing" @click="syncNow">立即上传</van-button>
+      <van-button v-if="!OFFLINE_EDITION" size="small" round type="primary" :loading="sync.syncing" @click="syncNow">立即上传</van-button>
     </section>
 
-    <EmptyState v-if="list.length === 0" art="data" title="还没有录过" desc="到平面图上选中小区，点录入。录的数据会先存在手机上，有网就自动上传。" :size="120" />
+    <EmptyState v-if="list.length === 0" art="data" title="还没有录过" :desc="OFFLINE_EDITION ? '到平面图上选中小区，点录入。记录只保存在这台手机上。' : '到平面图上选中小区，点录入。录的数据会先存在手机上，有网就自动上传。'" :size="120" />
 
     <div v-for="[day, items] in groups" :key="day" class="group">
       <div class="day m-title">{{ day }}<span class="m-muted">{{ items.length }} 条</span></div>
@@ -97,8 +104,8 @@ const statusText = computed(() => {
           </div>
           <div class="item-foot">
             <span class="m-muted">调查 {{ b.observedOn }} · {{ timeAgo(b.createdAt) }}</span>
-            <van-tag :type="b.status === 'done' ? 'success' : b.status === 'failed' ? 'danger' : 'warning'" plain round>
-              {{ b.status === 'done' ? '已上传' : b.status === 'failed' ? '没传上去' : '待上传' }}
+            <van-tag :type="b.status === 'done' || b.status === 'local' ? 'success' : b.status === 'failed' ? 'danger' : 'warning'" plain round>
+              {{ b.status === 'local' ? '已存本机' : b.status === 'done' ? '已上传' : b.status === 'failed' ? '没传上去' : '待上传' }}
             </van-tag>
           </div>
           <div v-if="b.status === 'failed'" class="failed">

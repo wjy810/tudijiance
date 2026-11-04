@@ -16,9 +16,12 @@
     "dist:win": "pnpm build && node scripts/dist-win.mjs",
     "dist:dir": "pnpm build && electron-builder --dir",
     "dev:mobile": "vite --config vite.mobile.config.ts",
+    "dev:offline": "vite --config vite.mobile.config.ts --mode offline",
     "build:mobile": "vite build --config vite.mobile.config.ts",
+    "build:offline": "vite build --config vite.mobile.config.ts --mode offline",
     "android:sync": "pnpm build:mobile && cap sync android",
-    "android:apk": "pnpm android:sync && cd android && ./gradlew assembleDebug"
+    "android:apk": "node scripts/build-android.mjs",
+    "android:offline": "node scripts/build-android.mjs --offline"
   },
   "devDependencies": {
     "@capacitor/android": "8.6.0",
