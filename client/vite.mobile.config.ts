@@ -13,6 +13,8 @@ export default defineConfig({
   // 相对路径：APP 里从本地文件加载
   base: './',
   publicDir: here('./public'),
+  // 和电脑端（pnpm dev）分开放依赖预构建缓存：两个同时开时不会互相把对方的缓存冲掉（"Outdated Optimize Dep"）
+  cacheDir: here('./node_modules/.vite-mobile'),
   plugins: [vue()],
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),

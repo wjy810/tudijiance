@@ -6,6 +6,7 @@ import { defineStore } from 'pinia'
 import type {
   Field, Layout, Plot, PlotStatus, TraitCategory, TraitView, Trial, TrialStatus, Variety,
 } from '@/shared/api'
+import type { FieldLayout } from '@/shared/fieldLayout'
 import { useAuthStore } from '@/stores/auth'
 import { mobileStorageKey } from '@/shared/edition'
 import { repo, sortTrials } from '../repo'
@@ -23,6 +24,8 @@ export const useFieldStore = defineStore('mobile-field', () => {
   const trials = ref<Trial[]>([])
   const plots = ref<Plot[]>([])
   const layout = ref<Layout | null>(null)
+  /** 实验田的区块布局（老师在电脑上保存过才有）；没有时按行列显示 */
+  const blockLayout = ref<FieldLayout | null>(null)
   const status = ref<TrialStatus | null>(null)
   const traits = ref<TraitView[]>([])
   const varieties = ref<Variety[]>([])
@@ -84,11 +87,13 @@ export const useFieldStore = defineStore('mobile-field', () => {
   async function loadField() {
     if (!fieldId.value) {
       plots.value = []
+      blockLayout.value = null
       trials.value = []
       return
     }
     const [d, t] = await Promise.all([repo.fieldDetail(fieldId.value), repo.trials(fieldId.value)])
     plots.value = d.data.plots
+    blockLayout.value = d.data.layoutSaved && d.data.layout ? d.data.layout : null
     trials.value = sortTrials(t.data)
     noteOffline(d)
     noteOffline(t)
@@ -153,7 +158,7 @@ export const useFieldStore = defineStore('mobile-field', () => {
     .filter((t): t is TraitView => !!t && t.trait.enabled && !t.trait.isComputed))
 
   return {
-    fields, trials, plots, layout, status, traits, varieties, fieldId, trialId, offlineSince, unsynced, loading, error,
+    fields, trials, plots, layout, blockLayout, status, traits, varieties, fieldId, trialId, offlineSince, unsynced, loading, error,
     field, trial, varietyById, traitById, plantingByPlot, statusByPlot, entryGroups, recentTraits,
     load, loadTrial, selectField, selectTrial, refreshUnsynced, rememberTrait,
   }

@@ -11,6 +11,7 @@ import { VARIETY_COLORS } from '@/shared/colors'
 import { useFieldStore } from '../stores/field'
 import { plotCode } from '../display'
 import PlotPicker from '../components/PlotPicker.vue'
+import BlockPlotPicker from '../components/BlockPlotPicker.vue'
 import type { PickerCell } from '../components/picker'
 import EntrySheet from '../components/EntrySheet.vue'
 import EmptyState from '@/desktop/components/EmptyState.vue'
@@ -57,6 +58,15 @@ function toggle(id: number) {
 /** 整行、整列：都选上了就全取消，否则全选上 */
 function line(kind: 'row' | 'col', index: number) {
   const ids = cells.value.filter((c) => c.selectable && (kind === 'row' ? c.rowNo : c.colNo) === index).map((c) => c.plotId)
+  const all = ids.every((id) => selected.value.has(id))
+  const next = new Set(selected.value)
+  ids.forEach((id) => (all ? next.delete(id) : next.add(id)))
+  selected.value = next
+}
+
+/** 一批小区（整块、区块里的一行一列）：都选上了就全取消，否则全选上 */
+function many(ids: number[]) {
+  if (ids.length === 0) return
   const all = ids.every((id) => selected.value.has(id))
   const next = new Set(selected.value)
   ids.forEach((id) => (all ? next.delete(id) : next.add(id)))
@@ -126,6 +136,17 @@ const trialActions = computed(() => field.trials.map((t) => ({ name: `${t.season
       <van-button round type="primary" @click="field.load()">再试一次</van-button>
     </EmptyState>
     <van-loading v-else-if="field.loading && field.plots.length === 0" class="loading" vertical>加载中…</van-loading>
+    <BlockPlotPicker
+      v-else-if="field.blockLayout"
+      class="picker"
+      :layout="field.blockLayout"
+      :cells="cells"
+      :selected="selected"
+      :scale="scale"
+      @toggle="toggle"
+      @many="many"
+      @hold="hold"
+    />
     <PlotPicker
       v-else
       class="picker"
@@ -147,7 +168,7 @@ const trialActions = computed(() => field.trials.map((t) => ({ name: `${t.season
         <van-button round class="btn-wheat go" icon="edit" @click="openEntry">录入</van-button>
       </template>
       <template v-else>
-        <span class="tip">点小区选中，点行号、列号选整行整列，长按看详情</span>
+        <span class="tip">{{ field.blockLayout ? '点小区选中，点“选整块”选一个区块，长按看详情' : '点小区选中，点行号、列号选整行整列，长按看详情' }}</span>
         <van-button size="small" round plain type="primary" :disabled="!field.trial" @click="selectAll">全选</van-button>
       </template>
     </div>
