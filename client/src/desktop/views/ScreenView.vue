@@ -11,6 +11,7 @@ import { PLOT_STATUS } from '@/shared/labels'
 import { DARK, FONT, axisStyle, formatNumber, formatPercent, tooltipStyle } from '@/shared/charts'
 import { useAuthStore } from '@/stores/auth'
 import EChart from '@/desktop/components/EChart.vue'
+import BlockMiniMap from '@/desktop/components/BlockMiniMap.vue'
 import bgArt from '@/assets/art/screen-bg.webp'
 import appIcon from '@/assets/art/app-icon.webp'
 
@@ -281,7 +282,17 @@ const statusOption = computed<EChartsCoreOption>(() => {
         <div class="frame map-panel">
           <div class="frame-title">试验田小区分布</div>
           <div class="map-wrap">
+            <BlockMiniMap
+              v-if="screen.layout"
+              class="block-map"
+              :layout="screen.layout"
+              :plots="screen.plots"
+              :colors="STATUS_DARK"
+              :labels="showText ? 'full' : 'none'"
+              theme="dark"
+            />
             <div
+              v-else
               class="map"
               :style="{
                 gridTemplateColumns: `repeat(${screen.colCount}, minmax(0, 1fr))`,
@@ -606,10 +617,13 @@ const statusOption = computed<EChartsCoreOption>(() => {
 .map-panel {
   display: flex;
   flex-direction: column;
+  min-height: 0;
 }
 
 .map-wrap {
   flex: 1;
+  min-height: 300px;
+  position: relative;
   padding: 12px;
   border-radius: 4px;
   background: rgba(5, 12, 9, 0.55);
@@ -621,6 +635,14 @@ const statusOption = computed<EChartsCoreOption>(() => {
   gap: 5px;
   height: 100%;
   min-height: 300px;
+}
+
+/* 区块布局按实际比例放在框里，不撑大框 */
+.block-map {
+  position: absolute;
+  inset: 12px;
+  width: calc(100% - 24px);
+  height: calc(100% - 24px);
 }
 
 .cell {

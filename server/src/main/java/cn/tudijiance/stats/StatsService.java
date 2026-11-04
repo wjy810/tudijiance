@@ -21,6 +21,7 @@ import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 
 import cn.tudijiance.common.ApiException;
 import cn.tudijiance.field.Field;
+import cn.tudijiance.field.FieldLayout;
 import cn.tudijiance.field.FieldService;
 import cn.tudijiance.field.Plot;
 import cn.tudijiance.observation.ComputedTraits;
@@ -148,7 +149,7 @@ public class StatsService {
         List<Field> fields = fieldService.list();
         if (fields.isEmpty()) {
             return new Screen(null, null, null, 0, 0, null, List.of(), List.of(), null, List.of(), List.of(),
-                    LocalDateTime.now(clock));
+                    LocalDateTime.now(clock), null);
         }
         Field field = fieldId == null ? fields.getFirst()
                 : fields.stream().filter(f -> f.getId().equals(fieldId)).findFirst()
@@ -162,7 +163,7 @@ public class StatsService {
                     new ScreenPlot(p.getId(), p.getRowNo(), p.getColNo(), p.getCode(), null,
                             Plot.KIND_PLOT.equals(p.getKind()) ? "NONE" : p.getKind(), null)));
             return new Screen(field.getName(), null, null, field.getRowCount(), field.getColCount(), null,
-                    plots, List.of(), null, List.of(), List.of(), LocalDateTime.now(clock));
+                    plots, List.of(), null, List.of(), List.of(), LocalDateTime.now(clock), fieldService.savedLayout(field));
         }
         TrialContext ctx = contextLoader.load(trial.getId());
         TrialStatus status = fieldMapService.status(trial.getId());
@@ -208,7 +209,7 @@ public class StatsService {
         List<RecentEntry> recent = groupRecent(observationService.views(recentRows, ctx));
         return new Screen(field.getName(), trial.getName(), trial.getSeasonYear(), field.getRowCount(),
                 field.getColCount(), status.indicators(), plots, yieldRows, yieldYear, trend, recent,
-                LocalDateTime.now(clock));
+                LocalDateTime.now(clock), fieldService.savedLayout(field));
     }
 
     /**
@@ -296,9 +297,10 @@ public class StatsService {
                               String value) {
     }
 
+    /** layout：保存过区块布局时按区块画，否则为 null，按 rowNo、colNo 画 */
     public record Screen(String fieldName, String trialName, Integer seasonYear, int rowCount, int colCount,
                          FieldMapService.Indicators indicators, List<ScreenPlot> plots, List<VarietyRow> yieldRows,
                          Integer yieldYear, List<TrendPoint> trend, List<RecentEntry> recent,
-                         LocalDateTime generatedAt) {
+                         LocalDateTime generatedAt, FieldLayout layout) {
     }
 }

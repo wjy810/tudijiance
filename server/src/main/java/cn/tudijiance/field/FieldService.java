@@ -74,9 +74,14 @@ public class FieldService {
     public FieldDetail detail(Long id) {
         Field field = get(id);
         List<Plot> plots = plots(id);
-        boolean saved = field.getLayout() != null && !field.getLayout().isBlank();
-        FieldLayout layout = saved ? json.readValue(field.getLayout(), FieldLayout.class) : LayoutGeometry.legacy(field, plots);
-        return new FieldDetail(field, plots, layout, saved);
+        FieldLayout saved = savedLayout(field);
+        return new FieldDetail(field, plots, saved != null ? saved : LayoutGeometry.legacy(field, plots), saved != null);
+    }
+
+    /** 保存过的区块布局；还是按行列建的老网格时为 null */
+    public FieldLayout savedLayout(Field field) {
+        return field.getLayout() == null || field.getLayout().isBlank()
+                ? null : json.readValue(field.getLayout(), FieldLayout.class);
     }
 
     public List<Plot> plots(Long fieldId) {

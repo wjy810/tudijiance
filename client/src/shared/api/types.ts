@@ -442,6 +442,8 @@ export interface Screen {
   /** 最新录入：同一次给多个小区录的同一个值合成一条，plotCount 是小区数 */
   recent: { at: string; user: string; plotCode: string; plotCount: number; traitName: string; value: string }[]
   generatedAt: string
+  /** 保存过区块布局时有，按区块画；没有时按 rowNo、colNo 画 */
+  layout?: FieldLayout | null
 }
 
 // ---------- 品种主要性状汇总表 ----------

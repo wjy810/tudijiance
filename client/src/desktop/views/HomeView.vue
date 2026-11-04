@@ -21,6 +21,8 @@ import { rememberTrial } from '@/shared/composables/useTrialPicker'
 import { MAIN_STAGES, stageView } from '@/shared/growthStage'
 import { useAuthStore } from '@/stores/auth'
 import MiniPlotMap from '@/desktop/components/MiniPlotMap.vue'
+import BlockMiniMap from '@/desktop/components/BlockMiniMap.vue'
+import { fieldSize } from '@/shared/fieldLayout'
 import FieldFormDialog from '@/desktop/components/FieldFormDialog.vue'
 import EmptyState from '@/desktop/components/EmptyState.vue'
 import PageHeader from '@/desktop/components/PageHeader.vue'
@@ -120,13 +122,25 @@ const leftToday = computed(() => (ind.value ? Math.max(0, ind.value.planted - in
 
 /** 缩略图：高度不超过 250px，行多列少的地按比例收窄 */
 function mapWidth(s: Screen, maxHeight: number, maxWidth: number): string {
+  if (s.layout) {
+    // 区块布局按实际长宽比
+    const f = fieldSize(s.layout)
+    return `${Math.round(Math.min((maxHeight * f.w) / Math.max(f.h, 1e-6), maxWidth))}px`
+  }
   const byHeight = (maxHeight / Math.max(s.rowCount, 1)) * 1.5 * s.colCount
   return `${Math.round(Math.min(byHeight, maxWidth))}px`
 }
 
-function fieldMeta(f: Field): string {
+function mapHeight(s: Screen, maxHeight: number, maxWidth: number): string | undefined {
+  if (!s.layout) return undefined
+  const f = fieldSize(s.layout)
+  return `${Math.round(Math.min(maxHeight, (maxWidth * f.h) / Math.max(f.w, 1e-6)))}px`
+}
+
+function fieldMeta(f: Field, s?: Screen | null): string {
+  const blocks = s?.layout?.blocks.filter((b) => b.kind === 'PLANT').length
   return [
-    `${f.rowCount} 行 × ${f.colCount} 列`,
+    blocks ? `${blocks} 个区块 · ${s!.plots.length} 个小区` : `${f.rowCount} 行 × ${f.colCount} 列`,
     f.location,
     f.irrigated === null ? null : f.irrigated ? '水地' : '旱地',
   ].filter(Boolean).join(' · ')
@@ -322,7 +336,7 @@ function onFieldCreated(detail: FieldDetail) {
               <h3 class="hero-title">{{ primary.field.name }}</h3>
               <div class="hero-meta">
                 <span v-if="primary.screen?.trialName" class="hero-trial">{{ primary.screen.trialName }}</span>
-                <span>{{ fieldMeta(primary.field) }}</span>
+                <span>{{ fieldMeta(primary.field, primary.screen) }}</span>
               </div>
             </div>
             <div v-if="ind" class="stage-now">
@@ -361,8 +375,16 @@ function onFieldCreated(detail: FieldDetail) {
 
         <button type="button" class="hero-map" title="打开平面图" @click="openMap(primary.field.id)">
           <span class="map-frame">
+            <BlockMiniMap
+              v-if="primary.screen?.layout"
+              :style="{ width: mapWidth(primary.screen, 236, 340), height: mapHeight(primary.screen, 236, 340) }"
+              :layout="primary.screen.layout"
+              :plots="primary.screen.plots"
+              :entered="enteredToday"
+              labels="code"
+            />
             <MiniPlotMap
-              v-if="primary.screen"
+              v-else-if="primary.screen"
               :style="{ width: mapWidth(primary.screen, 236, 340) }"
               :rows="primary.screen.rowCount"
               :cols="primary.screen.colCount"
@@ -490,8 +512,14 @@ function onFieldCreated(detail: FieldDetail) {
         <div class="field-grid">
           <article v-for="c in cards" :key="c.field.id" class="fcard" :class="{ on: c.field.id === primaryId }" @click="openMap(c.field.id)">
             <div class="fcard-map">
+              <BlockMiniMap
+                v-if="c.screen?.layout"
+                :style="{ width: mapWidth(c.screen, 150, 260), height: mapHeight(c.screen, 150, 260) }"
+                :layout="c.screen.layout"
+                :plots="c.screen.plots"
+              />
               <MiniPlotMap
-                v-if="c.screen"
+                v-else-if="c.screen"
                 :style="{ width: mapWidth(c.screen, 150, 260) }"
                 :rows="c.screen.rowCount"
                 :cols="c.screen.colCount"
@@ -503,7 +531,7 @@ function onFieldCreated(detail: FieldDetail) {
                 <span class="fcard-name">{{ c.field.name }}</span>
                 <span v-if="c.screen?.indicators?.currentStage" class="chip wheat">{{ c.screen.indicators.currentStage }}</span>
               </div>
-              <div class="fcard-meta">{{ c.screen?.trialName ?? '还没有试验' }} · {{ c.field.rowCount }} × {{ c.field.colCount }}</div>
+              <div class="fcard-meta">{{ c.screen?.trialName ?? '还没有试验' }} · {{ c.screen?.layout ? `${c.screen.layout.blocks.filter((b) => b.kind === 'PLANT').length} 个区块` : `${c.field.rowCount} × ${c.field.colCount}` }}</div>
               <div v-if="c.screen?.indicators" class="fcard-progress">
                 <span class="meter"><i :style="{ width: progress(c.screen) + '%' }" /></span>
                 <span class="num">今天 {{ c.screen.indicators.enteredToday }} / {{ c.screen.indicators.totalPlots }}</span>
