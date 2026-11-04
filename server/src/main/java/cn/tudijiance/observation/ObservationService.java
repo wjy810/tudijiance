@@ -5,7 +5,10 @@ import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -226,6 +229,12 @@ public class ObservationService {
     /** 老师修改一条数据。 */
     @Transactional
     public ObservationView update(Long id, UpdateRequest req, long userId) {
+        return update(id, req, userId, null);
+    }
+
+    /** 修改一条数据，auditNote 记进修改记录（例如按谁的更正申请改的） */
+    @Transactional
+    public ObservationView update(Long id, UpdateRequest req, long userId, String auditNote) {
         Observation o = get(id);
         if (!o.getVersion().equals(req.version())) {
             throw new ApiException(HttpStatus.CONFLICT, "这条数据刚被别人改过，请刷新后再改");
@@ -260,13 +269,18 @@ public class ObservationService {
             throw new ApiException(HttpStatus.CONFLICT, "这条数据刚被别人改过，请刷新后再改");
         }
         Observation saved = get(id);
-        audit(id, "UPDATE", before, describe(trait, options, saved), userId, now);
+        audit(id, "UPDATE", before, describe(trait, options, saved), userId, now, auditNote);
         return views(List.of(saved), contextLoader.load(trialIdOf(saved))).getFirst();
     }
 
     /** 老师删除一条数据（只做标记，保留记录）。 */
     @Transactional
     public void delete(Long id, long userId) {
+        delete(id, userId, null);
+    }
+
+    @Transactional
+    public void delete(Long id, long userId, String auditNote) {
         Observation o = get(id);
         TraitDef trait = catalog.get(o.getTraitId());
         observationMapper.update(null, Wrappers.<Observation>lambdaUpdate()
@@ -275,7 +289,7 @@ public class ObservationService {
                 .set(Observation::getUpdatedAt, LocalDateTime.now(clock))
                 .eq(Observation::getId, id));
         audit(id, "DELETE", describe(trait, catalog.optionsOf(trait.getId()), o), null, userId,
-                LocalDateTime.now(clock));
+                LocalDateTime.now(clock), auditNote);
     }
 
     public List<HistoryView> history(Long id) {
@@ -286,7 +300,7 @@ public class ObservationService {
                         .orderByDesc(AuditLog::getId))
                 .stream()
                 .map(a -> new HistoryView(a.getAction(), a.getOldValue(), a.getNewValue(),
-                        users.getOrDefault(a.getUserId(), "?"), a.getCreatedAt()))
+                        users.getOrDefault(a.getUserId(), "?"), a.getCreatedAt(), a.getNote()))
                 .toList();
     }
 
@@ -345,6 +359,54 @@ public class ObservationService {
         return planting;
     }
 
+    /** 按 id 取几条数据（已删的不要），给数据质量问题、更正申请用 */
+    public List<ObservationView> byIds(List<Long> ids) {
+        if (ids.isEmpty()) {
+            return List.of();
+        }
+        List<Observation> list = observationMapper.selectByIds(ids).stream()
+                .filter(o -> !Boolean.TRUE.equals(o.getDeleted())).toList();
+        Map<Long, List<Observation>> byTrial = new LinkedHashMap<>();
+        for (Observation o : list) {
+            byTrial.computeIfAbsent(trialIdOf(o), k -> new ArrayList<>()).add(o);
+        }
+        List<ObservationView> out = new ArrayList<>();
+        byTrial.forEach((trialId, obs) -> out.addAll(views(obs, contextLoader.load(trialId))));
+        Map<Long, Integer> order = new HashMap<>();
+        for (int i = 0; i < ids.size(); i++) {
+            order.putIfAbsent(ids.get(i), i);
+        }
+        out.sort(Comparator.comparing(v -> order.getOrDefault(v.id(), Integer.MAX_VALUE)));
+        return out;
+    }
+
+    /** 一条数据（没有或已删时 404） */
+    public Observation require(Long id) {
+        return get(id);
+    }
+
+    /** 数据所在的试验 */
+    public Long trialOf(Observation o) {
+        return trialIdOf(o);
+    }
+
+    /** 显示用的值，例如 "78 cm" "2 级" */
+    public String displayValue(Observation o) {
+        TraitDef trait = catalog.get(o.getTraitId());
+        return TraitValues.display(trait, catalog.optionsOf(trait.getId()), o.getValueNum(), o.getValueText(), o.getValueDate());
+    }
+
+    /** 检查要改成的值，返回改完以后显示用的值；值不对时抛 400 */
+    public String preview(Observation o, UpdateRequest req) {
+        TraitDef trait = catalog.get(o.getTraitId());
+        List<TraitOption> options = catalog.optionsOf(trait.getId());
+        TraitValues.Value value = TraitValues.validate(trait, options, req.valueNum(), req.valueText(), req.valueDate());
+        if (req.observedOn() != null && req.observedOn().isAfter(LocalDate.now(clock))) {
+            throw ApiException.badRequest("日期不能晚于今天");
+        }
+        return TraitValues.display(trait, options, value.num(), value.text(), value.date());
+    }
+
     private Observation get(Long id) {
         Observation o = observationMapper.selectById(id);
         if (o == null || Boolean.TRUE.equals(o.getDeleted())) {
@@ -363,6 +425,10 @@ public class ObservationService {
     }
 
     private void audit(Long id, String action, String before, String after, long userId, LocalDateTime at) {
+        audit(id, action, before, after, userId, at, null);
+    }
+
+    private void audit(Long id, String action, String before, String after, long userId, LocalDateTime at, String note) {
         AuditLog log = new AuditLog();
         log.setEntity(ENTITY);
         log.setEntityId(id);
@@ -371,10 +437,11 @@ public class ObservationService {
         log.setNewValue(truncate(after));
         log.setUserId(userId);
         log.setCreatedAt(at);
+        log.setNote(note == null || note.length() <= 300 ? note : note.substring(0, 300));
         auditMapper.insert(log);
     }
 
-    Map<Long, String> userNames() {
+    public Map<Long, String> userNames() {
         return userMapper.selectList(null).stream().collect(Collectors.toMap(User::getId,
                 u -> u.getDisplayName() == null || u.getDisplayName().isBlank() ? u.getUsername() : u.getDisplayName()));
     }

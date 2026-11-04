@@ -1,10 +1,11 @@
 <script setup lang="ts">
 // 我的：账号、服务器地址、下载离线数据、退出登录
-import { reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { showConfirmDialog, showLoadingToast, showToast, closeToast } from 'vant'
 
 import { useAuthStore } from '@/stores/auth'
+import { correctionApi, type CorrectionStatus, type CorrectionSummary, type CorrectionView } from '@/shared/api'
 import { ROLE } from '@/shared/labels'
 import { getServerUrl, setServerUrl } from '@/shared/settings'
 import { OFFLINE_EDITION } from '@/shared/edition'
@@ -80,6 +81,58 @@ async function clearDone() {
   showToast('已清除上传过的记录')
 }
 
+// ---------- 我的更正申请（学生，要联网） ----------
+const showCorrections = computed(() => !OFFLINE_EDITION && auth.role === 'STUDENT')
+const corrSummary = ref<CorrectionSummary | null>(null)
+const corrOpen = ref(false)
+const corrList = ref<CorrectionView[]>([])
+const corrLoading = ref(false)
+const CORR_STATUS: Record<CorrectionStatus, { label: string; type: 'warning' | 'success' | 'danger' | 'default' }> = {
+  PENDING: { label: '待审核', type: 'warning' },
+  APPROVED: { label: '已通过', type: 'success' },
+  REJECTED: { label: '已驳回', type: 'danger' },
+  WITHDRAWN: { label: '已撤回', type: 'default' },
+}
+const statusOf = (c: CorrectionView) => CORR_STATUS[c.status]
+const corrValue = computed(() => {
+  const c = corrSummary.value
+  if (!c) return ''
+  return [c.pending ? `${c.pending} 个待审核` : '', c.reviewedRecently ? `${c.reviewedRecently} 个有结果` : ''].filter(Boolean).join('，')
+})
+
+onMounted(async () => {
+  if (!showCorrections.value) return
+  corrSummary.value = await correctionApi.summary().catch(() => null)
+})
+
+async function openCorrections() {
+  corrOpen.value = true
+  corrLoading.value = true
+  try {
+    corrList.value = await correctionApi.list()
+  } catch (e) {
+    showToast((e as Error).message)
+  } finally {
+    corrLoading.value = false
+  }
+}
+
+async function withdrawCorrection(c: CorrectionView) {
+  try {
+    await showConfirmDialog({ title: '撤回这个申请？', message: '撤回后可以重新申请。' })
+  } catch {
+    return
+  }
+  try {
+    await correctionApi.withdraw(c.id)
+    showToast('已撤回')
+    await openCorrections()
+    corrSummary.value = await correctionApi.summary().catch(() => null)
+  } catch (e) {
+    showToast((e as Error).message)
+  }
+}
+
 async function logout() {
   const left = sync.pending + sync.failed
   try {
@@ -109,6 +162,7 @@ async function logout() {
       <van-cell v-if="OFFLINE_EDITION" title="新建本机实验田" label="填写名称、行列和品种，直接开始录入" is-link icon="plus" @click="localFieldOpen = true" />
       <van-cell v-else title="下载离线数据" :label="`去田里之前联网点一下。上次：${timeAgo(downloadedAt)}`" is-link icon="down" @click="download" />
       <van-cell title="录入记录" :value="OFFLINE_EDITION ? '已存本机' : sync.pending + sync.failed ? `${sync.pending + sync.failed} 条没传` : '全部已上传'" is-link icon="notes-o" @click="router.push('/records')" />
+      <van-cell v-if="showCorrections" title="我的更正申请" :value="corrValue" label="发现录错了，在小区详情里点“更正”" is-link icon="edit" @click="openCorrections" />
       <van-cell v-if="OFFLINE_EDITION" title="本机保存" label="记录不会自动清理。卸载应用或清除应用数据会删除本机记录。" icon="info-o" />
       <van-cell v-else title="清除上传过的记录" label="只清手机上的列表，服务器上的数据不动" icon="delete-o" is-link @click="clearDone" />
     </van-cell-group>
@@ -131,10 +185,116 @@ async function logout() {
     <van-dialog v-model:show="serverOpen" title="服务器地址" show-cancel-button @confirm="saveServer">
       <van-field v-model="serverDraft" placeholder="http://服务器地址:8080" clearable class="server-field" />
     </van-dialog>
+    <van-popup v-model:show="corrOpen" position="bottom" round closeable :style="{ height: '80%' }" teleport="body">
+      <div class="corr">
+        <div class="m-title corr-title">我的更正申请</div>
+        <van-loading v-if="corrLoading" class="corr-loading" />
+        <div v-else-if="corrList.length === 0" class="m-muted corr-empty">还没有申请过</div>
+        <div v-else class="corr-list">
+          <div v-for="c in corrList" :key="c.id" class="corr-item m-card">
+            <div class="corr-head">
+              <van-tag :type="statusOf(c).type" round>{{ statusOf(c).label }}</van-tag>
+              <b>小区 {{ c.plotCode }}</b><span>{{ c.traitName }}</span>
+              <span class="m-muted corr-time">{{ c.requestedAt.slice(5, 16).replace('T', ' ') }}</span>
+            </div>
+            <div class="corr-diff">
+              <s>{{ c.oldValue }}</s> → <b :class="{ del: c.kind === 'DELETE' }">{{ c.kind === 'DELETE' ? '删掉这条' : c.newValue }}</b>
+            </div>
+            <div class="m-muted corr-reason">{{ c.reason }}</div>
+            <div v-if="c.reviewedBy" class="corr-review" :class="c.status === 'APPROVED' ? 'ok' : 'no'">
+              {{ c.reviewedBy }}：{{ c.status === 'APPROVED' ? '通过' : '驳回' }}{{ c.reviewNote ? '，' + c.reviewNote : '' }}
+            </div>
+            <van-button v-if="c.status === 'PENDING'" size="small" round plain class="corr-withdraw" @click="withdrawCorrection(c)">撤回</van-button>
+          </div>
+        </div>
+      </div>
+    </van-popup>
   </div>
 </template>
 
 <style scoped>
+.corr {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 18px 14px 0;
+}
+
+.corr-title {
+  font-size: 19px;
+  margin-bottom: 12px;
+}
+
+.corr-loading,
+.corr-empty {
+  margin: 40px auto;
+  text-align: center;
+}
+
+.corr-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-bottom: calc(16px + env(safe-area-inset-bottom));
+}
+
+.corr-item {
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.corr-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.corr-time {
+  margin-left: auto;
+  font-size: 12px;
+}
+
+.corr-diff s {
+  color: var(--ink-3);
+}
+
+.corr-diff b {
+  color: var(--forest);
+}
+
+.corr-diff b.del {
+  color: var(--clay);
+}
+
+.corr-reason {
+  font-size: 13px;
+}
+
+.corr-review {
+  font-size: 13px;
+  padding: 6px 10px;
+  border-radius: 10px;
+}
+
+.corr-review.ok {
+  background: var(--green-soft);
+  color: var(--forest);
+}
+
+.corr-review.no {
+  background: #f8e6df;
+  color: #7d3520;
+}
+
+.corr-withdraw {
+  align-self: flex-end;
+}
+
 .profile {
   display: flex;
   align-items: center;

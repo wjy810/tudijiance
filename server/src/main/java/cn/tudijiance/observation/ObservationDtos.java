@@ -58,7 +58,7 @@ public final class ObservationDtos {
     public record PageResult<T>(long total, List<T> items) {
     }
 
-    public record HistoryView(String action, String oldValue, String newValue, String user, LocalDateTime at) {
+    public record HistoryView(String action, String oldValue, String newValue, String user, LocalDateTime at, String note) {
     }
 
     /** 平面图右键"标记异常"或取消异常。 */

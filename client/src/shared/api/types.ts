@@ -327,6 +327,67 @@ export interface HistoryView {
   newValue: string | null
   user: string
   at: string
+  /** 补充说明，例如"按李同学的更正申请：……" */
+  note?: string | null
+}
+
+export type CorrectionKind = 'UPDATE' | 'DELETE'
+export type CorrectionStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN'
+
+/** 学生提交的更正申请：改成什么、为什么 */
+export interface CorrectionCreate {
+  observationId: number
+  version: number
+  kind: CorrectionKind
+  observedOn?: string | null
+  valueNum?: number | null
+  valueText?: string | null
+  valueDate?: string | null
+  note?: string | null
+  reason: string
+}
+
+export interface CorrectionView {
+  id: number
+  observationId: number
+  trialId: number
+  trialName: string | null
+  fieldId: number | null
+  fieldName: string | null
+  plotId: number | null
+  plotCode: string | null
+  varietyName: string | null
+  traitId: number | null
+  traitName: string | null
+  dataType: TraitDataType | null
+  kind: CorrectionKind
+  /** 申请时的值（显示用，例如 "78 cm"）和调查日期 */
+  oldValue: string
+  oldObservedOn: string
+  /** 要改成的值和调查日期，申请删掉时为 null */
+  newValue: string | null
+  newObservedOn: string | null
+  /** 现在的值，数据已删时为 null */
+  currentValue: string | null
+  currentObservedOn: string | null
+  deleted: boolean
+  /** 待审核，但申请之后数据又被改过或删了，不能直接通过 */
+  stale: boolean
+  reason: string
+  status: CorrectionStatus
+  requestedById: number
+  requestedBy: string
+  requestedAt: string
+  reviewedBy: string | null
+  reviewedAt: string | null
+  reviewNote: string | null
+}
+
+export interface CorrectionSummary {
+  /** 老师：全部待审核；学生：自己待审核的 */
+  pending: number
+  /** 学生：最近 7 天被处理了的 */
+  reviewedRecently: number
 }
 
 export interface ObservationQuery {

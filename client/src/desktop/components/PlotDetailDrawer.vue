@@ -7,8 +7,10 @@ import { EditPen, Warning } from '@element-plus/icons-vue'
 import { observationApi, type LatestTraitValue, type ObservationView, type PlotDetail, type TraitCategory } from '@/shared/api'
 import { CONTROL_TYPE, PLOT_KIND, TRAIT_CATEGORY, replicateLabel } from '@/shared/labels'
 import { useAuthStore } from '@/stores/auth'
+import { useModuleStore } from '@/stores/modules'
 import ObservationEditDialog from './ObservationEditDialog.vue'
 import HistoryDialog from './HistoryDialog.vue'
+import CorrectionDialog from './CorrectionDialog.vue'
 
 const props = defineProps<{
   trialId: number | null
@@ -25,6 +27,7 @@ const emit = defineEmits<{
 }>()
 
 const auth = useAuthStore()
+const modules = useModuleStore()
 const detail = ref<PlotDetail | null>(null)
 const loading = ref(false)
 const tab = ref<'latest' | 'records'>('latest')
@@ -115,6 +118,16 @@ async function toggleAbnormal() {
 function edit(o: ObservationView) {
   editing.value = o
   editOpen.value = true
+}
+
+// 学生提交更正申请，老师审核通过后才改
+const correctOpen = ref(false)
+const correcting = ref<ObservationView[]>([])
+const canCorrect = computed(() => !auth.isTeacher && auth.canRecord && modules.isOn('corrections'))
+
+function requestCorrection(o: ObservationView) {
+  correcting.value = [o]
+  correctOpen.value = true
 }
 
 function history(o: ObservationView) {
@@ -221,6 +234,7 @@ async function onEdited() {
               <el-table-column label="" width="110" fixed="right">
                 <template #default="{ row }">
                   <el-button link size="small" @click="history(row)">记录</el-button>
+                  <el-button v-if="canCorrect" link type="primary" size="small" @click="requestCorrection(row)">更正</el-button>
                   <template v-if="auth.isTeacher">
                     <el-button link type="primary" size="small" @click="edit(row)">改</el-button>
                     <el-button link type="danger" size="small" @click="remove(row)">删</el-button>
@@ -236,6 +250,7 @@ async function onEdited() {
 
     <ObservationEditDialog v-model="editOpen" :observation="editing" @saved="onEdited" />
     <HistoryDialog v-model="historyOpen" :observation-id="historyId" />
+    <CorrectionDialog v-model="correctOpen" :observations="correcting" />
   </el-drawer>
 </template>
 

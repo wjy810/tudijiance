@@ -3,7 +3,9 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
-import type { PlotDetail } from '@/shared/api'
+import type { ObservationView, PlotDetail } from '@/shared/api'
+import { OFFLINE_EDITION } from '@/shared/edition'
+import { useAuthStore } from '@/stores/auth'
 import { PLOT_STATUS, TRAIT_CATEGORY, replicateLabel } from '@/shared/labels'
 import { repo } from '../repo'
 import { db, type OutboxBatch } from '../db'
@@ -11,6 +13,7 @@ import { useFieldStore } from '../stores/field'
 import { plotPlace } from '@/shared/fieldLayout'
 import { plotCode, timeAgo } from '../display'
 import EntrySheet from '../components/EntrySheet.vue'
+import CorrectionSheet from '../components/CorrectionSheet.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -53,6 +56,23 @@ const groups = computed(() => {
 async function onSaved() {
   await load()
 }
+
+// ---------- 学生申请更正（要联网；老师在电脑上审核） ----------
+const auth = useAuthStore()
+const canCorrect = computed(() => !OFFLINE_EDITION && auth.role === 'STUDENT' && !offlineAt.value && !!detail.value)
+const correctOpen = ref(false)
+const correcting = ref<ObservationView[]>([])
+
+function recordsOf(traitId: number): ObservationView[] {
+  return (detail.value?.records ?? [])
+    .filter((r) => r.traitId === traitId)
+    .sort((a, b) => b.observedOn.localeCompare(a.observedOn) || b.recordedAt.localeCompare(a.recordedAt))
+}
+
+function requestCorrection(traitId: number) {
+  correcting.value = recordsOf(traitId)
+  if (correcting.value.length) correctOpen.value = true
+}
 </script>
 
 <template>
@@ -92,6 +112,8 @@ async function onSaved() {
             <span class="name">{{ v.traitName }}<i v-if="v.computed" class="calc">算</i></span>
             <b class="num">{{ v.displayValue }}</b>
             <span class="m-muted date">{{ v.observedOn?.slice(5) ?? '' }}</span>
+            <button v-if="canCorrect && !v.computed && recordsOf(v.traitId).length" type="button" class="fix"
+              :aria-label="`申请更正${v.traitName}`" @click="requestCorrection(v.traitId)">更正</button>
           </div>
         </div>
       </section>
@@ -102,6 +124,7 @@ async function onSaved() {
       <van-button block round size="large" class="btn-wheat" icon="edit" :disabled="!plot || plot.kind !== 'PLOT'" @click="entryOpen = true">给这个小区录入</van-button>
     </div>
     <EntrySheet v-if="plot" v-model:show="entryOpen" :plots="[plot]" @saved="onSaved" />
+    <CorrectionSheet v-model:show="correctOpen" :observations="correcting" @submitted="load" />
   </div>
 </template>
 
@@ -232,6 +255,17 @@ async function onSaved() {
   width: 40px;
   text-align: right;
   font-size: 12px;
+}
+
+.fix {
+  align-self: center;
+  padding: 3px 9px;
+  border-radius: 12px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  font: inherit;
+  font-size: 12px;
+  color: var(--ink-2);
 }
 
 .row {

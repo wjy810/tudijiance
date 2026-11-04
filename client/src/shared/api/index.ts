@@ -39,6 +39,10 @@ import type {
   TrialBook,
   TrialBookRequest,
   AppModule,
+  CorrectionCreate,
+  CorrectionStatus,
+  CorrectionSummary,
+  CorrectionView,
   LinkModuleRequest,
   QualityReport,
   TraitDef,
@@ -115,6 +119,7 @@ export const observationApi = {
     data<ObservationView>(http.put(`/api/observations/${id}`, { version, observedOn, note, ...value })),
   remove: (id: number) => data<void>(http.delete(`/api/observations/${id}`)),
   history: (id: number) => data<HistoryView[]>(http.get(`/api/observations/${id}/history`)),
+  byIds: (ids: number[]) => data<ObservationView[]>(http.get('/api/observations/by-ids', { params: { ids: ids.join(',') } })),
   exportExcel: (q: Omit<ObservationQuery, 'page' | 'size'>, filename: string) =>
     download('/api/observations/export', q, filename),
   status: (trialId: number) => data<TrialStatus>(http.get(`/api/trials/${trialId}/status`)),
@@ -196,4 +201,14 @@ export const qualityApi = {
   ack: (trialId: number, key: string, note: string | null) =>
     data<void>(http.post('/api/quality/ack', { trialId, key, note })),
   unack: (trialId: number, key: string) => data<void>(http.delete('/api/quality/ack', { params: { trialId, key } })),
+}
+
+export const correctionApi = {
+  create: (req: CorrectionCreate) => data<CorrectionView>(http.post('/api/corrections', req)),
+  list: (params: { status?: CorrectionStatus; trialId?: number } = {}) =>
+    data<CorrectionView[]>(http.get('/api/corrections', { params })),
+  summary: () => data<CorrectionSummary>(http.get('/api/corrections/summary')),
+  approve: (id: number, note: string | null) => data<CorrectionView>(http.post(`/api/corrections/${id}/approve`, { note })),
+  reject: (id: number, note: string | null) => data<CorrectionView>(http.post(`/api/corrections/${id}/reject`, { note })),
+  withdraw: (id: number) => data<void>(http.post(`/api/corrections/${id}/withdraw`)),
 }

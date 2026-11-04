@@ -6,13 +6,14 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
   ArrowDown, ArrowRight, Check, Collection, Cpu, DataAnalysis, Document, Expand, Fold, Grid, HomeFilled,
-  DocumentChecked, Link as LinkIcon, Lock, Menu, Monitor, PieChart, Search, SwitchButton, Tickets, TopRight, Upload, User,
+  DocumentChecked, EditPen, Link as LinkIcon, Lock, Menu, Monitor, PieChart, Search, SwitchButton, Tickets, TopRight, Upload, User,
 } from '@element-plus/icons-vue'
 
 import { authApi, fieldApi, type Field, type Role } from '@/shared/api'
 import { ROLE } from '@/shared/labels'
 import { useAuthStore } from '@/stores/auth'
 import { useModuleStore } from '@/stores/modules'
+import { useCorrectionStore } from '@/stores/corrections'
 import { getServerUrl } from '@/shared/settings'
 import CommandPalette, { type PaletteItem } from '@/desktop/components/CommandPalette.vue'
 import appIcon from '@/assets/art/app-icon.webp'
@@ -20,6 +21,7 @@ import wheatArt from '@/assets/art/sidebar-wheat.webp'
 
 const auth = useAuthStore()
 const modules = useModuleStore()
+const corrections = useCorrectionStore()
 const route = useRoute()
 const router = useRouter()
 
@@ -47,6 +49,11 @@ const GROUPS: { title: string; items: MenuItem[] }[] = [
       { path: '/stats', label: '统计分析', icon: DataAnalysis, roles: RECORDERS, module: 'stats' },
       { path: '/analysis', label: '自助分析', icon: PieChart, roles: RECORDERS, module: 'analysis' },
       { path: '/quality', label: '数据质量', icon: DocumentChecked, roles: RECORDERS, module: 'quality' },
+      {
+        path: '/corrections', label: '更正申请', icon: EditPen, roles: RECORDERS, module: 'corrections',
+        // 老师：待审核的；学生：自己还没处理的
+        badge: () => corrections.summary?.pending,
+      },
     ],
   },
   {
@@ -190,6 +197,7 @@ function onKeydown(e: KeyboardEvent) {
 
 onMounted(() => {
   loadFields()
+  if (auth.canRecord) void corrections.refresh()
   window.addEventListener('keydown', onKeydown)
 })
 

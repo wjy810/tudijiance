@@ -21,6 +21,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import cn.tudijiance.common.ApiException;
 import cn.tudijiance.common.ExcelExport;
 import cn.tudijiance.observation.FieldMapService.PlotDetail;
 import cn.tudijiance.observation.FieldMapService.TrialStatus;
@@ -135,6 +136,16 @@ public class ObservationController {
     @PreAuthorize(Roles.IS_TEACHER)
     public void delete(@AuthenticationPrincipal Jwt jwt, @PathVariable Long id) {
         observationService.delete(id, CurrentUser.id(jwt));
+    }
+
+    /** 按 id 取几条数据，例如数据质量问题涉及的那几条 */
+    @GetMapping("/api/observations/by-ids")
+    @PreAuthorize(Roles.CAN_RECORD)
+    public List<ObservationView> byIds(@RequestParam List<Long> ids) {
+        if (ids.size() > 500) {
+            throw ApiException.badRequest("一次最多取 500 条");
+        }
+        return observationService.byIds(ids);
     }
 
     @GetMapping("/api/observations/{id}/history")

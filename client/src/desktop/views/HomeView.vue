@@ -21,6 +21,7 @@ import { rememberTrial } from '@/shared/composables/useTrialPicker'
 import { MAIN_STAGES, stageView } from '@/shared/growthStage'
 import { useAuthStore } from '@/stores/auth'
 import { useModuleStore } from '@/stores/modules'
+import { useCorrectionStore } from '@/stores/corrections'
 import MiniPlotMap from '@/desktop/components/MiniPlotMap.vue'
 import BlockMiniMap from '@/desktop/components/BlockMiniMap.vue'
 import blocksArt from '@/assets/art/empty-blocks.webp'
@@ -34,6 +35,7 @@ import GrowthStageTrack from '@/desktop/components/GrowthStageTrack.vue'
 
 const auth = useAuthStore()
 const modules = useModuleStore()
+const corrections = useCorrectionStore()
 const router = useRouter()
 
 interface FieldCard {
@@ -111,7 +113,10 @@ async function switchPrimary(id: number) {
   await loadPrimaryTrial()
 }
 
-onMounted(load)
+onMounted(() => {
+  load()
+  if (auth.canRecord) void corrections.refresh()
+})
 
 // ---------- 问候 ----------
 
@@ -203,11 +208,6 @@ const abnormal = computed(() =>
 )
 const abnormalTotal = computed(() => abnormal.value.length)
 
-/** 数据检查、更正申请这两页由别的功能提供；路由还没有时卡片显示"即将开放" */
-function hasRoute(path: string): boolean {
-  return router.getRoutes().some((r) => r.path === path)
-}
-
 interface Attention {
   key: string
   title: string
@@ -253,17 +253,34 @@ const attention = computed<Attention[]>(() => {
       },
     })
   }
-  if (auth.isTeacher) {
-    list.push({
-      key: 'corrections',
-      title: '待审核的更正申请',
-      desc: '学生发现录错了提交的更正，老师审核后生效',
-      icon: EditPen,
-      tone: 'sky',
-      action: '去审核',
-      // 合并"更正申请"后可在这里接上待审核条数（count）
-      go: hasRoute('/corrections') ? () => router.push('/corrections') : null,
-    })
+  if (modules.isOn('corrections')) {
+    const c = corrections.summary
+    if (auth.isTeacher) {
+      list.push({
+        key: 'corrections',
+        title: '待审核的更正申请',
+        desc: !c ? '学生发现录错了提交的更正，老师审核后生效'
+          : c.pending ? `${c.pending} 个申请等你看：原来的值、要改成的值和原因` : '没有待审核的申请',
+        icon: c && !c.pending ? CircleCheck : EditPen,
+        tone: c?.pending ? 'sky' : 'green',
+        count: c?.pending ?? null,
+        action: c?.pending ? '去审核' : '看看',
+        go: () => router.push('/corrections'),
+      })
+    } else {
+      list.push({
+        key: 'corrections',
+        title: '我的更正申请',
+        desc: !c ? '发现录错了，在数据查看或小区详情里对那条数据点“申请更正”'
+          : [c.pending ? `${c.pending} 个等老师审核` : '', c.reviewedRecently ? `最近 ${c.reviewedRecently} 个有了结果` : '']
+            .filter(Boolean).join('，') || '没有等待审核的申请。发现录错了，可以对那条数据申请更正',
+        icon: EditPen,
+        tone: c?.reviewedRecently ? 'green' : 'sky',
+        count: c ? c.pending + c.reviewedRecently || null : null,
+        action: '去看看',
+        go: () => router.push('/corrections'),
+      })
+    }
   }
   return list
 })
@@ -489,8 +506,7 @@ function onFieldCreated(detail: FieldDetail) {
               </span>
               <span class="attn-desc">{{ a.desc }}</span>
             </span>
-            <span v-if="!a.go && a.key !== 'abnormal'" class="chip">即将开放</span>
-            <span v-else-if="a.action" class="attn-go">{{ a.action }}<el-icon><ArrowRight /></el-icon></span>
+            <span v-if="a.action" class="attn-go">{{ a.action }}<el-icon><ArrowRight /></el-icon></span>
           </button>
         </div>
       </section>

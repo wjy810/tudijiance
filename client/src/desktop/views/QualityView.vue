@@ -5,13 +5,17 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Check, CircleCheck, MapLocation, Refresh, RefreshLeft } from '@element-plus/icons-vue'
+import { Check, CircleCheck, EditPen, MapLocation, Refresh, RefreshLeft } from '@element-plus/icons-vue'
 
-import { qualityApi, type QualityIssue, type QualityKind, type QualityReport, type TraitCategory } from '@/shared/api'
+import {
+  observationApi, qualityApi, type ObservationView, type QualityIssue, type QualityKind, type QualityReport, type TraitCategory,
+} from '@/shared/api'
 import { TRAIT_CATEGORY } from '@/shared/labels'
 import { QUALITY_KIND, QUALITY_LEVEL } from '@/shared/quality'
 import { useTrialPicker } from '@/shared/composables/useTrialPicker'
 import { useAuthStore } from '@/stores/auth'
+import { useModuleStore } from '@/stores/modules'
+import CorrectionDialog from '@/desktop/components/CorrectionDialog.vue'
 import PageHeader from '@/desktop/components/PageHeader.vue'
 import SectionCard from '@/desktop/components/SectionCard.vue'
 import StatCard from '@/desktop/components/StatCard.vue'
@@ -102,6 +106,31 @@ async function unack(issue: QualityIssue) {
     await load()
   } catch (e) {
     ElMessage.error((e as Error).message)
+  }
+}
+
+// ---------- 学生：对问题涉及的数据申请更正 ----------
+
+const modules = useModuleStore()
+const canCorrect = computed(() => !auth.isTeacher && auth.canRecord && modules.isOn('corrections'))
+const correctOpen = ref(false)
+const correcting = ref<ObservationView[]>([])
+const correctLoading = ref<string | null>(null)
+
+async function requestCorrection(issue: QualityIssue) {
+  correctLoading.value = issue.key
+  try {
+    // 问题涉及的数据，最多取 30 条让学生选
+    correcting.value = await observationApi.byIds(issue.observationIds.slice(0, 30))
+    if (correcting.value.length === 0) {
+      ElMessage.info('这些数据已经被改过或删了，重新检查一下')
+      return
+    }
+    correctOpen.value = true
+  } catch (e) {
+    ElMessage.error((e as Error).message)
+  } finally {
+    correctLoading.value = null
   }
 }
 
@@ -196,6 +225,10 @@ const checkedText = computed(() => (report.value ? report.value.checkedAt.slice(
               </div>
               <div class="issue-actions">
                 <el-button v-if="i.plotIds.length" link type="primary" :icon="MapLocation" @click="openPlot(i)">去平面图</el-button>
+                <el-button
+                  v-if="canCorrect && !i.acked && i.observationIds.length" link :icon="EditPen"
+                  :loading="correctLoading === i.key" @click="requestCorrection(i)"
+                >申请更正</el-button>
                 <template v-if="auth.isTeacher">
                   <el-button v-if="!i.acked" link :icon="Check" @click="ack(i)">确认没错</el-button>
                   <el-button v-else link :icon="RefreshLeft" @click="unack(i)">取消核实</el-button>
@@ -220,6 +253,8 @@ const checkedText = computed(() => (report.value ? report.value.checkedAt.slice(
         </div>
       </SectionCard>
     </template>
+
+    <CorrectionDialog v-model="correctOpen" :observations="correcting" @submitted="load" />
   </div>
 </template>
 

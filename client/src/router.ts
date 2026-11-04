@@ -47,6 +47,10 @@ const router = createRouter({
           meta: { roles: RECORDERS, module: 'quality' },
         },
         {
+          path: 'corrections', name: 'corrections', component: () => import('@/desktop/views/CorrectionsView.vue'),
+          meta: { roles: RECORDERS, module: 'corrections' },
+        },
+        {
           path: 'data', name: 'data', component: () => import('@/desktop/views/DataView.vue'),
           meta: { roles: RECORDERS, module: 'data' },
         },

@@ -48,6 +48,7 @@ watch(visible, async (open) => {
           <span class="old">{{ r.oldValue }}</span> → <span>{{ r.newValue }}</span>
         </div>
         <div v-else class="change">{{ r.action === 'DELETE' ? r.oldValue : r.newValue }}</div>
+        <div v-if="r.note" class="note">{{ r.note }}</div>
       </el-timeline-item>
     </el-timeline>
     <el-empty v-if="!loading && rows.length === 0" description="没有记录" :image-size="60" />
@@ -68,6 +69,12 @@ watch(visible, async (open) => {
   margin-top: 6px;
   color: #1f2a24;
   word-break: break-all;
+}
+
+.note {
+  margin-top: 4px;
+  font-size: 12.5px;
+  color: var(--ink-3);
 }
 
 .old {

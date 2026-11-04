@@ -9,10 +9,13 @@ import { TRAIT_CATEGORY, replicateLabel } from '@/shared/labels'
 import { useTrialPicker } from '@/shared/composables/useTrialPicker'
 import { useAuthStore } from '@/stores/auth'
 import { useCatalogStore } from '@/stores/catalog'
+import { useModuleStore } from '@/stores/modules'
 import ObservationEditDialog from '@/desktop/components/ObservationEditDialog.vue'
 import HistoryDialog from '@/desktop/components/HistoryDialog.vue'
+import CorrectionDialog from '@/desktop/components/CorrectionDialog.vue'
 
 const auth = useAuthStore()
+const modules = useModuleStore()
 const catalog = useCatalogStore()
 const picker = useTrialPicker()
 
@@ -134,6 +137,16 @@ function history(row: ObservationView) {
   historyOpen.value = true
 }
 
+// 学生不能直接改，提交更正申请，老师审核通过后才改
+const correctOpen = ref(false)
+const correcting = ref<ObservationView[]>([])
+const canCorrect = computed(() => !auth.isTeacher && auth.canRecord && modules.isOn('corrections'))
+
+function requestCorrection(row: ObservationView) {
+  correcting.value = [row]
+  correctOpen.value = true
+}
+
 async function remove(row: ObservationView) {
   try {
     await ElMessageBox.confirm(`删除小区 ${row.plotCode ?? ''} ${row.observedOn} 的"${row.traitName}：${row.displayValue}"？`, '删除数据', {
@@ -248,9 +261,10 @@ async function exportExcel() {
               <div v-if="row.updatedBy" class="edited small">{{ row.updatedBy }} 改过 · {{ row.updatedAt?.slice(5, 16).replace('T', ' ') }}</div>
             </template>
           </el-table-column>
-          <el-table-column label="" :width="auth.isTeacher ? 150 : 70" fixed="right" align="right">
+          <el-table-column label="" :width="auth.isTeacher || canCorrect ? 150 : 70" fixed="right" align="right">
             <template #default="{ row }">
               <el-button link size="small" @click="history(row)">记录</el-button>
+              <el-button v-if="canCorrect" link type="primary" size="small" @click="requestCorrection(row)">申请更正</el-button>
               <template v-if="auth.isTeacher">
                 <el-button link type="primary" size="small" @click="edit(row)">修改</el-button>
                 <el-button link type="danger" size="small" @click="remove(row)">删除</el-button>
@@ -275,6 +289,7 @@ async function exportExcel() {
 
     <ObservationEditDialog v-model="editOpen" :observation="editing" @saved="load" />
     <HistoryDialog v-model="historyOpen" :observation-id="historyId" />
+    <CorrectionDialog v-model="correctOpen" :observations="correcting" />
   </div>
 </template>
 

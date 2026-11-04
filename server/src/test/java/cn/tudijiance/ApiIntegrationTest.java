@@ -327,6 +327,80 @@ class ApiIntegrationTest {
     }
 
     @Test
+    void correctionRequestsAreReviewedByTeacher() throws Exception {
+        Setup s = setup("更正申请田");
+        JsonNode created = entry(student, s.trialId, "plant_height", List.of(s.plots.get(0)), Map.of("valueNum", 87), status().isOk());
+        long obsId = created.get(0).get("id").asLong();
+        int version = created.get(0).get("version").asInt();
+        Map<String, Object> req = new HashMap<>();
+        req.put("observationId", obsId);
+        req.put("version", version);
+        req.put("kind", "UPDATE");
+        req.put("valueNum", 78);
+        req.put("reason", "看错了刻度，应该是 78");
+
+        // 没写理由、和原来一样、游客都不行
+        Map<String, Object> noReason = new HashMap<>(req);
+        noReason.put("reason", " ");
+        call(student, post("/api/corrections"), noReason, status().isBadRequest());
+        Map<String, Object> same = new HashMap<>(req);
+        same.put("valueNum", 87);
+        call(student, post("/api/corrections"), same, status().isBadRequest());
+        call(guest, post("/api/corrections"), req, status().isForbidden());
+
+        JsonNode r = call(student, post("/api/corrections"), req, status().isOk());
+        assertThat(r.get("status").asString()).isEqualTo("PENDING");
+        assertThat(r.get("oldValue").asString()).isEqualTo("87 cm");
+        assertThat(r.get("newValue").asString()).isEqualTo("78 cm");
+        assertThat(r.get("newObservedOn").asString()).isEqualTo(r.get("oldObservedOn").asString());
+        assertThat(r.get("plotCode").asString()).isNotBlank();
+        // 同一条数据不能同时有两个待审核的申请
+        call(student, post("/api/corrections"), req, status().isConflict());
+        // 学生改不了数据，也审核不了
+        call(student, post("/api/corrections/" + r.get("id").asLong() + "/approve"), null, status().isForbidden());
+        assertThat(call(teacher, get("/api/corrections/summary"), null, status().isOk()).get("pending").asInt())
+                .isGreaterThanOrEqualTo(1);
+        assertThat(call(teacher, get("/api/corrections?status=PENDING"), null, status().isOk()).toString())
+                .contains("看错了刻度");
+
+        // 老师通过：数据改成 78，修改记录里写着按谁的申请改的
+        JsonNode approved = call(teacher, post("/api/corrections/" + r.get("id").asLong() + "/approve"),
+                Map.of("note", "好的"), status().isOk());
+        assertThat(approved.get("status").asString()).isEqualTo("APPROVED");
+        assertThat(approved.get("currentValue").asString()).isEqualTo("78 cm");
+        JsonNode history = call(teacher, get("/api/observations/" + obsId + "/history"), null, status().isOk());
+        assertThat(history.get(0).get("action").asString()).isEqualTo("UPDATE");
+        assertThat(history.get(0).get("note").asString()).contains("更正申请").contains("看错了刻度");
+        call(teacher, post("/api/corrections/" + r.get("id").asLong() + "/reject"), null, status().isConflict());
+        JsonNode mine = call(student, get("/api/corrections/summary"), null, status().isOk());
+        assertThat(mine.get("reviewedRecently").asInt()).isGreaterThanOrEqualTo(1);
+
+        // 申请删掉；之后老师又直接改了这条，申请过时，只能驳回
+        int v2 = call(student, get("/api/observations/by-ids?ids=" + obsId), null, status().isOk()).get(0).get("version").asInt();
+        JsonNode del = call(student, post("/api/corrections"), Map.of("observationId", obsId, "version", v2, "kind", "DELETE",
+                "reason", "录错小区了"), status().isOk());
+        call(teacher, put("/api/observations/" + obsId), Map.of("version", v2, "valueNum", 80), status().isOk());
+        JsonNode stale = find(call(teacher, get("/api/corrections"), null, status().isOk()),
+                c -> c.get("id").asLong() == del.get("id").asLong());
+        assertThat(stale.get("stale").asBoolean()).isTrue();
+        call(teacher, post("/api/corrections/" + del.get("id").asLong() + "/approve"), null, status().isConflict());
+        JsonNode rejected = call(teacher, post("/api/corrections/" + del.get("id").asLong() + "/reject"),
+                Map.of("note", "这条没录错小区"), status().isOk());
+        assertThat(rejected.get("reviewNote").asString()).isEqualTo("这条没录错小区");
+
+        // 学生可以撤回自己还没处理的申请；老师只看到全部，学生只看到自己的
+        JsonNode third = call(student, post("/api/corrections"), Map.of("observationId", obsId, "version", v2 + 1,
+                "kind", "DELETE", "reason", "多录了"), status().isOk());
+        call(teacher, post("/api/corrections/" + third.get("id").asLong() + "/withdraw"), null, status().isForbidden());
+        call(student, post("/api/corrections/" + third.get("id").asLong() + "/withdraw"), null, status().isOk());
+        JsonNode list = call(student, get("/api/corrections"), null, status().isOk());
+        assertThat(find(list, c -> c.get("id").asLong() == third.get("id").asLong()).get("status").asString())
+                .isEqualTo("WITHDRAWN");
+        assertThat(call(student, get("/api/observations/by-ids?ids=" + obsId), null, status().isOk()).get(0)
+                .get("displayValue").asString()).contains("80");
+    }
+
+    @Test
     void trialRecordBookAndHarvestArea() throws Exception {
         Setup s = setup("记载本试验田");
         String bookUrl = "/api/trials/" + s.trialId + "/book";

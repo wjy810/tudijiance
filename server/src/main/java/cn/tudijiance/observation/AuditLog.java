@@ -22,4 +22,6 @@ public class AuditLog {
     private String newValue;
     private Long userId;
     private LocalDateTime createdAt;
+    /** 补充说明，例如"按李同学的更正申请：……" */
+    private String note;
 }
