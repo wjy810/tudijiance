@@ -199,6 +199,70 @@ class ApiIntegrationTest {
     }
 
     @Test
+    void recordBookExportsInTheProvincialLayout() throws Exception {
+        Setup s = setup("记载本导出田");
+        String url = "/api/trials/" + s.trialId + "/plantings";
+        call(teacher, put(url), Map.of("plotIds", List.of(s.plots.get(0), s.plots.get(1)), "attribute", "REPLICATE",
+                "value", 1), status().isOk());
+        call(teacher, put(url), Map.of("plotIds", List.of(s.plots.get(2), s.plots.get(3)), "attribute", "REPLICATE",
+                "value", 2), status().isOk());
+        entry(student, s.trialId, "plant_height", List.of(s.plots.get(0)), Map.of("valueNum", 78), status().isOk());
+        entry(student, s.trialId, "seedling_habit", List.of(s.plots.get(0)), Map.of("valueText", "直立"), status().isOk());
+        entry(student, s.trialId, "plot_yield", List.of(s.plots.get(0), s.plots.get(2)), Map.of("valueNum", 8),
+                status().isOk());
+        call(teacher, put("/api/trials/" + s.trialId + "/book"), Map.of("info", Map.of("unitName", "某某农业大学"),
+                "weather", Map.of("tMonth|10|cur", "16.2"), "evaluations", Map.of()), status().isOk());
+
+        byte[] xlsx = mvc.perform(get("/api/stats/record-book/export?trialId=" + s.trialId)
+                        .header("Authorization", "Bearer " + student))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsByteArray();
+        try (Workbook wb = new XSSFWorkbook(new ByteArrayInputStream(xlsx))) {
+            List<String> names = new ArrayList<>();
+            wb.forEach(sh -> names.add(sh.getSheetName()));
+            assertThat(names).containsExactly("封面", "田间种植图", "基本情况", "气象资料", "田间记载", "考种结果", "产量表", "品种评价");
+            assertThat(cellText(wb.getSheet("封面"), "承试单位：", 1)).isEqualTo("某某农业大学");
+
+            Sheet field = wb.getSheet("田间记载");
+            assertThat(field.getRow(0).getCell(0).getStringCellValue()).contains("Ⅰ重复");
+            org.apache.poi.ss.usermodel.Row head = field.getRow(1);
+            int heightCol = -1;
+            int habitCol = -1;
+            for (int c = 0; c < head.getLastCellNum(); c++) {
+                String h = head.getCell(c).getStringCellValue();
+                if (h.equals("株高")) {
+                    heightCol = c;
+                }
+                if (h.equals("习性")) {
+                    habitCol = c;
+                }
+            }
+            org.apache.poi.ss.usermodel.Row first = field.getRow(3);
+            assertThat(first.getCell(0).getStringCellValue()).isEqualTo("1");
+            assertThat(first.getCell(heightCol).getNumericCellValue()).isEqualTo(78);
+            // 记载本用 1、3、5 记幼苗习性：直立写 5
+            assertThat(first.getCell(habitCol).getNumericCellValue()).isEqualTo(5);
+
+            // 产量表：两个品种各一行，有位次
+            Sheet yield = wb.getSheet("产量表");
+            assertThat(yield.getRow(1).getCell(1).getStringCellValue()).contains("小区产量");
+            assertThat(yield.getRow(3).getCell(1).getNumericCellValue()).isEqualTo(8);
+            assertThat(wb.getSheet("气象资料").getRow(12).getCell(4).getNumericCellValue()).isEqualTo(16.2);
+        }
+    }
+
+    private static String cellText(Sheet sheet, String label, int offset) {
+        for (org.apache.poi.ss.usermodel.Row row : sheet) {
+            for (org.apache.poi.ss.usermodel.Cell cell : row) {
+                if (cell.getCellType() == org.apache.poi.ss.usermodel.CellType.STRING
+                        && cell.getStringCellValue().equals(label)) {
+                    return row.getCell(cell.getColumnIndex() + offset).getStringCellValue();
+                }
+            }
+        }
+        return null;
+    }
+
+    @Test
     void fieldGridNumberingAndPlotKinds() throws Exception {
         JsonNode field = call(teacher, post("/api/fields"), Map.of("name", "东区试验田", "rowCount", 3, "colCount", 4,
                 "plotLengthM", 6.65, "plotWidthM", 2.0), status().isOk());

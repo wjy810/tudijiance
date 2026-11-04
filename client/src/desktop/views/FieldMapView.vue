@@ -12,7 +12,7 @@ import {
 } from '@element-plus/icons-vue'
 
 import {
-  deviceApi, fieldApi, observationApi, trialApi,
+  deviceApi, fieldApi, observationApi, statsApi, trialApi,
   type DeviceView, type FieldDetail, type Layout, type Plot, type PlotStatusCode, type PlotValue, type TraitView, type Trial,
   type TrialStatus,
 } from '@/shared/api'
@@ -880,6 +880,9 @@ function onMoreCommand(cmd: string) {
     fieldDialog.value = true
   } else if (cmd === 'export') {
     exportMap()
+  } else if (cmd === 'book' && trial.value) {
+    const name = [field.value?.name, trial.value.seasonYear, '记载本'].filter(Boolean).join('-')
+    statsApi.exportRecordBook(trial.value.id, `${name}.xlsx`).catch((e) => ElMessage.error((e as Error).message))
   } else if (cmd === 'import') {
     router.push('/import')
   }
@@ -1100,6 +1103,7 @@ const metricGroups = computed(() => {
               <el-dropdown-item v-if="auth.isTeacher" command="field">修改实验田信息</el-dropdown-item>
               <el-dropdown-item v-if="auth.isTeacher" command="import">导入历史表格</el-dropdown-item>
               <el-dropdown-item command="export">导出种植图（jpg）</el-dropdown-item>
+              <el-dropdown-item command="book" :disabled="!trial">导出记载本（Excel）</el-dropdown-item>
             </el-dropdown-menu>
           </template>
         </el-dropdown>

@@ -4,9 +4,9 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Check, Document, MapLocation, Sunny, Tickets } from '@element-plus/icons-vue'
+import { Check, Document, Download, MapLocation, Sunny, Tickets } from '@element-plus/icons-vue'
 
-import { fieldApi, trialApi, type FieldDetail, type Layout, type TrialBook } from '@/shared/api'
+import { fieldApi, statsApi, trialApi, type FieldDetail, type Layout, type TrialBook } from '@/shared/api'
 import {
   BOOK_GROUPS, WEATHER_ANALYSIS_KEY, WEATHER_MONTHS, WEATHER_ROWS, derivedWeather, harvestArea, mergePrefill,
   prefillFromSetup, weatherKey, type BookField, type WeatherKind,
@@ -89,6 +89,25 @@ async function save() {
     ElMessage.error((e as Error).message)
   } finally {
     saving.value = false
+  }
+}
+
+const exporting = ref(false)
+
+/** 导出 Excel 记载本：有没保存的改动时先保存，导出的才是现在看到的 */
+async function exportBook() {
+  if (dirty.value && !readonly.value) {
+    await save()
+    if (dirty.value) return
+  }
+  exporting.value = true
+  try {
+    const name = [field.value?.name, trial.value?.seasonYear, '记载本'].filter(Boolean).join('-')
+    await statsApi.exportRecordBook(trialId.value, `${name}.xlsx`)
+  } catch (e) {
+    ElMessage.error((e as Error).message)
+  } finally {
+    exporting.value = false
   }
 }
 
@@ -203,6 +222,9 @@ function setInfo(key: string, value: string | null | undefined) {
         <el-button v-if="field" :icon="MapLocation" @click="router.push({ path: `/fields/${field.id}`, query: { trial: trialId } })">
           回平面图
         </el-button>
+        <el-tooltip content="封面、种植图、基本情况、气象、田间记载（按重复）、考种、产量表、品种评价，一个 Excel" placement="bottom">
+          <el-button :icon="Download" :loading="exporting" :disabled="loading" @click="exportBook">导出记载本</el-button>
+        </el-tooltip>
         <el-button v-if="!readonly" type="primary" :icon="Check" :loading="saving" :disabled="!dirty" @click="save">
           保存<kbd class="kbd-light">Ctrl S</kbd>
         </el-button>

@@ -21,11 +21,21 @@ public class StatsController {
     private final StatsService statsService;
     private final TrialReportService reportService;
     private final TrialService trialService;
+    private final RecordBookExport recordBookExport;
 
-    public StatsController(StatsService statsService, TrialReportService reportService, TrialService trialService) {
+    public StatsController(StatsService statsService, TrialReportService reportService, TrialService trialService,
+                           RecordBookExport recordBookExport) {
         this.statsService = statsService;
         this.reportService = reportService;
         this.trialService = trialService;
+        this.recordBookExport = recordBookExport;
+    }
+
+    /** 按河南省小麦品种试验记载本的样子导出整个试验（封面、种植图、基本情况、气象、田间记载、考种、产量、评价） */
+    @GetMapping("/api/stats/record-book/export")
+    @PreAuthorize(Roles.CAN_RECORD)
+    public ResponseEntity<byte[]> exportRecordBook(@RequestParam Long trialId) {
+        return ExcelExport.response(recordBookExport.filename(trialId), recordBookExport.export(trialId));
     }
 
     /** 品种主要性状汇总表 */

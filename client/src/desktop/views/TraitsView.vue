@@ -159,7 +159,7 @@ async function onCreated() {
 
       <div class="panel table-panel">
         <el-table v-loading="loading" :data="rows" :empty-text="tab === 'CUSTOM' ? '还没有自定义项目' : '没有项目'">
-          <el-table-column label="项目" min-width="150">
+          <el-table-column label="项目" min-width="128">
             <template #default="{ row }">
               <div :class="{ disabled: !row.trait.enabled }">{{ row.trait.name }}</div>
               <div class="muted small">
@@ -169,13 +169,13 @@ async function onCreated() {
               </div>
             </template>
           </el-table-column>
-          <el-table-column label="类型" width="110">
+          <el-table-column label="类型" width="96">
             <template #default="{ row }">
               {{ TRAIT_DATA_TYPE[row.trait.dataType as keyof typeof TRAIT_DATA_TYPE] }}
               <span v-if="row.trait.unit && row.trait.unit !== '级'" class="muted small">（{{ row.trait.unit }}）</span>
             </template>
           </el-table-column>
-          <el-table-column label="可选的值" min-width="260">
+          <el-table-column label="可选的值" min-width="200">
             <template #default="{ row }">
               <div class="tags">
                 <span v-for="o in row.options.slice(0, MAX_TAGS)" :key="o.id" class="opt">{{ optionLabel(o) }}</span>
@@ -184,7 +184,7 @@ async function onCreated() {
               </div>
             </template>
           </el-table-column>
-          <el-table-column label="导入时的表头" min-width="190">
+          <el-table-column label="导入时的表头" min-width="150">
             <template #default="{ row }">
               <div class="tags">
                 <span v-for="a in row.aliases.slice(0, 3)" :key="a" class="chip wheat">{{ a }}</span>
@@ -194,10 +194,13 @@ async function onCreated() {
               </div>
             </template>
           </el-table-column>
-          <el-table-column label="调查时间 / 说明" min-width="180" show-overflow-tooltip>
-            <template #default="{ row }"><span class="muted">{{ row.trait.surveyTime }}</span></template>
+          <el-table-column label="调查时间 / 说明" min-width="160">
+            <template #default="{ row }">
+              <div class="survey muted" :title="row.trait.surveyTime ?? ''">{{ row.trait.surveyTime }}</div>
+              <div v-if="row.trait.description" class="book-note" :title="row.trait.description">{{ row.trait.description }}</div>
+            </template>
           </el-table-column>
-          <el-table-column label="启用" width="70" align="center">
+          <el-table-column label="启用" width="64" align="center" fixed="right">
             <template #default="{ row }">
               <el-switch
                 :model-value="row.trait.enabled"
@@ -207,7 +210,7 @@ async function onCreated() {
               />
             </template>
           </el-table-column>
-          <el-table-column v-if="auth.isTeacher && tab === 'CUSTOM'" label="" width="70">
+          <el-table-column v-if="auth.isTeacher && tab === 'CUSTOM'" label="" width="64" fixed="right">
             <template #default="{ row }">
               <el-button link type="danger" size="small" @click="remove(row)">删除</el-button>
             </template>
@@ -367,5 +370,21 @@ async function onCreated() {
   padding: 0 6px;
   font-size: 12px;
   line-height: 20px;
+}
+
+/* 说明最多两行；河南记载本和标准写法不同的地方用金色小字标出来 */
+.survey,
+.book-note {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.5;
+}
+
+.book-note {
+  margin-top: 2px;
+  font-size: var(--fs-xs);
+  color: var(--wheat-ink);
 }
 </style>

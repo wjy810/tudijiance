@@ -127,6 +127,9 @@ export const statsApi = {
   trialReport: (trialId: number) => data<TrialReport>(http.get('/api/stats/trial-report', { params: { trialId } })),
   exportTrialReport: (trialId: number, filename: string) =>
     download('/api/stats/trial-report/export', { trialId }, filename),
+  /** 按河南省小麦品种试验记载本的样子导出整个试验 */
+  exportRecordBook: (trialId: number, filename: string) =>
+    download('/api/stats/record-book/export', { trialId }, filename),
 }
 
 export const importApi = {

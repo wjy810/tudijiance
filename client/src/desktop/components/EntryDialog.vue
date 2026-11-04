@@ -178,6 +178,7 @@ async function onCustomCreated(created: TraitView) {
         <template v-if="trait.trait.surveyTime">{{ trait.trait.isStandard ? '调查时间：' : '' }}{{ trait.trait.surveyTime }}</template>
         <template v-if="trait.trait.stdClause"> · 标准条款 {{ trait.trait.stdClause }}</template>
       </div>
+      <div v-if="trait.trait.description" class="hint book-note">{{ trait.trait.description }}</div>
       <TraitValueInput v-model="value" :trait="trait" />
 
       <el-form label-width="80px" class="extra">
@@ -234,5 +235,11 @@ async function onCustomCreated(created: TraitView) {
 
 .extra {
   margin-top: 16px;
+}
+
+.book-note {
+  margin-top: -6px;
+  margin-bottom: 10px;
+  color: var(--wheat-ink);
 }
 </style>

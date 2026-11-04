@@ -226,6 +226,7 @@ function openDate() {
           <van-button size="small" icon="arrow-left" plain round @click="step = 'trait'">换项目</van-button>
           <span v-if="trait.trait.surveyTime" class="m-muted hint">{{ trait.trait.surveyTime }}</span>
         </div>
+        <div v-if="trait.trait.description" class="book-note">{{ trait.trait.description }}</div>
 
         <van-radio-group v-if="canEach" v-model="mode" direction="horizontal" class="mode">
           <van-radio name="same">所有小区同一个值</van-radio>
@@ -473,5 +474,15 @@ function openDate() {
   padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
   border-top: 1px solid var(--line);
   background: var(--surface);
+}
+
+.book-note {
+  margin: -4px 0 10px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--wheat-wash);
+  color: var(--wheat-ink);
+  font-size: 12.5px;
+  line-height: 1.5;
 }
 </style>
