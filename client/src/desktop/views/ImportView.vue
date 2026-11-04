@@ -417,7 +417,7 @@ const orientationHelp = computed(() => settings.orientation === 'COLUMNS'
       </div>
 
       <el-upload drag :auto-upload="false" :show-file-list="false" accept=".xlsx,.xls,.csv" :on-change="onFile" class="drop">
-        <EmptyState art="import" title="把表格拖到这里，或点击选择文件" desc="支持 Excel（.xlsx、.xls）和 CSV；每列一个字段、每行一个字段的表都可以" :size="130">
+        <EmptyState art="import" title="把表格拖到这里，或点击选择文件" desc="支持 Excel（.xlsx、.xls）和 CSV；每列一个字段、每行一个字段的表都可以。河南省小麦品种试验记载本的田间记载、性状汇总、考种、产量表的表头能自动认出" :size="130">
           <el-button class="btn-wheat" :icon="UploadFilled">选择文件</el-button>
         </EmptyState>
       </el-upload>

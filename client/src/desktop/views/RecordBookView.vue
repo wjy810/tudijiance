@@ -269,7 +269,7 @@ function setInfo(key: string, value: string | null | undefined) {
                 value-format="YYYY-MM-DD"
                 format="YYYY 年 M 月 D 日"
                 :disabled="readonly"
-                :placeholder="f.hint ?? '选择日期'"
+                :placeholder="readonly ? '' : (f.hint ?? '选择日期')"
                 style="width: 100%"
                 @update:model-value="(v: string) => setInfo(f.key, v)"
               />
@@ -278,7 +278,7 @@ function setInfo(key: string, value: string | null | undefined) {
                 :model-value="info[f.key] ?? ''"
                 :disabled="readonly"
                 clearable
-                placeholder="选择"
+                :placeholder="readonly ? '' : '选择'"
                 @update:model-value="(v: string) => setInfo(f.key, v)"
               >
                 <el-option v-for="o in f.options" :key="o" :value="o" :label="o" />
@@ -289,7 +289,7 @@ function setInfo(key: string, value: string | null | undefined) {
                 type="textarea"
                 :autosize="{ minRows: 2, maxRows: 8 }"
                 :disabled="readonly"
-                :placeholder="f.hint ?? '写清楚时间、种类、数量和方法'"
+                :placeholder="readonly ? '' : (f.hint ?? '写清楚时间、种类、数量和方法')"
                 @update:model-value="(v: string) => setInfo(f.key, v)"
               />
               <el-input
@@ -297,7 +297,7 @@ function setInfo(key: string, value: string | null | undefined) {
                 :model-value="info[f.key] ?? ''"
                 :inputmode="f.type === 'number' ? 'decimal' : undefined"
                 :disabled="readonly"
-                :placeholder="f.hint ?? ''"
+                :placeholder="readonly ? '' : (f.hint ?? '')"
                 @update:model-value="(v: string) => setInfo(f.key, f.type === 'number' ? v.replace(/[^\d.\-]/g, '') : v)"
               />
             </label>
@@ -372,7 +372,7 @@ function setInfo(key: string, value: string | null | undefined) {
             type="textarea"
             :autosize="{ minRows: 3, maxRows: 10 }"
             :disabled="readonly"
-            placeholder="例如：播种期墒情适宜，冬前积温偏高，春季倒春寒较轻……"
+            :placeholder="readonly ? '还没有写' : '例如：播种期墒情适宜，冬前积温偏高，春季倒春寒较轻……'"
             @update:model-value="(v: string) => setInfo(WEATHER_ANALYSIS_KEY, v)"
           />
         </SectionCard>
@@ -395,7 +395,7 @@ function setInfo(key: string, value: string | null | undefined) {
                 type="textarea"
                 :autosize="{ minRows: 2, maxRows: 8 }"
                 :disabled="readonly"
-                placeholder="产量表现、抗性、熟相、优缺点和建议"
+                :placeholder="readonly ? '还没有写' : '产量表现、抗性、熟相、优缺点和建议'"
                 @update:model-value="(t: string) => setEvaluation(v!.id, t)"
               />
             </div>

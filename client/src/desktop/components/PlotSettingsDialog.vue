@@ -6,7 +6,12 @@ import { ElMessage } from 'element-plus'
 import { fieldApi, type Plot, type PlotKind, type PlotPatch } from '@/shared/api'
 import { PLOT_KIND } from '@/shared/labels'
 
-const props = defineProps<{ fieldId: number; plots: Plot[] }>()
+const props = defineProps<{
+  fieldId: number
+  plots: Plot[]
+  /** 按区块布局管理的地：小区大小由布局决定，这里不改 */
+  layoutSaved?: boolean
+}>()
 const visible = defineModel<boolean>({ required: true })
 const emit = defineEmits<{ saved: [plots: Plot[]] }>()
 
@@ -38,8 +43,8 @@ watch(visible, (open) => {
 async function save() {
   const patch: PlotPatch = { plotIds: props.plots.map((p) => p.id) }
   if (form.kind) patch.kind = form.kind
-  if (form.lengthM) patch.lengthM = form.lengthM
-  if (form.widthM) patch.widthM = form.widthM
+  if (form.lengthM && !props.layoutSaved) patch.lengthM = form.lengthM
+  if (form.widthM && !props.layoutSaved) patch.widthM = form.widthM
   if (form.plantingRows) patch.plantingRows = form.plantingRows
   if (form.rowSpacingCm) patch.rowSpacingCm = form.rowSpacingCm
   if (Object.keys(patch).length === 1) {
@@ -70,7 +75,12 @@ async function save() {
         </el-radio-group>
         <div class="hint full">保护区和走道不种试验品种，也不录入数据。</div>
       </el-form-item>
-      <el-form-item label="长 × 宽">
+      <el-form-item v-if="layoutSaved" label="长 × 宽">
+        <span class="muted">
+          {{ form.lengthM && form.widthM ? `${form.lengthM} m × ${form.widthM} m，` : '' }}由区块布局决定，在“编辑地块”里改
+        </span>
+      </el-form-item>
+      <el-form-item v-else label="长 × 宽">
         <el-input-number v-model="form.lengthM" :min="0.1" :max="200" :precision="2" :controls="false" class="dim" />
         <span class="sep">×</span>
         <el-input-number v-model="form.widthM" :min="0.1" :max="200" :precision="2" :controls="false" class="dim" />

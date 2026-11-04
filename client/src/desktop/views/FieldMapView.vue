@@ -965,6 +965,56 @@ async function assignReplicate() {
   }
 }
 
+/** 种植区块按从上到下、从左到右的顺序 */
+const plantBlocks = computed(() => (fieldLayout.value?.blocks ?? [])
+  .filter((b) => b.kind === 'PLANT' && b.inner && Object.keys(b.inner.plots).length > 0)
+  .sort((a, b) => a.r - b.r || a.c - b.c))
+
+/** 每个区块现在的重复号（都一样时显示，不一样时为空） */
+const blockReplicates = computed(() => plantBlocks.value.map((b) => {
+  const reps = new Set(Object.values(b.inner!.plots)
+    .filter((id) => plotById.value.get(id)?.kind === 'PLOT')
+    .map((id) => plantingByPlot.value.get(id)?.replicateNo ?? null))
+  return { block: b, rep: reps.size === 1 ? [...reps][0] ?? null : null, mixed: reps.size > 1 }
+}))
+
+const assigningReps = ref(false)
+
+/** 一个区块一个重复：区块1 → 重复Ⅰ，区块2 → 重复Ⅱ…… */
+async function replicatesByBlock() {
+  if (!trialId.value || plantBlocks.value.length === 0) {
+    return
+  }
+  const already = blockReplicates.value.some((x) => x.rep != null || x.mixed)
+  try {
+    await ElMessageBox.confirm(
+      `按区块顺序设重复：${plantBlocks.value.slice(0, 4).map((b, i) => `${b.name} → 重复 ${replicateLabel(i + 1)}`).join('，')}`
+        + `${plantBlocks.value.length > 4 ? '……' : ''}。${already ? '已经设过的重复号会改掉。' : ''}`,
+      '按区块设重复', { confirmButtonText: '设重复', cancelButtonText: '取消', type: already ? 'warning' : 'info' },
+    )
+  } catch {
+    return
+  }
+  assigningReps.value = true
+  try {
+    let l: Layout | null = null
+    for (const [i, b] of plantBlocks.value.entries()) {
+      const ids = Object.values(b.inner!.plots).filter((id) => plotById.value.get(id)?.kind === 'PLOT')
+      if (ids.length) {
+        l = await trialApi.assign(trialId.value, ids, 'REPLICATE', i + 1)
+      }
+    }
+    if (l) {
+      onLayoutSaved(l)
+    }
+    ElMessage.success(`已按 ${plantBlocks.value.length} 个区块设好重复`)
+  } catch (e) {
+    ElMessage.error((e as Error).message)
+  } finally {
+    assigningReps.value = false
+  }
+}
+
 async function removeLink(id: number, label: string) {
   try {
     await ElMessageBox.confirm(`删除对照关系"${label}"？`, '删除', { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' })
@@ -1265,7 +1315,7 @@ const metricGroups = computed(() => {
               <el-button @click="assignReplicate">设重复</el-button>
               <el-button @click="openLayoutDialog('link')">设对照</el-button>
               <el-button @click="numberingDialog = true">编号</el-button>
-              <el-button @click="plotDialog = true">小区类型和尺寸</el-button>
+              <el-button @click="plotDialog = true">{{ detail?.layoutSaved ? '小区类型' : '小区类型和尺寸' }}</el-button>
             </template>
             <el-button text :icon="Close" class="clear" @click="selected = []">取消选择</el-button>
           </div>
@@ -1311,6 +1361,20 @@ const metricGroups = computed(() => {
           <div class="legend-row"><span class="dot" />今天录过数据</div>
           <div class="legend-row"><b class="ck">CK</b>对照品种</div>
           <div class="legend-row"><b class="ck alert">!</b>有异常</div>
+        </section>
+
+        <section v-if="trial && mode === 'layout' && plantBlocks.length > 1" class="panel panel-pad">
+          <div class="panel-title">区块和重复<span class="sub">{{ plantBlocks.length }} 个区块</span></div>
+          <div v-for="x in blockReplicates" :key="x.block.id" class="rep-row">
+            <span>{{ x.block.name }}</span>
+            <span v-if="x.rep" class="chip green">重复 {{ replicateLabel(x.rep) }}</span>
+            <span v-else-if="x.mixed" class="chip wheat">几个重复</span>
+            <span v-else class="faint">未设</span>
+          </div>
+          <el-button size="small" type="primary" plain :loading="assigningReps" class="rep-btn" @click="replicatesByBlock">
+            一个区块一个重复
+          </el-button>
+          <div class="hint">记载本里一个重复通常种在一个区块。也可以点区块的名称牌选中整个区块，再点“设重复”。</div>
         </section>
 
         <section v-if="trial" class="panel panel-pad">
@@ -1387,7 +1451,7 @@ const metricGroups = computed(() => {
       @saved="onLayoutSaved"
     />
     <NumberingDialog v-model="numberingDialog" :field-id="fieldId" :plots="selectedPlots" @saved="onPlotsSaved" />
-    <PlotSettingsDialog v-model="plotDialog" :field-id="fieldId" :plots="selectedPlots" @saved="onPlotsSaved" />
+    <PlotSettingsDialog v-model="plotDialog" :field-id="fieldId" :plots="selectedPlots" :layout-saved="detail?.layoutSaved" @saved="onPlotsSaved" />
   </div>
 </template>
 
@@ -1961,6 +2025,19 @@ const metricGroups = computed(() => {
 .ck.alert {
   background: var(--clay);
   color: #fff6ee;
+}
+
+.rep-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 3px 0;
+  font-size: 13px;
+}
+
+.rep-btn {
+  margin: 8px 0 6px;
+  width: 100%;
 }
 
 .link-row {
