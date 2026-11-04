@@ -100,3 +100,18 @@ cd server && mvn test
 ```bash
 cd client && pnpm test && pnpm type-check
 ```
+
+## 独立田间种植图与记载本
+
+仓库根目录的 `src/`、`tests/` 和 `package.json` 保留独立的 React 版田间种植图与记载本，数据保存在浏览器本地。它与上面的 `client/`、`server/` 分别运行；使用说明见 [独立种植图工具](docs/field-map-standalone.md)。
+
+在仓库根目录运行：
+
+```bash
+npm ci
+npm run dev -- --port 5175
+npm test
+npm run build
+```
+
+开发地址为 http://localhost:5175 ，与电脑端的 5173、手机端的 5174 区分。
