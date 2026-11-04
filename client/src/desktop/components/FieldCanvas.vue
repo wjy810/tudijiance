@@ -60,7 +60,10 @@ const props = withDefaults(defineProps<{
   rulers?: boolean
   /** 可以拖动特殊区块（编辑地块时） */
   draggable?: boolean
+  /** 底部浮动操作条占的高度（像素），适应窗口时让开 */
+  insetBottom?: number
 }>(), {
+  insetBottom: 0,
   focus: null, pick: 'plot', selectedPlots: () => [], selectedBlocks: () => [], selectedCells: () => [],
   links: () => [], devices: () => [], rotation: 0, locked: false, panning: false, rulers: false, draggable: false,
 })
@@ -165,11 +168,12 @@ function fit() {
   const s = Math.abs(Math.sin(rad.value))
   const bw = r.w * c + r.h * s
   const bh = r.w * s + r.h * c
-  const k = Math.min((size.value.w - margin * 2) / Math.max(bw, 1e-6), (size.value.h - margin * 2) / Math.max(bh, 1e-6))
+  const availH = size.value.h - props.insetBottom
+  const k = Math.min((size.value.w - margin * 2) / Math.max(bw, 1e-6), (availH - margin * 2) / Math.max(bh, 1e-6))
   fitScale = Math.max(0.01, k)
   scale.value = fitScale
   origin.value = { x: r.x + r.w / 2, y: r.y + r.h / 2 }
-  pan.value = { x: size.value.w / 2, y: size.value.h / 2 }
+  pan.value = { x: size.value.w / 2, y: availH / 2 }
   touched = false
   emit('zoom', 100)
 }
@@ -373,7 +377,17 @@ interface Tick {
   index: number
   rect: Rect
   label: string
+  /** 地方不够时只写这个 */
+  short?: string
   selected: boolean
+}
+
+/** 标尺上的字：放得下写全（序号 · 大小），放不下只写序号或大小 */
+function tickLabel(t: Tick): string {
+  const box = uprightBox(t.rect)
+  const room = box.w * scale.value
+  const need = t.label.length * 7 + 8
+  return room >= need || !t.short ? (room >= 18 ? t.label : '') : room >= t.short.length * 7 + 4 ? t.short : ''
 }
 
 const rulerTicks = computed<Tick[]>(() => {
@@ -390,7 +404,7 @@ const rulerTicks = computed<Tick[]>(() => {
     sizes.cols.forEach((w, i) => {
       out.push({
         key: `c${i}`, axis: 'col', index: i, rect: { x, y: box.y - gap, w, h: gap * 0.8 },
-        label: showSizes ? `${i + 1} · ${fmt(w, u)}` : String(i + 1), selected: false,
+        label: showSizes ? `${i + 1} · ${fmt(w, u)}` : String(i + 1), short: String(i + 1), selected: false,
       })
       x += w
     })
@@ -398,7 +412,7 @@ const rulerTicks = computed<Tick[]>(() => {
     sizes.rows.forEach((h, i) => {
       out.push({
         key: `r${i}`, axis: 'row', index: i, rect: { x: box.x - gap, y, w: gap * 0.8, h },
-        label: showSizes ? `${i + 1} · ${fmt(h, u)}` : String(i + 1), selected: false,
+        label: showSizes ? `${i + 1} · ${fmt(h, u)}` : String(i + 1), short: String(i + 1), selected: false,
       })
       y += h
     })
@@ -757,6 +771,11 @@ function screenOf(p: { x: number; y: number }) {
 
 defineExpose({ fit, zoomBy, rotateTo, exportJpeg, screenOf, contentRect })
 
+// 开发时给自动化测试用：布局坐标 → 画布上的位置
+if (import.meta.env.DEV) {
+  ;(window as unknown as { __fieldCanvas?: unknown }).__fieldCanvas = { screenOf }
+}
+
 const cursor = computed(() => {
   if (props.locked) return 'default'
   if (space.value || props.panning) return 'grab'
@@ -955,7 +974,7 @@ const fieldRect = computed(() => trackRect(props.layout.rows, props.layout.cols,
             <v-text
               :config="{
                 ...uprightBox(t.rect), width: uprightBox(t.rect).w, height: uprightBox(t.rect).h,
-                text: t.label, align: 'center', verticalAlign: 'middle', fontSize: px(11), fill: '#6b6450',
+                text: tickLabel(t), align: 'center', verticalAlign: 'middle', fontSize: px(11), fill: '#6b6450',
                 fontFamily: FONT, wrap: 'none', ellipsis: true, listening: false,
               }"
             />

@@ -4,10 +4,11 @@
 //   布置试验：老师每季开始时用，分配品种、设重复、设对照、编号、改小区类型和尺寸。
 // 选中小区后，底部浮出对应模式的操作条；右键小区弹出菜单，双击打开详情
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  ArrowDown, ArrowLeft, Close, EditPen, Notebook, PieChart, QuestionFilled, Rank, Warning, ZoomIn, ZoomOut,
+  ArrowDown, ArrowLeft, Check, Close, EditPen, Notebook, PieChart, QuestionFilled, Rank, RefreshLeft, RefreshRight, Warning,
+  ZoomIn, ZoomOut,
 } from '@element-plus/icons-vue'
 
 import {
@@ -21,7 +22,11 @@ import { rememberTrial } from '@/shared/composables/useTrialPicker'
 import { useAuthStore } from '@/stores/auth'
 import { useCatalogStore } from '@/stores/catalog'
 import FieldCanvas, { type CanvasCell, type CanvasDevice, type CanvasLink } from '@/desktop/components/FieldCanvas.vue'
-import { fieldSize, fmt, innerCells, type FieldLayout } from '@/shared/fieldLayout'
+import {
+  anchors, checkLayout, fieldSize, fmt, innerCells, moveBlockFit, type FieldLayout,
+} from '@/shared/fieldLayout'
+import { useLayoutDraft } from '@/desktop/components/layoutDraft'
+import LayoutEditPanel from '@/desktop/components/LayoutEditPanel.vue'
 import FieldFormDialog from '@/desktop/components/FieldFormDialog.vue'
 import TrialFormDialog from '@/desktop/components/TrialFormDialog.vue'
 import EntryDialog from '@/desktop/components/EntryDialog.vue'
@@ -134,14 +139,175 @@ onMounted(async () => {
 
 // ---------- 模式和显示方式 ----------
 
-type Mode = 'record' | 'layout'
+/** 正在看的区块（"进入区块"），为空是整块地 */
+const focus = ref<string | null>(null)
+
+type Mode = 'record' | 'layout' | 'edit'
 type ViewMode = 'status' | 'variety' | 'replicate' | 'trait'
 
 /** 老师刚建好试验、还没分配品种时，直接进入布置模式 */
 const mode = ref<Mode>('record')
 watch(layout, (l, old) => {
-  if (auth.isTeacher && !old && l && l.plantings.every((p) => !p.varietyId)) {
+  if (auth.isTeacher && !old && l && l.plantings.every((p) => !p.varietyId) && mode.value === 'record') {
     mode.value = 'layout'
+  }
+})
+
+// ---------- 编辑地块（草稿，可以撤销，点保存才提交） ----------
+
+const savedLayout = computed<FieldLayout | null>(() => detail.value?.layout ?? null)
+const draft = useLayoutDraft(savedLayout)
+const selectedBlocks = ref<string[]>([])
+const selectedCells = ref<string[]>([])
+const track = ref<{ axis: 'row' | 'col'; index: number } | null>(null)
+const savingLayout = ref(false)
+
+/** 切换模式：离开编辑地块时有没保存的改动要先问 */
+const modeModel = computed<Mode>({
+  get: () => mode.value,
+  set: async (m) => {
+    if (mode.value === 'edit' && m !== 'edit' && draft.dirty.value) {
+      try {
+        await ElMessageBox.confirm('地块布局改了还没保存，离开编辑会丢掉这些改动。', '还没保存', {
+          type: 'warning', confirmButtonText: '丢掉改动', cancelButtonText: '继续编辑',
+        })
+      } catch {
+        return
+      }
+    }
+    mode.value = m
+  },
+})
+
+watch(mode, (m, old) => {
+  selected.value = []
+  selectedBlocks.value = []
+  selectedCells.value = []
+  track.value = null
+  if (m === 'edit') {
+    draft.begin()
+  } else if (old === 'edit') {
+    draft.end()
+  }
+})
+
+watch([focus, selectedBlocks], () => {
+  if (mode.value !== 'edit') {
+    return
+  }
+  if (selectedBlocks.value.length > 0) {
+    track.value = null
+  }
+})
+
+watch(focus, () => {
+  selectedCells.value = []
+  track.value = null
+})
+
+/** 点了标尺：编辑时选中那一行（列）的区块或小区，并显示它的大小 */
+function onTrack(axis: 'row' | 'col', index: number) {
+  if (mode.value !== 'edit') {
+    return
+  }
+  const l = draft.draft.value
+  if (!l) {
+    return
+  }
+  track.value = { axis, index }
+  if (focusBlock.value) {
+    const b = l.blocks.find((x) => x.id === focus.value)
+    if (!b?.inner) {
+      return
+    }
+    selectedCells.value = anchors(b.inner.rows.length, b.inner.cols.length, b.inner.merges)
+      .filter((sp) => (axis === 'row' ? index >= sp.r && index < sp.r + sp.rs : index >= sp.c && index < sp.c + sp.cs))
+      .map((sp) => `${sp.r},${sp.c}`)
+  } else {
+    selectedBlocks.value = []
+  }
+}
+
+function onMoveFit(id: string, x: number, y: number) {
+  const l = draft.draft.value
+  if (l) {
+    draft.apply(moveBlockFit(l, id, x, y))
+  }
+}
+
+function plotCode(id: number): string {
+  const p = plotById.value.get(id)
+  return p ? p.code || `${p.rowNo}-${p.colNo}` : `#${id}`
+}
+
+async function saveLayout() {
+  const l = draft.draft.value
+  if (!l || savingLayout.value) {
+    return
+  }
+  const problem = checkLayout(l)
+  if (problem) {
+    ElMessage.warning(problem)
+    return
+  }
+  const gone = draft.removed.value
+  if (gone.length > 0) {
+    try {
+      await ElMessageBox.confirm(
+        `保存后会去掉 ${gone.length} 个小区（${gone.slice(0, 10).map(plotCode).join('、')}${gone.length > 10 ? ' 等' : ''}）`
+          + `${draft.added.value ? `，新建 ${draft.added.value} 个小区` : ''}。已经分配了品种、录了数据的小区不能去掉，会提示你先清掉。`,
+        '保存布局', { type: 'warning', confirmButtonText: '保存', cancelButtonText: '取消' },
+      )
+    } catch {
+      return
+    }
+  }
+  savingLayout.value = true
+  try {
+    const d = await fieldApi.saveLayout(fieldId.value, l)
+    detail.value = d
+    draft.begin()
+    selected.value = []
+    await loadTrialData().catch(() => undefined)
+    ElMessage.success(`已保存布局，共 ${d.plots.length} 个小区`)
+  } catch (e) {
+    ElMessage.error((e as Error).message)
+  } finally {
+    savingLayout.value = false
+  }
+}
+
+async function discardLayout() {
+  if (!draft.dirty.value) {
+    return
+  }
+  try {
+    await ElMessageBox.confirm('丢掉这次的所有改动，回到保存的布局？', '放弃改动', {
+      type: 'warning', confirmButtonText: '放弃改动', cancelButtonText: '取消',
+    })
+  } catch {
+    return
+  }
+  draft.begin()
+  selectedBlocks.value = []
+  selectedCells.value = []
+  track.value = null
+}
+
+/** 画布上画的布局：编辑时画草稿 */
+const shownLayout = computed(() => (mode.value === 'edit' ? draft.draft.value : fieldLayout.value))
+
+onBeforeRouteLeave(async () => {
+  if (mode.value !== 'edit' || !draft.dirty.value) {
+    return true
+  }
+  try {
+    await ElMessageBox.confirm('地块布局改了还没保存，离开后改动会丢掉。', '还没保存', {
+      type: 'warning', confirmButtonText: '不保存，离开', cancelButtonText: '留在这里',
+    })
+    return true
+  } catch {
+    return false
   }
 })
 
@@ -175,9 +341,9 @@ watch(display, (d) => {
   }
 }, { deep: true })
 
-// 布置试验时看品种分布更方便，录入时看状态
+// 布置试验、编辑地块时看品种分布更方便，录入时看状态
 watch(mode, (m) => {
-  display.value.view = m === 'layout' ? 'variety' : 'status'
+  display.value.view = m === 'record' ? 'status' : 'variety'
 })
 
 /** 画布缩放比例（相对"正好放下"的百分比） */
@@ -196,12 +362,10 @@ function fitView() {
 
 // ---------- 进入区块 ----------
 
-/** 正在看的区块（"进入区块"），为空是整块地 */
-const focus = ref<string | null>(null)
-const focusBlock = computed(() => fieldLayout.value?.blocks.find((b) => b.id === focus.value) ?? null)
+const focusBlock = computed(() => shownLayout.value?.blocks.find((b) => b.id === focus.value) ?? null)
 
 function enterBlock(id: string) {
-  const b = fieldLayout.value?.blocks.find((x) => x.id === id)
+  const b = shownLayout.value?.blocks.find((x) => x.id === id)
   if (!b || b.kind !== 'PLANT') {
     return
   }
@@ -226,9 +390,13 @@ const layoutStats = computed(() => {
   }
 })
 
-watch(fieldLayout, (l) => {
-  if (focus.value && !l?.blocks.some((b) => b.id === focus.value)) {
+watch(() => shownLayout.value, (l) => {
+  if (focus.value && !l?.blocks.some((b) => b.id === focus.value && b.kind === 'PLANT')) {
     focus.value = null
+  }
+  // 草稿里没有了的区块不再选着
+  if (l && selectedBlocks.value.some((id) => !l.blocks.some((b) => b.id === id))) {
+    selectedBlocks.value = selectedBlocks.value.filter((id) => l.blocks.some((b) => b.id === id))
   }
 })
 
@@ -449,9 +617,31 @@ function onKey(e: KeyboardEvent) {
   if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) {
     return
   }
+  if (mode.value === 'edit' && (e.ctrlKey || e.metaKey) && !e.altKey) {
+    const k = e.key.toLowerCase()
+    if (k === 'z' && !e.shiftKey) {
+      e.preventDefault()
+      draft.undo()
+      return
+    }
+    if (k === 'y' || (k === 'z' && e.shiftKey)) {
+      e.preventDefault()
+      draft.redo()
+      return
+    }
+    if (k === 's') {
+      e.preventDefault()
+      saveLayout()
+      return
+    }
+  }
   if (e.key === 'Escape') {
     if (menu.value) {
       closeMenu()
+    } else if (selectedBlocks.value.length || selectedCells.value.length || track.value) {
+      selectedBlocks.value = []
+      selectedCells.value = []
+      track.value = null
     } else if (focus.value) {
       leaveBlock()
     }
@@ -806,18 +996,19 @@ const metricGroups = computed(() => {
     <div class="workspace">
       <section class="map-panel panel">
         <div class="toolbar">
-          <el-radio-group v-if="auth.isTeacher" v-model="mode" class="mode">
+          <el-radio-group v-if="auth.isTeacher" v-model="modeModel" class="mode">
             <el-radio-button value="record">录入数据</el-radio-button>
             <el-radio-button value="layout">布置试验</el-radio-button>
+            <el-radio-button value="edit">编辑地块</el-radio-button>
           </el-radio-group>
-          <el-radio-group v-model="display.view" size="small">
+          <el-radio-group v-if="mode !== 'edit'" v-model="display.view" size="small">
             <el-radio-button value="status">按状态</el-radio-button>
             <el-radio-button value="variety">按品种</el-radio-button>
             <el-radio-button value="replicate">按重复</el-radio-button>
             <el-radio-button value="trait">按指标</el-radio-button>
           </el-radio-group>
           <el-select
-            v-if="display.view === 'trait'"
+            v-if="display.view === 'trait' && mode !== 'edit'"
             v-model="display.traitId"
             size="small"
             filterable
@@ -834,7 +1025,7 @@ const metricGroups = computed(() => {
             </el-option-group>
           </el-select>
           <div class="spacer" />
-          <el-button size="small" text @click="selectAllPlots">{{ focusBlock ? '全选本区块' : '全选小区' }}</el-button>
+          <el-button v-if="mode !== 'edit'" size="small" text @click="selectAllPlots">{{ focusBlock ? '全选本区块' : '全选小区' }}</el-button>
           <el-button-group size="small">
             <el-button :icon="ZoomOut" @click="zoomBy(1 / 1.25)" />
             <el-tooltip content="点一下适应窗口（F）" placement="top">
@@ -870,26 +1061,53 @@ const metricGroups = computed(() => {
 
         <div class="canvas-box">
           <FieldCanvas
-            v-if="fieldLayout"
+            v-if="shownLayout"
             ref="canvasRef"
             v-model:selected-plots="selected"
+            v-model:selected-blocks="selectedBlocks"
+            v-model:selected-cells="selectedCells"
             v-model:rotation="rotation"
-            :layout="fieldLayout"
+            :layout="shownLayout"
             :cells="cells"
             :focus="focus"
-            :links="gridLinks"
-            :devices="gridDevices"
+            :links="mode === 'edit' ? [] : gridLinks"
+            :devices="mode === 'edit' ? [] : gridDevices"
             :panning="panning"
-            pick="plot"
+            :pick="mode === 'edit' ? (focus ? 'cell' : 'block') : 'plot'"
+            :rulers="mode === 'edit'"
+            :draggable="mode === 'edit'"
+            :inset-bottom="60"
             @zoom="(z: number) => (zoom = z)"
             @contextmenu="onContextMenu"
             @open="openDetail"
             @enter="enterBlock"
+            @track="onTrack"
+            @move-fit="onMoveFit"
           />
         </div>
 
+        <!-- 编辑地块：撤销、重做、保存 -->
+        <div v-if="mode === 'edit'" class="action-bar edit-bar">
+          <el-tooltip content="撤销（Ctrl Z）" placement="top">
+            <el-button :icon="RefreshLeft" :disabled="!draft.canUndo.value" @click="draft.undo()" />
+          </el-tooltip>
+          <el-tooltip content="重做（Ctrl Y）" placement="top">
+            <el-button :icon="RefreshRight" :disabled="!draft.canRedo.value" @click="draft.redo()" />
+          </el-tooltip>
+          <span class="sel edit-state">
+            <template v-if="draft.dirty.value">
+              有改动未保存
+              <em v-if="draft.removed.value.length" class="gone">去掉 {{ draft.removed.value.length }} 个小区</em>
+              <em v-if="draft.added.value" class="new">新建 {{ draft.added.value }} 个</em>
+            </template>
+            <template v-else>和保存的布局一样</template>
+          </span>
+          <el-button :disabled="!draft.dirty.value" @click="discardLayout">放弃改动</el-button>
+          <el-button type="primary" :icon="Check" :loading="savingLayout" :disabled="!draft.dirty.value" @click="saveLayout">保存布局</el-button>
+        </div>
+
         <!-- 选中小区后浮出的操作条 -->
-        <transition name="rise">
+        <transition v-if="mode !== 'edit'" name="rise">
           <div v-if="selected.length > 0" class="action-bar">
             <span class="sel">已选 <b>{{ selected.length }}</b> 个小区</span>
             <template v-if="mode === 'record'">
@@ -915,7 +1133,20 @@ const metricGroups = computed(() => {
         </transition>
       </section>
 
-      <aside class="side">
+      <aside v-if="mode === 'edit' && draft.draft.value" class="side side-edit">
+        <LayoutEditPanel
+          v-model:selected-blocks="selectedBlocks"
+          v-model:selected-cells="selectedCells"
+          v-model:track="track"
+          :layout="draft.draft.value"
+          :focus="focus"
+          :plot-code="plotCode"
+          @apply="draft.apply"
+          @enter="enterBlock"
+          @leave="leaveBlock"
+        />
+      </aside>
+      <aside v-else class="side">
         <section class="panel panel-pad">
           <div class="panel-title">图例</div>
           <template v-if="display.view === 'trait'">
@@ -1243,7 +1474,17 @@ const metricGroups = computed(() => {
   margin-left: 0;
 }
 
-/* 深色操作条上的按钮：主操作用麦穗金，其它是半透明的 */
+/* 深色操作条上的按钮：主操作用麦穗金，其它是半透明的；不能点的更淡 */
+.action-bar .el-button.is-disabled:not(.el-button--primary) {
+  --el-button-disabled-bg-color: rgba(255, 255, 255, 0.04);
+  --el-button-disabled-text-color: rgba(251, 243, 223, 0.35);
+  --el-button-disabled-border-color: rgba(226, 182, 90, 0.15);
+}
+
+.action-bar .el-button--primary.is-disabled {
+  opacity: 0.55;
+}
+
 .action-bar .el-button:not(.el-button--primary):not(.is-text) {
   --el-button-bg-color: rgba(255, 255, 255, 0.08);
   --el-button-text-color: #fbf3df;
@@ -1286,6 +1527,35 @@ const metricGroups = computed(() => {
   border-radius: 999px;
   border: 1px solid var(--line-strong);
   box-shadow: var(--shadow);
+}
+
+.edit-bar .edit-state {
+  font-size: 13px;
+  color: #dfe9e1;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.edit-bar .edit-state em {
+  font-style: normal;
+  font-size: 12px;
+  padding: 1px 8px;
+  border-radius: 999px;
+}
+
+.edit-bar .gone {
+  background: rgba(176, 84, 58, 0.85);
+  color: #fff6ee;
+}
+
+.edit-bar .new {
+  background: rgba(226, 182, 90, 0.85);
+  color: #3b2a0c;
+}
+
+.side.side-edit {
+  width: 300px;
 }
 
 .rise-enter-active,
