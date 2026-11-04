@@ -37,6 +37,10 @@ public class TrialContextLoader {
         Trial trial = trialService.get(trialId);
         Map<Long, Plot> plots = fieldService.plots(trial.getFieldId()).stream()
                 .collect(Collectors.toMap(Plot::getId, Function.identity()));
+        // 记载本里填了收获面积时，计产都按它算
+        if (trial.getHarvestAreaM2() != null) {
+            plots.values().forEach(p -> p.setHarvestAreaM2(trial.getHarvestAreaM2()));
+        }
         Map<Long, Planting> byId = plantingMapper.selectList(
                         Wrappers.<Planting>lambdaQuery().eq(Planting::getTrialId, trialId))
                 .stream().collect(Collectors.toMap(Planting::getId, Function.identity()));

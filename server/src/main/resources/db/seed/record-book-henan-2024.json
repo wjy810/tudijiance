@@ -1,0 +1,80 @@
+{
+  "source": "河南省小麦品种试验记载本（2024-2025），河南省农业科学院小麦研究中心制，2015.9 修订",
+  "traits": [
+    {
+      "code": "sprouting_grade", "name": "穗发芽", "category": "STRESS", "dataType": "GRADE", "unit": "级",
+      "agg": "MAX", "clause": "河南记载本 四", "after": "sprouting_rate",
+      "survey": "自然状态下目测，分无、轻、重三级，以 1、3、5 表示",
+      "options": [
+        {"v": "1", "label": "1 级 无"},
+        {"v": "3", "label": "3 级 轻"},
+        {"v": "5", "label": "5 级 重"}
+      ]
+    },
+    {
+      "code": "field_evaluation", "name": "田间评价", "category": "YIELD", "dataType": "TEXT",
+      "agg": "NONE", "clause": "河南记载本 四", "after": "yield_vs_ck",
+      "survey": "收获前对小区长势、整齐度、抗性的综合评价（记载本田间记载的最后一列）"
+    }
+  ],
+  "optionDescriptions": {
+    "seedling_habit": {"匍匐": "1 级", "半匍匐": "3 级", "直立": "5 级"}
+  },
+  "descriptions": {
+    "seedling_habit": "河南记载本：分蘖盛期观察，1 匍匐、3 半匍匐、5 直立；导入时写 1、3、5 也能认出",
+    "winter_freeze_grade": "河南记载本按地上部冻害分五级：1 无冻害；2 叶尖受冻发黄；3 叶片冻死一半；4 叶片全枯；5 植株或大部分分蘖冻死",
+    "spring_freeze_grade": "河南记载本按地上部冻害分五级：1 无冻害；2 叶尖受冻发黄；3 叶片冻死一半；4 叶片全枯；5 植株或大部分分蘖冻死",
+    "lodging_first_grade": "河南记载本记作“第 1 次倒伏程度”",
+    "lodging_first_area": "河南记载本记作“第 1 次倒伏面积”，填整数，35% 填 35",
+    "lodging_final_grade": "河南记载本记作“第 2 次倒伏程度”",
+    "lodging_final_area": "河南记载本记作“第 2 次倒伏面积”，填整数，35% 填 35",
+    "basic_seedlings": "河南记载本：保留 1 位小数",
+    "max_tillers": "河南记载本记作“最高分蘖”，保留 1 位小数",
+    "effective_spikes": "河南记载本记作“亩成穗”，保留 1 位小数",
+    "plant_height": "河南记载本：四舍五入为整数",
+    "plot_yield": "河南记载本：保留 2 位小数；收获面积见试验记载本的产量计算参数",
+    "shattering": "河南记载本：完熟期调查，1 口紧、3 易脱粒、5 口松；导入时写 1、3、5 也能认出",
+    "maturity_appearance": "河南记载本：按茎叶落黄情况，1 好、3 中、5 差；导入时写 1、3、5 也能认出",
+    "root_rot_spike": "河南记载本记作“根腐病穗部”",
+    "sharp_eyespot_whitehead": "河南记载本记作“纹枯病穗”"
+  },
+  "aliases": {
+    "seedling_habit": ["习性"],
+    "basic_seedlings": ["基本苗"],
+    "max_tillers": ["最高分蘖", "最高蘖"],
+    "effective_spikes": ["亩成穗", "有效穗"],
+    "winter_freeze_date": ["冬冻时间"],
+    "winter_freeze_grade": ["冬冻"],
+    "spring_freeze_date": ["春冻时间"],
+    "spring_freeze_grade": ["春冻"],
+    "drought_grade": ["旱害程度", "耐旱性", "旱害"],
+    "dry_hot_grade": ["青干程度", "抗青干", "青干"],
+    "wet_grade": ["湿害程度", "湿害"],
+    "lodging_first_date": ["第1次倒伏日期", "倒伏日期"],
+    "lodging_first_grade": ["第1次倒伏程度", "第1次倒程度", "倒伏1"],
+    "lodging_first_area": ["第1次倒伏面积", "第1次倒面积", "倒伏1面积", "倒伏面积"],
+    "lodging_final_date": ["第2次倒伏日期"],
+    "lodging_final_grade": ["第2次倒伏程度", "第2次倒程度", "倒伏2"],
+    "lodging_final_area": ["第2次倒伏面积", "第2次倒面积", "倒伏2面积"],
+    "stripe_rust_reaction": ["条锈病反", "条锈病反应"],
+    "stripe_rust_severity": ["条锈病严", "条锈病严重"],
+    "stripe_rust_incidence": ["条锈病普", "条锈病普遍"],
+    "leaf_rust_reaction": ["叶锈病反", "叶锈病反应"],
+    "leaf_rust_severity": ["叶锈病严", "叶锈病严重"],
+    "leaf_rust_incidence": ["叶锈病普", "叶锈病普遍"],
+    "powdery_mildew": ["白粉病", "白粉病反"],
+    "scab_severity": ["赤霉严重度", "赤霉病严"],
+    "scab_spike_rate": ["赤霉病穗", "赤霉病穗率"],
+    "sharp_eyespot": ["纹枯病"],
+    "sharp_eyespot_whitehead": ["纹枯病穗", "纹枯病白穗"],
+    "root_rot_spike": ["根腐病穗部", "根腐穗部"],
+    "root_rot_leaf": ["根腐病叶部", "根腐叶片"],
+    "sprouting_grade": ["穗发芽"],
+    "off_type_count": ["小区杂株数", "每小区杂株"],
+    "spike_shape": ["穗型"],
+    "grain_texture": ["籽粒品质"],
+    "grains_per_spike": ["穗粒数"],
+    "yield_per_mu": ["折亩产", "亩产量"],
+    "spike_rate": ["成穗率%"]
+  }
+}

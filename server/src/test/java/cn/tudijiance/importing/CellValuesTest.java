@@ -58,10 +58,26 @@ class CellValuesTest {
         assertThat(CellValues.option("9级", grades)).isNull();
     }
 
+    @Test
+    void matchesTextOptionsByGradeInDescription() {
+        // 河南记载本用 1、3、5 记熟相、落粒性这类文字选项
+        List<TraitOption> look = List.of(option("好", "好", "1 级"), option("中", "中", "3 级"), option("差", "差", "5 级"));
+        assertThat(CellValues.option(new BigDecimal("3"), look).getValueCode()).isEqualTo("中");
+        assertThat(CellValues.option("5级", look).getValueCode()).isEqualTo("差");
+        assertThat(CellValues.option("2", look)).isNull();
+        List<TraitOption> shattering = List.of(option("口紧", "口紧", "1 级：手用力搓才落粒"), option("口松", "口松", "5 级：稍加触动就落粒"));
+        assertThat(CellValues.option("1", shattering).getValueCode()).isEqualTo("口紧");
+    }
+
     private static TraitOption option(String code, String label) {
+        return option(code, label, null);
+    }
+
+    private static TraitOption option(String code, String label, String description) {
         TraitOption o = new TraitOption();
         o.setValueCode(code);
         o.setLabel(label);
+        o.setDescription(description);
         return o;
     }
 }

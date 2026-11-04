@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest'
 
 import type { TraitView } from '@/shared/api'
 import {
-  aliasKey, columnLetter, fieldsOf, guessHeaderRow, guessOrientation, guessRange, guessTarget, normalizeHeader, rangeText,
+  aliasKey, columnLetter, fieldsOf, guessHeaderRow, guessOrientation, guessRange, guessTarget, guessTargets, normalizeHeader,
+  rangeText,
   suggestCustomTrait, unitOf,
 } from '@/shared/importGuess'
 
@@ -142,5 +143,33 @@ describe('suggestCustomTrait', () => {
     expect(suggestCustomTrait('拔节期', ['3月5日', '2025-03-06']).dataType).toBe('DATE')
     expect(suggestCustomTrait('长势', ['好', '中', '好', '差'])).toMatchObject({ dataType: 'OPTION', options: ['好', '中', '差'] })
     expect(suggestCustomTrait('备注', ['叶片发黄', '有积水']).dataType).toBe('TEXT')
+  })
+})
+
+describe('guessTargets（河南省记载本的田间记载）', () => {
+  const book = [
+    trait(10, 'lodging_first_date', '最初倒伏日期', false, ['倒伏日期']),
+    trait(11, 'lodging_first_grade', '最初倒伏程度', false, ['倒伏程度']),
+    trait(12, 'lodging_final_date', '最终倒伏日期'),
+    trait(13, 'lodging_final_grade', '最终倒伏程度'),
+    trait(14, 'effective_spikes', '有效穗数', false, ['亩成穗']),
+  ]
+
+  it('maps the second lodging columns to the final lodging', () => {
+    const got = guessTargets(['区号', '品种编号', '亩成穗', '倒伏日期', '倒伏程度', '倒伏日期', '倒伏程度'], book)
+    expect(got).toEqual([
+      { kind: 'plot' }, { kind: 'variety' }, { kind: 'trait', traitId: 14 },
+      { kind: 'trait', traitId: 10 }, { kind: 'trait', traitId: 11 },
+      { kind: 'trait', traitId: 12 }, { kind: 'trait', traitId: 13 },
+    ])
+  })
+
+  it('ignores other repeated trait columns after the first', () => {
+    expect(guessTargets(['亩成穗', '亩成穗'], book)).toEqual([{ kind: 'trait', traitId: 14 }, { kind: 'ignore' }])
+  })
+
+  it('recognises the record book variety header', () => {
+    expect(guessTarget('品   种 (系)      编  号', book)).toEqual({ kind: 'variety' })
+    expect(guessTarget('品种名或代号', book)).toEqual({ kind: 'variety' })
   })
 })

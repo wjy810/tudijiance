@@ -3,6 +3,8 @@ package cn.tudijiance.trial;
 import java.util.List;
 
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -16,7 +18,10 @@ import org.springframework.web.bind.annotation.RestController;
 import cn.tudijiance.trial.TrialDtos.AssignRequest;
 import cn.tudijiance.trial.TrialDtos.Layout;
 import cn.tudijiance.trial.TrialDtos.LinkRequest;
+import cn.tudijiance.trial.TrialDtos.TrialBookRequest;
+import cn.tudijiance.trial.TrialDtos.TrialBookView;
 import cn.tudijiance.trial.TrialDtos.TrialRequest;
+import cn.tudijiance.security.CurrentUser;
 import cn.tudijiance.security.Roles;
 import jakarta.validation.Valid;
 
@@ -25,9 +30,11 @@ import jakarta.validation.Valid;
 public class TrialController {
 
     private final TrialService trialService;
+    private final TrialBookService bookService;
 
-    public TrialController(TrialService trialService) {
+    public TrialController(TrialService trialService, TrialBookService bookService) {
         this.trialService = trialService;
+        this.bookService = bookService;
     }
 
     @GetMapping
@@ -76,5 +83,19 @@ public class TrialController {
     @PreAuthorize(Roles.IS_TEACHER)
     public Layout deleteLink(@PathVariable Long id, @PathVariable Long linkId) {
         return trialService.deleteLink(id, linkId);
+    }
+
+    /** 试验记载本：基本情况、气象资料、品种评价 */
+    @GetMapping("/{id}/book")
+    @PreAuthorize(Roles.CAN_RECORD)
+    public TrialBookView book(@PathVariable Long id) {
+        return bookService.get(id);
+    }
+
+    @PutMapping("/{id}/book")
+    @PreAuthorize(Roles.IS_TEACHER)
+    public TrialBookView saveBook(@AuthenticationPrincipal Jwt jwt, @PathVariable Long id,
+                                  @RequestBody TrialBookRequest req) {
+        return bookService.save(id, req, CurrentUser.id(jwt));
     }
 }

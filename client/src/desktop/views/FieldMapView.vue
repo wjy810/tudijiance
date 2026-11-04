@@ -7,7 +7,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  ArrowDown, ArrowLeft, Close, EditPen, PieChart, QuestionFilled, Rank, Setting, Warning, ZoomIn, ZoomOut,
+  ArrowDown, ArrowLeft, Close, EditPen, Notebook, PieChart, QuestionFilled, Rank, Setting, Warning, ZoomIn, ZoomOut,
 } from '@element-plus/icons-vue'
 
 import {
@@ -713,6 +713,9 @@ const metricGroups = computed(() => {
         <el-select v-model="trialId" placeholder="还没有试验" class="trial-select" :disabled="trials.length === 0">
           <el-option v-for="t in trials" :key="t.id" :value="t.id" :label="`${t.seasonYear} 年 · ${t.name}`" />
         </el-select>
+        <el-tooltip v-if="trial" content="封面、试验设计、栽培管理、气象资料、品种评价" placement="bottom">
+          <el-button :icon="Notebook" @click="router.push(`/trials/${trial.id}/book`)">记载本</el-button>
+        </el-tooltip>
         <el-dropdown v-if="auth.isTeacher" trigger="click" @command="onTrialCommand">
           <el-button>试验<el-icon class="el-icon--right"><ArrowDown /></el-icon></el-button>
           <template #dropdown>

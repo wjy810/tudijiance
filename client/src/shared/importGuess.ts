@@ -33,7 +33,8 @@ export function unitOf(header: string): string | null {
 
 const KEY_COLUMNS: { kind: 'plot' | 'variety' | 'replicate' | 'date'; names: string[] }[] = [
   { kind: 'plot', names: ['小区编号', '小区号', '小区', '编号', '区号', '小区代号'] },
-  { kind: 'variety', names: ['品种', '品种名称', '品种名', '品系', '品种系', '参试品种'] },
+  // 河南省记载本里写"品种编号""品种代号""品种名或代号""品   种 (系)      编  号"
+  { kind: 'variety', names: ['品种', '品种名称', '品种名', '品系', '品种系', '参试品种', '品种编号', '品种代号', '品种名或代号', '品种编码'] },
   { kind: 'replicate', names: ['重复', '重复号', '区组'] },
   { kind: 'date', names: ['调查日期', '记载日期', '日期'] },
 ]
@@ -100,6 +101,41 @@ export function guessTarget(header: string, traits: TraitView[]): ColumnTarget {
   const code = TRAIT_SYNONYMS[h]
   const bySynonym = code ? traits.find((t) => t.trait.code === code) : undefined
   return bySynonym ? { kind: 'trait', traitId: bySynonym.trait.id } : { kind: 'ignore' }
+}
+
+/**
+ * 记载本的田间记载里，两次倒伏都写成"倒伏日期 倒伏程度 倒伏面积"：
+ * 同一个表头出现第二次时，对应到第二次（最终）倒伏
+ */
+const SECOND_OCCURRENCE: Record<string, string> = {
+  lodging_first_date: 'lodging_final_date',
+  lodging_first_grade: 'lodging_final_grade',
+  lodging_first_area: 'lodging_final_area',
+}
+
+/**
+ * 一次猜所有字段。和 guessTarget 一样，另外处理重复的表头：
+ * 有"第二次"写法的项目（倒伏）第二次出现时对应到第二次的项目；其它项目重复出现时只保留第一个，后面的不导入
+ */
+export function guessTargets(headers: string[], traits: TraitView[]): ColumnTarget[] {
+  const used = new Set<number>()
+  return headers.map((h) => {
+    const t = guessTarget(h, traits)
+    if (t.kind !== 'trait') {
+      return t
+    }
+    if (!used.has(t.traitId)) {
+      used.add(t.traitId)
+      return t
+    }
+    const code = traits.find((x) => x.trait.id === t.traitId)?.trait.code ?? ''
+    const second = traits.find((x) => x.trait.code === SECOND_OCCURRENCE[code])
+    if (second && !used.has(second.trait.id)) {
+      used.add(second.trait.id)
+      return { kind: 'trait', traitId: second.trait.id }
+    }
+    return { kind: 'ignore' }
+  })
 }
 
 const isKeyName = (cell: string) => KEY_COLUMNS.slice(0, 3).some((k) => k.names.includes(normalizeHeader(cell)))

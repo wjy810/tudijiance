@@ -1,6 +1,9 @@
 package cn.tudijiance.trial;
 
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -50,5 +53,19 @@ public final class TrialDtos {
     }
 
     public record Layout(Trial trial, List<PlantingView> plantings, List<LinkView> links) {
+    }
+
+    /**
+     * 试验记载本。info：封面、试验设计、栽培管理、产量计算参数等（字段 → 值）；
+     * weather：气象资料（"行|月|cur 或 norm" → 值）；evaluations：品种评价（品种 id → 评价）。
+     */
+    public record TrialBookRequest(Map<String, String> info, Map<String, String> weather,
+                                   Map<String, String> evaluations) {
+    }
+
+    /** harvestAreaM2：按产量计算参数算出的收获面积，折合亩产用它；为空时按小区长 × 宽 */
+    public record TrialBookView(Long trialId, Map<String, String> info, Map<String, String> weather,
+                                Map<String, String> evaluations, BigDecimal harvestAreaM2,
+                                LocalDateTime updatedAt, String updatedBy) {
     }
 }

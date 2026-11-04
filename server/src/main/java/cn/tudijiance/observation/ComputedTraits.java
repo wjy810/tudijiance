@@ -160,10 +160,10 @@ public class ComputedTraits {
     }
 
     private static BigDecimal perArea(BigDecimal plotYield, Plot plot, BigDecimal factor, int scale) {
-        if (plotYield == null || plot == null || plot.getLengthM() == null || plot.getWidthM() == null) {
+        BigDecimal area = plot == null ? null : plot.areaM2();
+        if (plotYield == null || area == null) {
             return null;
         }
-        BigDecimal area = plot.getLengthM().multiply(plot.getWidthM());
         return area.signum() == 0 ? null : plotYield.multiply(factor).divide(area, scale + 2, RoundingMode.HALF_UP);
     }
 }

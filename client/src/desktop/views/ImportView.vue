@@ -14,7 +14,7 @@ import {
 import { TRAIT_CATEGORY } from '@/shared/labels'
 import { useTrialPicker } from '@/shared/composables/useTrialPicker'
 import {
-  aliasKey, fieldsOf, guessOrientation, guessRange, guessTarget, importable, rangeText, suggestCustomTrait,
+  aliasKey, fieldsOf, guessOrientation, guessRange, guessTarget, guessTargets, importable, rangeText, suggestCustomTrait,
   type ColumnTarget, type CustomTraitSuggestion,
 } from '@/shared/importGuess'
 import { useCatalogStore } from '@/stores/catalog'
@@ -148,7 +148,7 @@ function autoDetect() {
 }
 
 function guessAll() {
-  targets.value = fields.value.map((f) => guessTarget(f.header, catalog.traits))
+  targets.value = guessTargets(fields.value.map((f) => f.header), catalog.traits)
 }
 
 function setOrientation(o: ImportOrientation) {

@@ -1,5 +1,6 @@
 package cn.tudijiance.trial;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 import com.baomidou.mybatisplus.annotation.IdType;
@@ -24,5 +25,7 @@ public class Trial {
     private String wheatZone;
     private Integer replicateCount;
     private String remark;
+    /** 计产用的收获面积（m²），由试验记载本的产量计算参数算出；为空时按小区长 × 宽 */
+    private BigDecimal harvestAreaM2;
     private LocalDateTime createdAt;
 }

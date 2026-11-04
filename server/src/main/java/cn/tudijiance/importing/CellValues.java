@@ -122,7 +122,9 @@ final class CellValues {
     }
 
     /**
-     * 从选项里找：编码相同、名称相同，或者去掉空格后相同；"3级" 按 3 找；都不行时找名称里唯一包含它的。
+     * 从选项里找：编码相同、名称相同，或者去掉空格后相同；"3级" 按 3 找；
+     * 选项是文字、说明里写了级别时（记载本用 1、3、5 记"熟相""落粒性"），"3" 按说明里的"3 级"找；
+     * 都不行时找名称里唯一包含它的。
      */
     static TraitOption option(Object v, List<TraitOption> options) {
         String s = code(v);
@@ -134,6 +136,15 @@ final class CellValues {
         for (TraitOption o : options) {
             if (o.getValueCode().equals(key) || o.getValueCode().equals(noGrade) || o.getLabel().replace(" ", "").equals(key)) {
                 return o;
+            }
+        }
+        if (noGrade.matches("\\d{1,2}")) {
+            List<TraitOption> byGrade = options.stream()
+                    .filter(o -> o.getDescription() != null
+                            && o.getDescription().replace(" ", "").startsWith(noGrade + "级"))
+                    .toList();
+            if (byGrade.size() == 1) {
+                return byGrade.getFirst();
             }
         }
         List<TraitOption> contains = options.stream().filter(o -> o.getLabel().replace(" ", "").contains(key)).toList();

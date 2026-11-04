@@ -99,9 +99,27 @@ export interface Trial {
   replicateCount: number | null
   remark: string | null
   createdAt: string
+  /** 记载本里算出的收获面积（m²），折合亩产按它算；为空时按小区长 × 宽 */
+  harvestAreaM2?: number | null
 }
 
-export type TrialRequest = Omit<Trial, 'id' | 'createdAt'>
+export type TrialRequest = Omit<Trial, 'id' | 'createdAt' | 'harvestAreaM2'>
+
+/** 试验记载本（按河南省小麦品种试验记载本）：字段见 shared/recordBook.ts */
+export interface TrialBook {
+  trialId: number
+  /** 封面、试验设计、栽培管理、产量计算参数、联系信息、气象分析 */
+  info: Record<string, string>
+  /** 气象资料，键为"行|月|cur 或 norm" */
+  weather: Record<string, string>
+  /** 品种评价，键为品种 id */
+  evaluations: Record<string, string>
+  harvestAreaM2: number | null
+  updatedAt: string | null
+  updatedBy: string | null
+}
+
+export type TrialBookRequest = Pick<TrialBook, 'info' | 'weather' | 'evaluations'>
 
 export interface PlantingView {
   plotId: number

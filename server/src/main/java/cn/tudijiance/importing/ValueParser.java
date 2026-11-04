@@ -82,9 +82,10 @@ final class ValueParser {
         if (!t.fromYieldPerMu()) {
             return n;
         }
-        if (plot.getLengthM() == null || plot.getWidthM() == null) {
-            throw ApiException.badRequest("小区 " + plot.getCode() + " 没有填长和宽，不能由亩产换算小区产量");
+        BigDecimal area = plot.areaM2();
+        if (area == null || area.signum() == 0) {
+            throw ApiException.badRequest("小区 " + plot.getCode() + " 没有填长和宽，也没有在记载本里填收获面积，不能由亩产换算小区产量");
         }
-        return n.multiply(plot.getLengthM().multiply(plot.getWidthM())).divide(MU, 2, RoundingMode.HALF_UP);
+        return n.multiply(area).divide(MU, 2, RoundingMode.HALF_UP);
     }
 }

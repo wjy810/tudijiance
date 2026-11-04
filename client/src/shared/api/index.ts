@@ -36,6 +36,8 @@ import type {
   TraitView,
   Trial,
   TrialRequest,
+  TrialBook,
+  TrialBookRequest,
   UserView,
   Variety,
   VarietyRequest,
@@ -78,6 +80,8 @@ export const trialApi = {
   create: (req: TrialRequest) => data<Trial>(http.post('/api/trials', req)),
   update: (id: number, req: TrialRequest) => data<Trial>(http.put(`/api/trials/${id}`, req)),
   remove: (id: number) => data<void>(http.delete(`/api/trials/${id}`)),
+  book: (id: number) => data<TrialBook>(http.get(`/api/trials/${id}/book`)),
+  saveBook: (id: number, req: TrialBookRequest) => data<TrialBook>(http.put(`/api/trials/${id}/book`, req)),
   layout: (id: number) => data<Layout>(http.get(`/api/trials/${id}/layout`)),
   assign: (id: number, plotIds: number[], attribute: 'VARIETY' | 'REPLICATE', value: number | null) =>
     data<Layout>(http.put(`/api/trials/${id}/plantings`, { plotIds, attribute, value })),

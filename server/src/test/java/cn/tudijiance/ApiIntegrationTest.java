@@ -138,6 +138,67 @@ class ApiIntegrationTest {
     }
 
     @Test
+    void recordBookFieldsAreMerged() throws Exception {
+        JsonNode traits = call(teacher, get("/api/traits"), null, status().isOk());
+        JsonNode sprouting = find(traits, t -> t.get("trait").get("code").asString().equals("sprouting_grade"));
+        assertThat(sprouting.get("options").size()).isEqualTo(3);
+        // 和项目名称一样的表头按名称就能认出，不再记成别名
+        assertThat(sprouting.get("aliases").size()).isZero();
+        assertThat(find(traits, t -> t.get("trait").get("code").asString().equals("field_evaluation"))
+                .get("trait").get("dataType").asString()).isEqualTo("TEXT");
+        // 记载本的表头记成了别名
+        JsonNode spikes = find(traits, t -> t.get("trait").get("code").asString().equals("effective_spikes"));
+        assertThat(spikes.get("aliases").toString()).contains("亩成穗");
+        JsonNode lodging = find(traits, t -> t.get("trait").get("code").asString().equals("lodging_final_grade"));
+        assertThat(lodging.get("aliases").toString()).contains("第2次倒伏程度");
+        assertThat(lodging.get("trait").get("description").asString()).contains("第 2 次倒伏程度");
+        // 幼苗习性用 1、3、5 记：选项说明里补了级别
+        JsonNode habit = find(traits, t -> t.get("trait").get("code").asString().equals("seedling_habit"));
+        assertThat(habit.get("options").get(2).get("description").asString()).isEqualTo("5 级");
+    }
+
+    @Test
+    void trialRecordBookAndHarvestArea() throws Exception {
+        Setup s = setup("记载本试验田");
+        String bookUrl = "/api/trials/" + s.trialId + "/book";
+        JsonNode empty = call(student, get(bookUrl), null, status().isOk());
+        assertThat(empty.get("info").size()).isZero();
+
+        // 学生能看不能改
+        call(student, put(bookUrl), Map.of("info", Map.of("unitName", "x")), status().isForbidden());
+
+        Map<String, String> info = new HashMap<>();
+        info.put("unitName", "某某农业大学");
+        info.put("trialGroup", "黄淮北片水地组");
+        info.put("harvestLength", "6.65");
+        info.put("rowsPerPlot", "8");
+        info.put("rowSpacing", "20");
+        info.put("ridgeWidth", "40");
+        info.put("blank", "   ");
+        JsonNode saved = call(teacher, put(bookUrl), Map.of("info", info,
+                "weather", Map.of("tMonth|10|cur", "16.2", "tMonth|10|norm", "15.8"),
+                "evaluations", Map.of(String.valueOf(s.testVariety), "抗倒性好，熟相好")), status().isOk());
+        assertThat(saved.get("info").get("unitName").asString()).isEqualTo("某某农业大学");
+        assertThat(saved.get("info").has("blank")).isFalse();
+        assertThat(saved.get("weather").get("tMonth|10|cur").asString()).isEqualTo("16.2");
+        assertThat(saved.get("updatedBy").asString()).isEqualTo("王老师");
+        // 6.65 × [(8 − 1) × 20 + 40] ÷ 100 = 11.97 m²
+        assertThat(saved.get("harvestAreaM2").decimalValue()).isEqualByComparingTo("11.97");
+
+        // 折合亩产按收获面积算：6 kg ÷ 11.97 m² × 666.67 = 334.2 kg
+        entry(student, s.trialId, "plot_yield", List.of(s.plots.get(0)), Map.of("valueNum", 6), status().isOk());
+        JsonNode values = call(student, get("/api/trials/" + s.trialId + "/trait-values?traitId="
+                + traitId("yield_per_mu")), null, status().isOk());
+        assertThat(values.get(0).get("value").decimalValue()).isEqualByComparingTo("334.2");
+
+        // 清掉参数后回到按小区长 × 宽（6.65 × 2 = 13.3 m²）：6 ÷ 13.3 × 666.67 = 300.8 kg
+        call(teacher, put(bookUrl), Map.of("info", Map.of("unitName", "某某农业大学")), status().isOk());
+        values = call(student, get("/api/trials/" + s.trialId + "/trait-values?traitId="
+                + traitId("yield_per_mu")), null, status().isOk());
+        assertThat(values.get(0).get("value").decimalValue()).isEqualByComparingTo("300.8");
+    }
+
+    @Test
     void fieldGridNumberingAndPlotKinds() throws Exception {
         JsonNode field = call(teacher, post("/api/fields"), Map.of("name", "东区试验田", "rowCount", 3, "colCount", 4,
                 "plotLengthM", 6.65, "plotWidthM", 2.0), status().isOk());

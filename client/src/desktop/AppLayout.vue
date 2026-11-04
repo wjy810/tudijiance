@@ -71,7 +71,8 @@ const groups = computed(() =>
 )
 
 // 平面图是从首页点进去的，菜单仍然高亮"首页"
-const activeMenu = computed(() => (route.path.startsWith('/fields') ? '/home' : '/' + (route.path.split('/')[1] ?? '')))
+const activeMenu = computed(() =>
+  (route.path.startsWith('/fields') || route.path.startsWith('/trials') ? '/home' : '/' + (route.path.split('/')[1] ?? '')))
 
 const displayName = computed(() => auth.user?.displayName || auth.user?.username || '')
 
@@ -116,6 +117,9 @@ const crumbs = computed<{ label: string; to?: string }[]>(() => {
   if (route.path.startsWith('/fields/')) {
     const f = fields.value.find((x) => x.id === Number(route.params.id))
     return [{ label: '首页', to: '/home' }, { label: f?.name ?? '实验田平面图' }]
+  }
+  if (route.path.startsWith('/trials/')) {
+    return [{ label: '首页', to: '/home' }, { label: '试验记载本' }]
   }
   for (const g of groups.value) {
     const m = g.items.find((x) => x.path === activeMenu.value)

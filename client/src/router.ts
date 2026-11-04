@@ -35,6 +35,10 @@ const router = createRouter({
           meta: { roles: RECORDERS },
         },
         {
+          path: 'trials/:id/book', name: 'trial-book', component: () => import('@/desktop/views/RecordBookView.vue'),
+          meta: { roles: RECORDERS },
+        },
+        {
           path: 'data', name: 'data', component: () => import('@/desktop/views/DataView.vue'),
           meta: { roles: RECORDERS },
         },
