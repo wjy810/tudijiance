@@ -27,6 +27,8 @@ import {
 } from '@/shared/fieldLayout'
 import { useLayoutDraft } from '@/desktop/components/layoutDraft'
 import LayoutEditPanel from '@/desktop/components/LayoutEditPanel.vue'
+import MapCompass from '@/desktop/components/MapCompass.vue'
+import { eastNorth, eastNorthText, edgeLabels, normDeg, northUpRotation } from '@/shared/compass'
 import FieldFormDialog from '@/desktop/components/FieldFormDialog.vue'
 import TrialFormDialog from '@/desktop/components/TrialFormDialog.vue'
 import EntryDialog from '@/desktop/components/EntryDialog.vue'
@@ -356,6 +358,98 @@ function zoomBy(factor: number) {
   canvasRef.value?.zoomBy(factor)
 }
 
+// ---------- 视角和方位 ----------
+
+/** 自由视角：可以拖动、缩放、旋转；固定视角：按图纸或正北朝上，总是正好放下 */
+type ViewKind = 'free' | 'fixed'
+type Facing = 'drawing' | 'north'
+
+interface ViewPrefs {
+  kind: ViewKind
+  facing: Facing
+  rotation: number
+}
+
+const viewKey = () => `tudijiance.mapView.${fieldId.value}`
+
+function loadView(): ViewPrefs {
+  try {
+    const v = JSON.parse(localStorage.getItem(viewKey()) || '{}') as Partial<ViewPrefs>
+    return { kind: v.kind ?? 'free', facing: v.facing ?? 'drawing', rotation: Number(v.rotation) || 0 }
+  } catch {
+    return { kind: 'free', facing: 'drawing', rotation: 0 }
+  }
+}
+
+const viewPrefs = ref<ViewPrefs>(loadView())
+rotation.value = viewPrefs.value.rotation
+const viewKind = computed({
+  get: () => viewPrefs.value.kind,
+  set: (k: ViewKind) => { viewPrefs.value = { ...viewPrefs.value, kind: k } },
+})
+const facing = computed({
+  get: () => viewPrefs.value.facing,
+  set: (f: Facing) => { viewPrefs.value = { ...viewPrefs.value, facing: f } },
+})
+const locked = computed(() => viewKind.value === 'fixed')
+const northDeg = computed(() => shownLayout.value?.northDeg ?? 0)
+
+/** 固定视角下画面转多少度 */
+const fixedRotation = computed(() => (facing.value === 'north' ? northUpRotation(northDeg.value) : 0))
+
+watch([locked, fixedRotation], () => {
+  if (locked.value) {
+    rotation.value = fixedRotation.value
+  }
+}, { immediate: true })
+
+watch(rotation, (r) => {
+  if (!locked.value) {
+    viewPrefs.value = { ...viewPrefs.value, rotation: r }
+  }
+})
+
+watch(viewPrefs, (v) => {
+  try {
+    localStorage.setItem(viewKey(), JSON.stringify(v))
+  } catch {
+    // 不记忆
+  }
+}, { deep: true })
+
+function rotateTo(deg: number) {
+  if (locked.value) {
+    return
+  }
+  canvasRef.value?.rotateTo(normDeg(deg))
+}
+
+function rotateBy(step: number) {
+  rotateTo(rotation.value + step)
+}
+
+function northUp() {
+  if (locked.value) {
+    facing.value = 'north'
+  } else {
+    rotateTo(northUpRotation(northDeg.value))
+  }
+}
+
+const edges = computed(() => edgeLabels(northDeg.value, rotation.value))
+
+/** 鼠标所在位置离地块中心往东、往北多远 */
+const pointerAt = ref<{ x: number; y: number } | null>(null)
+const pointerText = computed(() => {
+  const l = shownLayout.value
+  const p = pointerAt.value
+  if (!l || !p) {
+    return ''
+  }
+  const s = fieldSize(l)
+  return eastNorthText(eastNorth(p, { x: s.w / 2, y: s.h / 2 }, l.northDeg ?? 0, l.unit.meters))
+})
+
 function fitView() {
   canvasRef.value?.fit()
 }
@@ -647,6 +741,12 @@ function onKey(e: KeyboardEvent) {
     }
   } else if (e.key === 'f' || e.key === 'F') {
     fitView()
+  } else if ((e.key === 'q' || e.key === 'Q') && !e.ctrlKey && !e.metaKey) {
+    rotateBy(-15)
+  } else if ((e.key === 'e' || e.key === 'E') && !e.ctrlKey && !e.metaKey) {
+    rotateBy(15)
+  } else if ((e.key === 'n' || e.key === 'N') && !e.ctrlKey && !e.metaKey) {
+    northUp()
   }
 }
 
@@ -1026,16 +1126,6 @@ const metricGroups = computed(() => {
           </el-select>
           <div class="spacer" />
           <el-button v-if="mode !== 'edit'" size="small" text @click="selectAllPlots">{{ focusBlock ? '全选本区块' : '全选小区' }}</el-button>
-          <el-button-group size="small">
-            <el-button :icon="ZoomOut" @click="zoomBy(1 / 1.25)" />
-            <el-tooltip content="点一下适应窗口（F）" placement="top">
-              <el-button class="zoom-text" @click="fitView">{{ zoom }}%</el-button>
-            </el-tooltip>
-            <el-button :icon="ZoomIn" @click="zoomBy(1.25)" />
-          </el-button-group>
-          <el-tooltip content="打开后按住左键拖动画面（也可以按住空格或滚轮拖动）" placement="top">
-            <el-button size="small" :type="panning ? 'primary' : 'default'" :icon="Rank" @click="panning = !panning" />
-          </el-tooltip>
           <el-popover placement="bottom-end" :width="320" trigger="hover">
             <template #reference>
               <el-button size="small" :icon="QuestionFilled" text />
@@ -1045,6 +1135,7 @@ const metricGroups = computed(() => {
               <p><b>区块：</b>双击区块的名称牌进入区块，只看这个区块；进去后点上面、左边的行号列号选整行整列；Esc 返回整块地。</p>
               <p><b>操作：</b>选中后底部出现操作条；右键小区弹出菜单；双击小区看详情。</p>
               <p><b>画面：</b>滚轮缩放；按住空格或滚轮拖动画面；F 适应窗口。</p>
+              <p><b>方位：</b>Shift + 滚轮、Q / E 或拖动指北针旋转画面；N 或点指北针让北朝上。固定视角下画面不动，适合投屏、打印。</p>
             </div>
           </el-popover>
         </div>
@@ -1077,13 +1168,64 @@ const metricGroups = computed(() => {
             :rulers="mode === 'edit'"
             :draggable="mode === 'edit'"
             :inset-bottom="60"
+            :locked="locked"
             @zoom="(z: number) => (zoom = z)"
+            @pointer="(p: { x: number; y: number } | null) => (pointerAt = p)"
             @contextmenu="onContextMenu"
             @open="openDetail"
             @enter="enterBlock"
             @track="onTrack"
             @move-fit="onMoveFit"
           />
+          <template v-if="shownLayout">
+            <span class="edge top">{{ edges.top }}</span>
+            <span class="edge right">{{ edges.right }}</span>
+            <span class="edge bottom">{{ edges.bottom }}</span>
+            <span class="edge left">{{ edges.left }}</span>
+            <div class="view-switch">
+              <el-radio-group v-model="viewKind" size="small">
+                <el-tooltip content="可以拖动、缩放、旋转画面" placement="bottom">
+                  <el-radio-button value="free">自由视角</el-radio-button>
+                </el-tooltip>
+                <el-tooltip content="按图纸或正北朝上，画面固定，正好放下整块地；适合投屏、打印" placement="bottom">
+                  <el-radio-button value="fixed">固定视角</el-radio-button>
+                </el-tooltip>
+              </el-radio-group>
+              <el-select v-if="locked" v-model="facing" size="small" class="facing">
+                <el-option value="drawing" label="图纸朝上" />
+                <el-option value="north" label="正北朝上" />
+              </el-select>
+            </div>
+            <div class="map-tools" :class="{ locked }">
+              <button class="tool angle num" :title="locked ? '画面角度' : '点一下转回图纸朝上'" :disabled="locked" @click="rotateTo(0)">
+                {{ Math.round(rotation) }}°
+              </button>
+              <template v-if="!locked">
+                <button class="tool" title="向左转 15°（Q）" aria-label="向左转 15 度" @click="rotateBy(-15)"><el-icon><RefreshLeft /></el-icon></button>
+                <button class="tool" title="向右转 15°（E）" aria-label="向右转 15 度" @click="rotateBy(15)"><el-icon><RefreshRight /></el-icon></button>
+                <span class="tool-sep" />
+                <button class="tool" title="放大" aria-label="放大" @click="zoomBy(1.25)"><el-icon><ZoomIn /></el-icon></button>
+                <button class="tool zoom num" title="适应窗口（F）" @click="fitView">{{ zoom }}%</button>
+                <button class="tool" title="缩小" aria-label="缩小" @click="zoomBy(1 / 1.25)"><el-icon><ZoomOut /></el-icon></button>
+                <span class="tool-sep" />
+                <button
+                  class="tool" :class="{ on: panning }" title="打开后按住左键拖动画面（也可以按住空格或滚轮拖动）"
+                  aria-label="拖动画面" @click="panning = !panning"
+                >
+                  <el-icon><Rank /></el-icon>
+                </button>
+              </template>
+            </div>
+            <MapCompass
+              class="map-compass"
+              :north-deg="northDeg"
+              :rotation="rotation"
+              :rotatable="!locked"
+              @rotate="(d: number) => (rotation = d)"
+              @north-up="northUp"
+            />
+            <div v-if="pointerText" class="pointer-at num">{{ pointerText }}<span>（从地块中心量）</span></div>
+          </template>
         </div>
 
         <!-- 编辑地块：撤销、重做、保存 -->
@@ -1140,6 +1282,7 @@ const metricGroups = computed(() => {
           v-model:track="track"
           :layout="draft.draft.value"
           :focus="focus"
+          :rotation="rotation"
           :plot-code="plotCode"
           @apply="draft.apply"
           @enter="enterBlock"
@@ -1408,6 +1551,147 @@ const metricGroups = computed(() => {
   background: #e9e1cd url('@/assets/art/soil.jpg') repeat;
   background-size: 256px;
   box-shadow: inset 0 2px 10px rgba(80, 60, 20, 0.12);
+}
+
+.view-switch {
+  position: absolute;
+  z-index: 2;
+  top: 10px;
+  left: 12px;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.facing {
+  width: 108px;
+}
+
+/* 画面工具：右下角一排小按钮 */
+.map-tools {
+  position: absolute;
+  z-index: 2;
+  bottom: 36px;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 12px;
+  background: rgba(255, 253, 248, 0.92);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+}
+
+.tool {
+  min-width: 30px;
+  height: 30px;
+  padding: 0 4px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-2);
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.tool:hover:not(:disabled) {
+  background: var(--surface-3);
+  color: var(--forest);
+}
+
+.tool:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+
+.tool.on {
+  background: var(--green);
+  color: #fff;
+}
+
+.tool.zoom,
+.tool.angle {
+  font-size: 11px;
+  font-weight: 600;
+  min-width: 40px;
+}
+
+.tool:disabled {
+  cursor: default;
+}
+
+.tool-sep {
+  width: 1px;
+  height: 18px;
+  background: var(--line);
+  margin: 0 2px;
+}
+
+/* 四边的方位字 */
+.edge {
+  position: absolute;
+  z-index: 2;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(255, 253, 248, 0.88);
+  border: 1px solid var(--line);
+  color: var(--ink-2);
+  font-family: var(--font-serif);
+  font-weight: 700;
+  font-size: 13px;
+  pointer-events: none;
+}
+
+.edge.top {
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.edge.bottom {
+  bottom: 70px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.edge.left {
+  left: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.edge.right {
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.map-compass {
+  position: absolute;
+  z-index: 2;
+  top: 12px;
+  right: 14px;
+}
+
+.pointer-at {
+  position: absolute;
+  z-index: 2;
+  right: 12px;
+  bottom: 10px;
+  font-size: 11px;
+  color: var(--ink-2);
+  background: rgba(255, 253, 248, 0.85);
+  border-radius: 6px;
+  padding: 2px 8px;
+  pointer-events: none;
+}
+
+.pointer-at span {
+  color: var(--ink-3);
+  margin-left: 2px;
 }
 
 .crumbs {

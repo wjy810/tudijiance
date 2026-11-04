@@ -81,6 +81,8 @@ const emit = defineEmits<{
   /** 点了标尺上的第 index 行（列） */
   track: [axis: 'row' | 'col', index: number, additive: boolean]
   zoom: [percent: number]
+  /** 鼠标在布局里的位置（单位同布局），移出画布时为 null */
+  pointer: [p: { x: number; y: number } | null]
 }>()
 
 const FONT = "'Microsoft YaHei UI', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans CJK SC', sans-serif"
@@ -522,6 +524,7 @@ function onMove() {
     return
   }
   if (mode === 'none') updateHover(p)
+  emit('pointer', toContent(p))
 }
 
 /** 鼠标拖到画布外面松开也要收尾 */
@@ -743,6 +746,7 @@ function blockTip(id: string): string {
 
 function onLeave() {
   hover.value = null
+  emit('pointer', null)
 }
 
 // ---------- 导出 ----------
@@ -922,7 +926,10 @@ const fieldRect = computed(() => trackRect(props.layout.rows, props.layout.cols,
             <!-- 区块名称牌：整块地视图里才有，双击进入区块 -->
             <v-label
               v-if="!focusBlock && s.block.kind === 'PLANT' && s.rect.w * scale > 46"
-              :config="{ x: s.rect.x + px(4), y: s.rect.y + px(4), scaleX: px(1), scaleY: px(1), name: `label:${s.block.id}` }"
+              :config="{
+                x: s.rect.x + px(4), y: s.rect.y + px(4), scaleX: px(1), scaleY: px(1), rotation: -rotation,
+                name: `label:${s.block.id}`,
+              }"
             >
               <v-tag
                 :config="{

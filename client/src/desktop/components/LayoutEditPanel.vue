@@ -20,6 +20,8 @@ const props = defineProps<{
   selectedCells: string[]
   focus: string | null
   track: { axis: 'row' | 'col'; index: number } | null
+  /** 画面现在转了多少度：设"屏幕上方为北"时用 */
+  rotation?: number
   /** 小区 id → 编号，提示会去掉哪些小区时用 */
   plotCode: (id: number) => string
 }>()
@@ -95,6 +97,24 @@ async function setGrid(rows: number | undefined, cols: number | undefined) {
 function setDefaultInner(rows: number | undefined, cols: number | undefined) {
   if (!rows || !cols) return
   emit('apply', { ...props.layout, defaultInner: { rows, cols } })
+}
+
+// ---------- 真北方向 ----------
+
+const north = computed(() => props.layout.northDeg ?? 0)
+const NORTH_PRESETS: { deg: number; label: string }[] = [
+  { deg: 0, label: '北在上' }, { deg: 90, label: '北在右' }, { deg: 180, label: '北在下' }, { deg: 270, label: '北在左' },
+]
+
+function setNorth(deg: number | undefined) {
+  if (deg == null || !Number.isFinite(deg)) return
+  const d = Math.round((((deg % 360) + 360) % 360) * 10) / 10
+  if (d !== north.value) emit('apply', { ...props.layout, northDeg: d })
+}
+
+/** 现在屏幕上方是北：图纸上方顺时针转 −rotation 度是北 */
+function screenUpIsNorth() {
+  setNorth(-(props.rotation ?? 0))
 }
 
 // ---------- 一行（列）区块 ----------
@@ -560,6 +580,25 @@ const KINDS: BlockKind[] = ['PLANT', 'ROAD', 'GUARD', 'BLANK']
       </section>
 
       <section class="panel panel-pad">
+        <div class="panel-title">真北方向<span class="sub">图纸上方顺时针 {{ north }}°</span></div>
+        <div class="norths">
+          <button v-for="p in NORTH_PRESETS" :key="p.deg" class="north-btn" :class="{ on: north === p.deg }" @click="setNorth(p.deg)">
+            <i :style="{ transform: `rotate(${p.deg}deg)` }">↑</i>{{ p.label }}
+          </button>
+        </div>
+        <div class="row-form">
+          <span class="lbl">角度</span>
+          <el-input-number
+            :model-value="north" :min="0" :max="359.9" :precision="1" :step="5" size="small" controls-position="right" class="w"
+            @change="setNorth"
+          />
+          <span>°</span>
+        </div>
+        <el-button size="small" @click="screenUpIsNorth">以现在屏幕上方为北</el-button>
+        <div class="hint">先在自由视角里把画面转到和实地一样（屏幕上方对着北），再点这个。</div>
+      </section>
+
+      <section class="panel panel-pad">
         <div class="panel-title">长度单位</div>
         <div class="row-form">
           <el-select v-model="unitPick" size="small" class="unit" @change="changeUnit">
@@ -748,6 +787,41 @@ const KINDS: BlockKind[] = ['PLANT', 'ROAD', 'GUARD', 'BLANK']
 .align-btn.top i::after { top: 0; left: calc(50% - 3.5px); }
 .align-btn.vcenter i::after { top: calc(50% - 3.5px); left: calc(50% - 3.5px); }
 .align-btn.bottom i::after { bottom: 0; left: calc(50% - 3.5px); }
+
+.norths {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  margin: 8px 0 4px;
+}
+
+.north-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 5px 0;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  font-size: 11px;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.north-btn i {
+  font-style: normal;
+  font-size: 14px;
+  color: var(--clay);
+  line-height: 1;
+}
+
+.north-btn.on {
+  border-color: var(--green);
+  background: var(--green-wash);
+  color: var(--forest);
+  font-weight: 600;
+}
 
 .tips ul {
   margin: 0;
