@@ -6,7 +6,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
   ArrowDown, ArrowRight, Check, Collection, Cpu, DataAnalysis, Document, Expand, Fold, Grid, HomeFilled,
-  Link as LinkIcon, Lock, Menu, Monitor, PieChart, Search, SwitchButton, Tickets, TopRight, Upload, User,
+  DocumentChecked, Link as LinkIcon, Lock, Menu, Monitor, PieChart, Search, SwitchButton, Tickets, TopRight, Upload, User,
 } from '@element-plus/icons-vue'
 
 import { authApi, fieldApi, type Field, type Role } from '@/shared/api'
@@ -46,6 +46,7 @@ const GROUPS: { title: string; items: MenuItem[] }[] = [
       { path: '/data', label: '数据查看', icon: Document, roles: RECORDERS, module: 'data' },
       { path: '/stats', label: '统计分析', icon: DataAnalysis, roles: RECORDERS, module: 'stats' },
       { path: '/analysis', label: '自助分析', icon: PieChart, roles: RECORDERS, module: 'analysis' },
+      { path: '/quality', label: '数据质量', icon: DocumentChecked, roles: RECORDERS, module: 'quality' },
     ],
   },
   {

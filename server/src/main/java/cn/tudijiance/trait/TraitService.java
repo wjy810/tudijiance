@@ -74,6 +74,22 @@ public class TraitService {
         traitMapper.updateById(trait);
     }
 
+    /** 常见范围：只有数值、分级和计算项目有；最小值不能大于最大值 */
+    public TraitDef setRange(Long id, java.math.BigDecimal min, java.math.BigDecimal max) {
+        TraitDef trait = catalog.get(id);
+        boolean numeric = "NUMBER".equals(trait.getDataType()) || "GRADE".equals(trait.getDataType())
+                || Boolean.TRUE.equals(trait.getIsComputed());
+        if (!numeric && (min != null || max != null)) {
+            throw ApiException.badRequest("只有数值项目能设常见范围");
+        }
+        if (min != null && max != null && min.compareTo(max) > 0) {
+            throw ApiException.badRequest("最小值不能大于最大值");
+        }
+        traitMapper.update(null, Wrappers.<TraitDef>lambdaUpdate()
+                .set(TraitDef::getMinValue, min).set(TraitDef::getMaxValue, max).eq(TraitDef::getId, id));
+        return catalog.get(id);
+    }
+
     /** 新增自定义项目，例如"小区负责人""田间积水" */
     @Transactional
     public TraitView createCustom(CustomTraitRequest req) {
@@ -106,6 +122,13 @@ public class TraitService {
         trait.setIsComputed(false);
         trait.setEnabled(true);
         trait.setImportant(Boolean.TRUE.equals(req.important()));
+        if (number) {
+            if (req.minValue() != null && req.maxValue() != null && req.minValue().compareTo(req.maxValue()) > 0) {
+                throw ApiException.badRequest("常见范围的最小值不能大于最大值");
+            }
+            trait.setMinValue(req.minValue());
+            trait.setMaxValue(req.maxValue());
+        }
         long customCount = traitMapper.selectCount(Wrappers.<TraitDef>lambdaQuery().eq(TraitDef::getCategory, "CUSTOM"));
         trait.setSortOrder((int) (customCount + 1) * 10);
         traitMapper.insert(trait);

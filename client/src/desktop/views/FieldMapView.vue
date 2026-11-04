@@ -139,6 +139,12 @@ onMounted(async () => {
   rememberTrial(fieldId.value, trialId.value)
   await nextTick()
   canvasRef.value?.fit()
+  // 从数据质量等页面带着 ?plot= 过来：选中这个小区并打开详情
+  const plotId = Number(route.query.plot)
+  if (plotId && plotById.value.has(plotId)) {
+    selected.value = [plotId]
+    openDetail(plotId)
+  }
 })
 
 // ---------- 模式和显示方式 ----------

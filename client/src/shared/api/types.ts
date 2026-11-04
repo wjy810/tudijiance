@@ -166,6 +166,9 @@ export interface TraitDef {
   enabled: boolean
   /** 重要项目：河南记载本里要填的都是；录入时排在前面、标星，数据质量检查看它有没有漏录 */
   important: boolean
+  /** 常见范围：录入时超出会提醒，质量检查列为"超出常见范围"；不是硬限制 */
+  minValue?: number | null
+  maxValue?: number | null
   sortOrder: number
   description: string | null
 }
@@ -266,6 +269,9 @@ export interface CustomTraitRequest {
   aliases?: string[]
   /** 标为重要项目 */
   important?: boolean
+  /** 数值项目的常见范围 */
+  minValue?: number | null
+  maxValue?: number | null
 }
 
 // ---------- 录入的数据 ----------
@@ -636,4 +642,61 @@ export interface LinkModuleRequest {
   description?: string | null
   roles: Role[]
   enabled?: boolean
+}
+
+// ---------- 数据质量 ----------
+
+export type QualityLevel = 'ERROR' | 'WARN' | 'INFO'
+export type QualityKind =
+  | 'LAYOUT' | 'MISSING' | 'RANGE' | 'OUTLIER' | 'DATE_ORDER' | 'DATE_SEASON' | 'CONFLICT'
+  | 'YIELD_CV' | 'VARIETY_CV' | 'YIELD_GAIN' | 'SEEDLING_LOSS' | 'ABNORMAL'
+
+export interface QualityIssue {
+  /** 稳定的编号：核实时用 */
+  key: string
+  level: QualityLevel
+  kind: QualityKind
+  title: string
+  detail: string
+  traitId: number | null
+  traitName: string | null
+  plotIds: number[]
+  plotCodes: string[]
+  /** 涉及的记录，可以去改或申请更正 */
+  observationIds: number[]
+  /** 老师核实过，确认没错 */
+  acked: boolean
+  ackNote: string | null
+  ackedBy: string | null
+  ackedAt: string | null
+}
+
+export interface QualityCompleteness {
+  traitId: number
+  traitName: string
+  category: TraitCategory
+  recorded: number
+  total: number
+  /** 这个试验里已经开始录了 */
+  started: boolean
+}
+
+export interface QualityReport {
+  trialId: number
+  trialName: string
+  seasonYear: number
+  checkedAt: string
+  summary: {
+    errors: number
+    warnings: number
+    infos: number
+    acked: number
+    planted: number
+    /** 产量误差变异系数（%） */
+    yieldCv: number | null
+    /** 已开始录的重要项目的完整度（%） */
+    completenessPercent: number | null
+  }
+  issues: QualityIssue[]
+  completeness: QualityCompleteness[]
 }

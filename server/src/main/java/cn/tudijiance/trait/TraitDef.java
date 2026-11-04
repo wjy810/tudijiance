@@ -31,5 +31,8 @@ public class TraitDef {
     /** 重要项目：录入时排在前面、标星，数据质量检查看它有没有漏录 */
     private Boolean important;
     private Integer sortOrder;
+    /** 常见范围：录入时超出会提醒，质量检查列为"超出常见范围"；不是硬限制 */
+    private java.math.BigDecimal minValue;
+    private java.math.BigDecimal maxValue;
     private String description;
 }

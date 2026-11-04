@@ -7,6 +7,7 @@ import { showToast } from 'vant'
 import type { Plot, TraitValue, TraitView } from '@/shared/api'
 import { TRAIT_CATEGORY, TRAIT_DATA_TYPE, replicateLabel } from '@/shared/labels'
 import { emptyValue, missingValue, newUuid, normalizeValue, observedOnFor, today } from '@/shared/traitValue'
+import { rangeWarning } from '@/shared/quality'
 import { useAuthStore } from '@/stores/auth'
 import { OFFLINE_EDITION } from '@/shared/edition'
 import { useFieldStore } from '../stores/field'
@@ -83,6 +84,13 @@ const eachValues = ref(new Map<number, number | null>())
 const eachIndex = ref(0)
 const current = computed(() => ordered.value[eachIndex.value] ?? null)
 const filledCount = computed(() => [...eachValues.value.values()].filter((v) => v !== null && v !== undefined).length)
+
+const eachWarning = computed(() => (trait.value && current.value
+  ? rangeWarning(trait.value.trait, eachValues.value.get(current.value.id)) : null))
+
+function outOfRange(plotId: number): boolean {
+  return !!trait.value && rangeWarning(trait.value.trait, eachValues.value.get(plotId)) !== null
+}
 
 function setEach(v: number | null) {
   if (!current.value) return
@@ -246,9 +254,10 @@ function openDate() {
           <NumberPad :key="current.id" :model-value="eachValues.get(current.id) ?? null"
             :unit="trait.trait.unit" :precision="trait.trait.precisionDigits" autofocus done-text="下一个"
             @update:model-value="setEach" @done="nextPlot" />
+          <div v-if="eachWarning" class="range-warn" role="status">{{ eachWarning }}</div>
           <div class="each-list">
             <button v-for="(p, i) in ordered" :key="p.id" type="button" class="each-chip"
-              :class="{ now: i === eachIndex, filled: eachValues.get(p.id) != null }" @click="eachIndex = i">
+              :class="{ now: i === eachIndex, filled: eachValues.get(p.id) != null, odd: outOfRange(p.id) }" @click="eachIndex = i">
               <b>{{ plotCode(p) }}</b><span class="num">{{ eachValues.get(p.id) ?? '—' }}</span>
             </button>
           </div>
@@ -408,6 +417,21 @@ function openDate() {
   border-radius: 12px;
   background: var(--surface-2);
   border: 1px solid var(--line);
+}
+
+.range-warn {
+  text-align: center;
+  font-size: 14px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  color: #8a5a10;
+  background: #fbefd2;
+  border: 1px solid #ecd39a;
+}
+
+.each-list .each-chip.odd {
+  border-color: #e0b85c;
+  background: #fbefd2;
 }
 
 .each-card {

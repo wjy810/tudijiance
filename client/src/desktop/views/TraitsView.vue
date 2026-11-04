@@ -13,6 +13,7 @@ import { useCatalogStore } from '@/stores/catalog'
 import { useModuleStore } from '@/stores/modules'
 import CustomTraitDialog from '@/desktop/components/CustomTraitDialog.vue'
 import { aliasKey } from '@/shared/importGuess'
+import { rangeText } from '@/shared/quality'
 
 const auth = useAuthStore()
 const catalog = useCatalogStore()
@@ -130,6 +131,47 @@ async function saveAliases() {
   }
 }
 
+// ---------- 常见范围 ----------
+
+/** 能设常见范围的：数值项目（带档位的不算）。自动算的也能设，算出来超出范围多半是原始数据录错了 */
+function rangeable(t: TraitView): boolean {
+  return t.trait.dataType === 'NUMBER' && t.options.length === 0
+}
+
+const rangeTarget = ref<TraitView | null>(null)
+const rangeMin = ref<number | null>(null)
+const rangeMax = ref<number | null>(null)
+const rangeSaving = ref(false)
+
+function editRange(t: TraitView) {
+  rangeTarget.value = t
+  rangeMin.value = t.trait.minValue ?? null
+  rangeMax.value = t.trait.maxValue ?? null
+}
+
+async function saveRange() {
+  const t = rangeTarget.value
+  if (!t) return
+  const lo = rangeMin.value ?? null
+  const hi = rangeMax.value ?? null
+  if (lo !== null && hi !== null && lo > hi) {
+    ElMessage.warning('最小值不能大于最大值')
+    return
+  }
+  rangeSaving.value = true
+  try {
+    const saved = await traitApi.setRange(t.trait.id, lo, hi)
+    t.trait.minValue = saved.minValue ?? null
+    t.trait.maxValue = saved.maxValue ?? null
+    ElMessage.success(lo === null && hi === null ? `已清除"${t.trait.name}"的常见范围` : `已保存"${t.trait.name}"的常见范围`)
+    rangeTarget.value = null
+  } catch (e) {
+    ElMessage.error((e as Error).message)
+  } finally {
+    rangeSaving.value = false
+  }
+}
+
 async function onCreated() {
   await load()
   tab.value = 'CUSTOM'
@@ -207,10 +249,15 @@ async function onCreated() {
               </div>
             </template>
           </el-table-column>
-          <el-table-column label="类型" width="96">
+          <el-table-column label="类型 / 常见范围" width="132">
             <template #default="{ row }">
               {{ TRAIT_DATA_TYPE[row.trait.dataType as keyof typeof TRAIT_DATA_TYPE] }}
               <span v-if="row.trait.unit && row.trait.unit !== '级'" class="muted small">（{{ row.trait.unit }}）</span>
+              <div v-if="rangeable(row)" class="range-line">
+                <span v-if="rangeText(row.trait)" class="range-chip num" title="录的值超出这个范围时会提醒">{{ rangeText(row.trait) }}</span>
+                <span v-else class="muted small">没设范围</span>
+                <el-button v-if="auth.isTeacher" link :icon="EditPen" class="alias-edit" aria-label="设常见范围" @click="editRange(row)" />
+              </div>
             </template>
           </el-table-column>
           <el-table-column label="可选的值" min-width="200">
@@ -258,6 +305,22 @@ async function onCreated() {
     </div>
 
     <CustomTraitDialog v-model="customOpen" @created="onCreated" />
+
+    <el-dialog :model-value="!!rangeTarget" :title="`常见范围：${rangeTarget?.trait.name ?? ''}`" width="440px"
+      @update:model-value="(v: boolean) => { if (!v) rangeTarget = null }">
+      <div class="hint">录的值低于最小值或高于最大值时，录入界面会提醒“确认没录错？”，数据质量检查也会列出来。
+        只是提醒，真有这种情况照样能存。两个都不填就是不检查。</div>
+      <div class="range-edit">
+        <el-input-number v-model="rangeMin" :value-on-clear="null" controls-position="right" placeholder="最小值" />
+        <span class="muted">至</span>
+        <el-input-number v-model="rangeMax" :value-on-clear="null" controls-position="right" placeholder="最大值" />
+        <span v-if="rangeTarget?.trait.unit" class="muted">{{ rangeTarget.trait.unit }}</span>
+      </div>
+      <template #footer>
+        <el-button @click="rangeTarget = null">取消</el-button>
+        <el-button type="primary" :loading="rangeSaving" @click="saveRange">保存</el-button>
+      </template>
+    </el-dialog>
 
     <el-dialog :model-value="!!aliasTarget" :title="`导入时的表头：${aliasTarget?.trait.name ?? ''}`" width="480px"
       @update:model-value="(v: boolean) => { if (!v) aliasTarget = null }">
@@ -313,6 +376,30 @@ async function onCreated() {
 
 .search {
   width: 220px;
+}
+
+.range-line {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-top: 3px;
+}
+
+.range-chip {
+  font-size: 12px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.range-edit {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
 }
 
 .search-note {

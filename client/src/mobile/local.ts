@@ -4,6 +4,7 @@ import type {
 } from '@/shared/api'
 import { today } from '@/shared/traitValue'
 import { RECORD_BOOK_TRAIT_CODES } from '@/shared/recordBook'
+import { DEFAULT_TRAIT_RANGES } from '@/shared/quality'
 import traitSeed from '../../../server/src/main/resources/db/seed/traits-ny1301-2025.json'
 import { db as defaultDb, type MobileDb, type OutboxBatch } from './db'
 import type { NewBatch } from './outbox'
@@ -99,6 +100,7 @@ export async function initializeLocal(database: MobileDb = defaultDb): Promise<v
         unit: t.unit ?? null, precisionDigits: t.precision ?? null, aggMethod: t.agg,
         surveyTime: t.survey ?? null, stdClause: t.clause ?? null, isStandard: t.standard !== false,
         isComputed: t.computed === true, enabled: true, important: RECORD_BOOK_TRAIT_CODES.has(t.code),
+        minValue: DEFAULT_TRAIT_RANGES[t.code]?.[0] ?? null, maxValue: DEFAULT_TRAIT_RANGES[t.code]?.[1] ?? null,
         sortOrder: (i + 1) * 10, description: null,
       },
       options: (t.options ?? []).map((o, n) => ({

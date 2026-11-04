@@ -222,6 +222,111 @@ class ApiIntegrationTest {
     }
 
     @Test
+    void qualityCheckFindsProblemsAndCanBeAcked() throws Exception {
+        Setup s = setup("质量检查田");
+        String url = "/api/trials/" + s.trialId + "/plantings";
+        // 对照：小区 0（重复 1）、2（重复 2）；品系：小区 1（重复 1）、3（重复 2）；小区 4 没分配品种，5 是保护区
+        call(teacher, put(url), Map.of("plotIds", List.of(s.plots.get(0), s.plots.get(1)), "attribute", "REPLICATE",
+                "value", 1), status().isOk());
+        call(teacher, put(url), Map.of("plotIds", List.of(s.plots.get(2), s.plots.get(3)), "attribute", "REPLICATE",
+                "value", 2), status().isOk());
+        int year = java.time.LocalDate.now().getYear();
+        call(teacher, put("/api/trials/" + s.trialId), Map.of("fieldId", s.fieldId, "seasonYear", year + 1,
+                "name", "质量检查试验", "trialType", "COMPARISON"), status().isOk());
+        entry(student, s.trialId, "plant_height", List.of(s.plots.get(0), s.plots.get(1)), Map.of("valueNum", 78), status().isOk());
+        entry(student, s.trialId, "plant_height", List.of(s.plots.get(2)), Map.of("valueNum", 12), status().isOk());
+        entry(student, s.trialId, "emergence_date", List.of(s.plots.get(0)), Map.of("valueDate", year + "-10-20"), status().isOk());
+        entry(student, s.trialId, "heading_date", List.of(s.plots.get(0)), Map.of("valueDate", year + "-10-10"), status().isOk());
+        entry(student, s.trialId, "plot_yield", List.of(s.plots.get(0)), Map.of("valueNum", 8), status().isOk());
+        entry(student, s.trialId, "plot_yield", List.of(s.plots.get(2)), Map.of("valueNum", 12), status().isOk());
+        entry(student, s.trialId, "plot_yield", List.of(s.plots.get(1)), Map.of("valueNum", 8.2), status().isOk());
+        entry(student, s.trialId, "plot_yield", List.of(s.plots.get(3)), Map.of("valueNum", 8), status().isOk());
+
+        JsonNode report = call(student, get("/api/quality?trialId=" + s.trialId), null, status().isOk());
+        JsonNode issues = report.get("issues");
+        java.util.function.Function<String, List<JsonNode>> kind = k -> {
+            List<JsonNode> out = new ArrayList<>();
+            issues.forEach(i -> {
+                if (i.get("kind").asString().equals(k)) {
+                    out.add(i);
+                }
+            });
+            return out;
+        };
+        assertThat(kind.apply("LAYOUT")).anyMatch(i -> i.get("title").asString().contains("1 个试验小区没分配品种"));
+        JsonNode range = kind.apply("RANGE").getFirst();
+        assertThat(range.get("title").asString()).contains("株高").contains("12").contains("偏低");
+        assertThat(range.get("observationIds").size()).isEqualTo(1);
+        assertThat(kind.apply("DATE_ORDER").getFirst().get("level").asString()).isEqualTo("ERROR");
+        // 株高还差小区 3 没录
+        assertThat(kind.apply("MISSING")).anyMatch(i -> i.get("traitName").asString().equals("株高")
+                && i.get("plotIds").size() == 1);
+        // 试验误差变异系数 23.2%，对照两个重复 8、12 kg 差得多
+        assertThat(report.get("summary").get("yieldCv").decimalValue()).isEqualByComparingTo("23.2");
+        assertThat(kind.apply("YIELD_CV").getFirst().get("level").asString()).isEqualTo("ERROR");
+        assertThat(kind.apply("VARIETY_CV")).hasSize(1);
+        assertThat(report.get("summary").get("errors").asInt()).isGreaterThanOrEqualTo(2);
+        JsonNode height = find(report.get("completeness"), c -> c.get("traitName").asString().equals("株高"));
+        assertThat(height.get("recorded").asInt()).isEqualTo(3);
+        assertThat(height.get("total").asInt()).isEqualTo(4);
+
+        // 老师核实过：倒伏小区株高确实矮
+        String key = range.get("key").asString();
+        call(student, post("/api/quality/ack"), Map.of("trialId", s.trialId, "key", key), status().isForbidden());
+        call(teacher, post("/api/quality/ack"), Map.of("trialId", s.trialId, "key", key, "note", "倒伏，确实矮"), status().isOk());
+        JsonNode after = call(student, get("/api/quality?trialId=" + s.trialId), null, status().isOk());
+        JsonNode acked = find(after.get("issues"), i -> i.get("key").asString().equals(key));
+        assertThat(acked.get("acked").asBoolean()).isTrue();
+        assertThat(acked.get("ackNote").asString()).isEqualTo("倒伏，确实矮");
+        assertThat(after.get("summary").get("acked").asInt()).isEqualTo(1);
+        assertThat(after.get("summary").get("warnings").asInt()).isEqualTo(report.get("summary").get("warnings").asInt() - 1);
+        call(teacher, delete("/api/quality/ack").param("trialId", String.valueOf(s.trialId)).param("key", key), null,
+                status().isOk());
+        assertThat(call(student, get("/api/quality?trialId=" + s.trialId), null, status().isOk())
+                .get("summary").get("acked").asInt()).isZero();
+
+        // 常见范围可以改；改宽以后不再提醒
+        long heightId = traitId("plant_height");
+        call(teacher, put("/api/traits/" + heightId + "/range"), Map.of("minValue", 50, "maxValue", 20), status().isBadRequest());
+        Map<String, Object> wide = new HashMap<>();
+        wide.put("minValue", 5);
+        wide.put("maxValue", 150);
+        call(teacher, put("/api/traits/" + heightId + "/range"), wide, status().isOk());
+        assertThat(call(student, get("/api/quality?trialId=" + s.trialId), null, status().isOk()).get("issues").toString())
+                .doesNotContain("\"kind\":\"RANGE\"");
+        Map<String, Object> back = new HashMap<>();
+        back.put("minValue", 30);
+        back.put("maxValue", 150);
+        call(teacher, put("/api/traits/" + heightId + "/range"), back, status().isOk());
+
+        // 很多小区一起超出范围（千粒重按 kg 录成了 0.04）、整块田重复录了播种期：各合成一条，不按小区刷屏
+        entry(student, s.trialId, "thousand_grain_weight", s.plots.subList(0, 4), Map.of("valueNum", 0.04), status().isOk());
+        entry(student, s.trialId, "sowing_date", s.plots.subList(0, 4), Map.of("valueDate", year + "-10-08"), status().isOk());
+        entry(student, s.trialId, "sowing_date", s.plots.subList(0, 4), Map.of("valueDate", year + "-10-09"), status().isOk());
+        JsonNode grouped = call(student, get("/api/quality?trialId=" + s.trialId), null, status().isOk()).get("issues");
+        List<JsonNode> tgw = new ArrayList<>();
+        List<JsonNode> sowing = new ArrayList<>();
+        grouped.forEach(i -> {
+            if ("千粒重".equals(i.path("traitName").asString(""))) {
+                tgw.add(i);
+            }
+            if ("CONFLICT".equals(i.get("kind").asString())) {
+                sowing.add(i);
+            }
+        });
+        assertThat(tgw).hasSize(1);
+        assertThat(tgw.getFirst().get("title").asString()).isEqualTo("4 个小区的千粒重超出常见范围");
+        assertThat(tgw.getFirst().get("plotIds").size()).isEqualTo(4);
+        assertThat(tgw.getFirst().get("observationIds").size()).isEqualTo(4);
+        assertThat(sowing).hasSize(1);
+        assertThat(sowing.getFirst().get("title").asString()).isEqualTo("4 个小区的播种期录了不同的日期");
+        assertThat(sowing.getFirst().get("observationIds").size()).isEqualTo(8);
+        assertThat(sowing.getFirst().get("key").asString().length()).isLessThanOrEqualTo(200);
+        call(teacher, post("/api/quality/ack"), Map.of("trialId", s.trialId, "key", sowing.getFirst().get("key").asString()),
+                status().isOk());
+    }
+
+    @Test
     void trialRecordBookAndHarvestArea() throws Exception {
         Setup s = setup("记载本试验田");
         String bookUrl = "/api/trials/" + s.trialId + "/book";

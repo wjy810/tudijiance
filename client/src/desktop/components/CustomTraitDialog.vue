@@ -34,6 +34,8 @@ const form = reactive({
   options: ['', ''] as string[],
   description: '',
   important: false,
+  minValue: null as number | null,
+  maxValue: null as number | null,
 })
 const saving = ref(false)
 
@@ -46,8 +48,12 @@ watch(visible, (open) => {
     ? {
         name: p.name, dataType: p.dataType, unit: p.unit ?? '', precisionDigits: p.precisionDigits ?? 1,
         options: p.options.length >= 2 ? [...p.options] : ['', ''], description: '', important: false,
+        minValue: null, maxValue: null,
       }
-    : { name: '', dataType: 'OPTION', unit: '', precisionDigits: 1, options: ['', ''], description: '', important: false })
+    : {
+        name: '', dataType: 'OPTION', unit: '', precisionDigits: 1, options: ['', ''], description: '', important: false,
+        minValue: null, maxValue: null,
+      })
 })
 
 async function save() {
@@ -61,6 +67,11 @@ async function save() {
     ElMessage.warning('选项至少要有 2 个')
     return
   }
+  const isNum = form.dataType === 'NUMBER'
+  if (isNum && form.minValue != null && form.maxValue != null && form.minValue > form.maxValue) {
+    ElMessage.warning('常见范围的最小值不能大于最大值')
+    return
+  }
   saving.value = true
   try {
     const created = await traitApi.createCustom({
@@ -72,6 +83,8 @@ async function save() {
       description: form.description.trim() || null,
       aliases: props.preset?.header ? [props.preset.header] : [],
       important: form.important,
+      minValue: isNum ? form.minValue ?? null : null,
+      maxValue: isNum ? form.maxValue ?? null : null,
     })
     ElMessage.success(`已新增项目"${name}"`)
     visible.value = false
@@ -120,6 +133,14 @@ async function save() {
         <el-form-item label="小数位数">
           <el-input-number v-model="form.precisionDigits" :min="0" :max="4" />
         </el-form-item>
+        <el-form-item label="常见范围">
+          <div class="range">
+            <el-input-number v-model="form.minValue" :value-on-clear="null" controls-position="right" placeholder="最小" class="range-num" />
+            <span class="muted">至</span>
+            <el-input-number v-model="form.maxValue" :value-on-clear="null" controls-position="right" placeholder="最大" class="range-num" />
+          </div>
+          <div class="hint full">可不填。录的值超出这个范围时会提醒“确认没录错？”，数据质量检查也会列出来。</div>
+        </el-form-item>
       </template>
       <el-form-item label="说明">
         <el-input v-model="form.description" type="textarea" maxlength="200" placeholder="怎么调查、什么时候调查（可不填）" />
@@ -160,5 +181,15 @@ async function save() {
 
 .short {
   width: 160px;
+}
+
+.range {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.range-num {
+  width: 130px;
 }
 </style>

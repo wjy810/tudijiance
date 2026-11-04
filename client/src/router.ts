@@ -43,6 +43,10 @@ const router = createRouter({
           meta: { roles: RECORDERS, module: 'record_book' },
         },
         {
+          path: 'quality', name: 'quality', component: () => import('@/desktop/views/QualityView.vue'),
+          meta: { roles: RECORDERS, module: 'quality' },
+        },
+        {
           path: 'data', name: 'data', component: () => import('@/desktop/views/DataView.vue'),
           meta: { roles: RECORDERS, module: 'data' },
         },

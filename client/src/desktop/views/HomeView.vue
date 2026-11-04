@@ -14,7 +14,7 @@ import {
 } from '@element-plus/icons-vue'
 
 import {
-  fieldApi, observationApi, statsApi, trialApi, type Field, type FieldDetail, type Screen, type Trial,
+  fieldApi, observationApi, qualityApi, statsApi, trialApi, type Field, type FieldDetail, type Screen, type Trial,
 } from '@/shared/api'
 import { PLOT_STATUS } from '@/shared/labels'
 import { rememberTrial } from '@/shared/composables/useTrialPicker'
@@ -73,9 +73,24 @@ async function load() {
   }
 }
 
+/** 当前试验的数据质量：待处理的错误和提醒条数，最严重的一条 */
+const quality = ref<{ errors: number; warnings: number; top: string | null } | null>(null)
+
+async function loadQuality(trialId: number) {
+  if (!modules.isOn('quality')) return
+  try {
+    const r = await qualityApi.check(trialId)
+    const first = r.issues.find((i) => !i.acked && i.level !== 'INFO')
+    quality.value = { errors: r.summary.errors, warnings: r.summary.warnings, top: first?.title ?? null }
+  } catch {
+    quality.value = null
+  }
+}
+
 async function loadPrimaryTrial() {
   primaryTrial.value = null
   enteredToday.value = []
+  quality.value = null
   if (!primaryId.value) return
   try {
     const trials = await trialApi.list(primaryId.value)
@@ -83,6 +98,7 @@ async function loadPrimaryTrial() {
     if (primaryTrial.value) {
       const status = await observationApi.status(primaryTrial.value.id)
       enteredToday.value = status.plots.filter((p) => p.enteredToday).map((p) => p.plotId)
+      loadQuality(primaryTrial.value.id)
     }
   } catch {
     // 取不到只是少了绿点和待办，不影响首页其它内容
@@ -219,16 +235,24 @@ const attention = computed<Attention[]>(() => {
     action: abnormalTotal.value > 0 ? '去平面图看' : '',
     go: first ? () => openMap(first.fieldId) : null,
   })
-  list.push({
-    key: 'checks',
-    title: '数据质量提醒',
-    desc: '漏录、超出常见范围、前后对不上的数据',
-    icon: DocumentChecked,
-    tone: 'wheat',
-    action: '去检查',
-    // 合并"数据检查"后可在这里接上提醒条数（count）
-    go: hasRoute('/checks') ? () => router.push('/checks') : null,
-  })
+  if (modules.isOn('quality')) {
+    const q = quality.value
+    const n = q ? q.errors + q.warnings : null
+    list.push({
+      key: 'checks',
+      title: '数据质量提醒',
+      desc: !q ? '漏录、超出常见范围、前后对不上的数据'
+        : n === 0 ? '当前试验没发现问题' : `${q.errors ? `${q.errors} 个错误，` : ''}${q.warnings} 个提醒。${q.top ?? ''}`,
+      icon: q && n === 0 ? CircleCheck : DocumentChecked,
+      tone: !q ? 'wheat' : q.errors > 0 ? 'clay' : n ? 'wheat' : 'green',
+      count: n,
+      action: '去检查',
+      go: () => {
+        if (primaryTrial.value) rememberTrial(primaryTrial.value.fieldId, primaryTrial.value.id)
+        router.push('/quality')
+      },
+    })
+  }
   if (auth.isTeacher) {
     list.push({
       key: 'corrections',

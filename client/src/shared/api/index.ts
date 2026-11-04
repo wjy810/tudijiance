@@ -40,6 +40,8 @@ import type {
   TrialBookRequest,
   AppModule,
   LinkModuleRequest,
+  QualityReport,
+  TraitDef,
   UserView,
   Variety,
   VarietyRequest,
@@ -99,6 +101,8 @@ export const traitApi = {
   list: () => data<TraitView[]>(http.get('/api/traits')),
   setEnabled: (id: number, enabled: boolean) => data<void>(http.put(`/api/traits/${id}/enabled`, { enabled })),
   setImportant: (id: number, important: boolean) => data<void>(http.put(`/api/traits/${id}/important`, { important })),
+  setRange: (id: number, minValue: number | null, maxValue: number | null) =>
+    data<TraitDef>(http.put(`/api/traits/${id}/range`, { minValue, maxValue })),
   createCustom: (req: CustomTraitRequest) => data<TraitView>(http.post('/api/traits', req)),
   removeCustom: (id: number) => data<void>(http.delete(`/api/traits/${id}`)),
   setAliases: (id: number, aliases: string[]) => data<string[]>(http.put(`/api/traits/${id}/aliases`, { aliases })),
@@ -185,4 +189,11 @@ export const moduleApi = {
   createLink: (req: LinkModuleRequest) => data<AppModule>(http.post('/api/modules/links', req)),
   updateLink: (code: string, req: LinkModuleRequest) => data<AppModule>(http.put(`/api/modules/links/${code}`, req)),
   removeLink: (code: string) => data<void>(http.delete(`/api/modules/links/${code}`)),
+}
+
+export const qualityApi = {
+  check: (trialId: number) => data<QualityReport>(http.get('/api/quality', { params: { trialId } })),
+  ack: (trialId: number, key: string, note: string | null) =>
+    data<void>(http.post('/api/quality/ack', { trialId, key, note })),
+  unack: (trialId: number, key: string) => data<void>(http.delete('/api/quality/ack', { params: { trialId, key } })),
 }

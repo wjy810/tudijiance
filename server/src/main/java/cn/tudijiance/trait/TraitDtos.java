@@ -23,6 +23,10 @@ public final class TraitDtos {
     public record ImportantRequest(@NotNull Boolean important) {
     }
 
+    /** 常见范围，两个都可以为 null（不限） */
+    public record RangeRequest(java.math.BigDecimal minValue, java.math.BigDecimal maxValue) {
+    }
+
     public record CustomTraitRequest(
             @NotBlank @Size(max = 50) String name,
             @NotBlank String dataType,
@@ -33,7 +37,10 @@ public final class TraitDtos {
             /** 同时记下的表头别名，例如导入时按表头新建项目，就把这个表头记下来 */
             @Size(max = 20) List<String> aliases,
             /** 标为重要项目 */
-            Boolean important) {
+            Boolean important,
+            /** 数值项目的常见范围 */
+            java.math.BigDecimal minValue,
+            java.math.BigDecimal maxValue) {
     }
 
     public record AliasRequest(@NotNull @Size(max = 50) List<String> aliases) {

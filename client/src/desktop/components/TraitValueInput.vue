@@ -3,6 +3,7 @@
 import { computed } from 'vue'
 
 import type { TraitValue, TraitView } from '@/shared/api'
+import { rangeText, rangeWarning } from '@/shared/quality'
 import { today } from '@/shared/traitValue'
 
 const props = defineProps<{ trait: TraitView }>()
@@ -12,6 +13,9 @@ const def = computed(() => props.trait.trait)
 const options = computed(() => props.trait.options)
 const unit = computed(() => (def.value.unit && def.value.unit !== '级' ? def.value.unit : ''))
 const step = computed(() => (def.value.precisionDigits ? 10 ** -def.value.precisionDigits : 1))
+/** 超出常见范围时的提醒，只提醒、不拦着，真有这种情况照样能存 */
+const warning = computed(() => rangeWarning(def.value, value.value.valueNum))
+const range = computed(() => rangeText(def.value))
 
 function setNum(v: number | null | undefined) {
   value.value = { ...value.value, valueNum: v ?? null }
@@ -90,6 +94,8 @@ const gradeValue = computed({
         @update:model-value="setNum"
       />
       <span v-if="unit" class="unit">{{ unit }}</span>
+      <span v-if="warning" class="range-warn" role="status">{{ warning }}</span>
+      <span v-else-if="range" class="range-hint">常见 {{ range }}</span>
     </template>
 
     <el-radio-group
@@ -228,6 +234,20 @@ const gradeValue = computed({
 
 .unit {
   color: var(--app-text-secondary);
+}
+
+.range-hint {
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+.range-warn {
+  font-size: 12.5px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  color: #8a5a10;
+  background: #fbefd2;
+  border: 1px solid #ecd39a;
 }
 
 .operation {

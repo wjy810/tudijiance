@@ -3,6 +3,7 @@
 import { computed, ref } from 'vue'
 
 import type { TraitValue, TraitView } from '@/shared/api'
+import { rangeText, rangeWarning } from '@/shared/quality'
 import { today } from '@/shared/traitValue'
 import NumberPad from './NumberPad.vue'
 
@@ -13,6 +14,10 @@ const def = computed(() => props.trait.trait)
 const options = computed(() => props.trait.options)
 const hasStandards = computed(() => options.value.some((o) => o.description))
 const unit = computed(() => (def.value.unit && def.value.unit !== '级' ? def.value.unit : null))
+
+/** 超出常见范围只提醒一句，照样能存 */
+const warning = computed(() => (def.value.dataType === 'NUMBER' ? rangeWarning(def.value, props.modelValue.valueNum) : null))
+const range = computed(() => rangeText(def.value))
 
 function set(patch: Partial<TraitValue>) {
   emit('update:modelValue', { ...props.modelValue, ...patch })
@@ -76,8 +81,12 @@ function confirmPicker({ selectedValues }: { selectedValues: string[] }) {
     </template>
 
     <!-- 数值 -->
-    <NumberPad v-else-if="def.dataType === 'NUMBER'" :model-value="modelValue.valueNum" :unit="unit"
-      :precision="def.precisionDigits" autofocus @update:model-value="(v) => set({ valueNum: v })" />
+    <template v-else-if="def.dataType === 'NUMBER'">
+      <NumberPad :model-value="modelValue.valueNum" :unit="unit"
+        :precision="def.precisionDigits" autofocus @update:model-value="(v) => set({ valueNum: v })" />
+      <div v-if="warning" class="range-warn" role="status">{{ warning }}</div>
+      <div v-else-if="range" class="range-hint">常见范围 {{ range }}</div>
+    </template>
 
     <!-- 选项、农事操作 -->
     <template v-else-if="def.dataType === 'OPTION' || def.dataType === 'OPERATION'">
@@ -105,6 +114,22 @@ function confirmPicker({ selectedValues }: { selectedValues: string[] }) {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.range-hint {
+  text-align: center;
+  font-size: 13px;
+  color: var(--ink-3);
+}
+
+.range-warn {
+  text-align: center;
+  font-size: 14px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  color: #8a5a10;
+  background: #fbefd2;
+  border: 1px solid #ecd39a;
 }
 
 .date-big {

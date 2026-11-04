@@ -17,6 +17,7 @@ import cn.tudijiance.trait.TraitDtos.AliasRequest;
 import cn.tudijiance.trait.TraitDtos.CustomTraitRequest;
 import cn.tudijiance.trait.TraitDtos.EnabledRequest;
 import cn.tudijiance.trait.TraitDtos.ImportantRequest;
+import cn.tudijiance.trait.TraitDtos.RangeRequest;
 import cn.tudijiance.trait.TraitDtos.TraitView;
 import jakarta.validation.Valid;
 
@@ -47,6 +48,12 @@ public class TraitController {
     @PreAuthorize(Roles.IS_TEACHER)
     public void setImportant(@PathVariable Long id, @Valid @RequestBody ImportantRequest req) {
         traitService.setImportant(id, req.important());
+    }
+
+    @PutMapping("/{id}/range")
+    @PreAuthorize(Roles.IS_TEACHER)
+    public TraitDef setRange(@PathVariable Long id, @RequestBody RangeRequest req) {
+        return traitService.setRange(id, req.minValue(), req.maxValue());
     }
 
     @PostMapping
