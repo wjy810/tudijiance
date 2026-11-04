@@ -36,10 +36,14 @@ public final class FieldDtos {
             @Size(max = 50) String previousCrop,
             @Size(max = 500) String remark,
             @DecimalMin("0.1") @DecimalMax("200") BigDecimal plotLengthM,
-            @DecimalMin("0.1") @DecimalMax("200") BigDecimal plotWidthM) {
+            @DecimalMin("0.1") @DecimalMax("200") BigDecimal plotWidthM,
+            FieldLayout layout) {
     }
 
-    public record FieldDetail(Field field, List<Plot> plots) {
+    /**
+     * layout：区块布局；还没保存过布局的老实验田给的是按行列算出来的（整块地一个区块），layoutSaved 为 false。
+     */
+    public record FieldDetail(Field field, List<Plot> plots, FieldLayout layout, boolean layoutSaved) {
     }
 
     /** 批量改小区编号：key 是小区 id，value 是新编号（空字符串表示清除编号）。 */

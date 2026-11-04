@@ -60,6 +60,13 @@ public class FieldController {
         fieldService.delete(id);
     }
 
+    /** 保存区块布局，按布局增删、更新小区 */
+    @PutMapping("/{id}/layout")
+    @PreAuthorize(Roles.IS_TEACHER)
+    public FieldDetail saveLayout(@PathVariable Long id, @RequestBody FieldLayout layout) {
+        return fieldService.saveLayout(id, layout);
+    }
+
     @PutMapping("/{id}/plot-codes")
     @PreAuthorize(Roles.IS_TEACHER)
     public List<Plot> updateCodes(@PathVariable Long id, @Valid @RequestBody PlotCodesRequest req) {

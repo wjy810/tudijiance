@@ -226,6 +226,105 @@ class ApiIntegrationTest {
     }
 
     @Test
+    void blockLayoutCreatesAndSyncsPlots() throws Exception {
+        // 新建实验田时直接给区块布局：一行两个区块（各 2 × 3 个小区），单位用“尺”
+        Map<String, Object> inner = Map.of("rows", List.of(1, 1), "cols", List.of(1, 1, 1), "merges", List.of());
+        Map<String, Object> layout = new HashMap<>(Map.of(
+                "version", 1, "unit", Map.of("name", "尺", "symbol", "尺", "meters", 1.0 / 3),
+                "rows", List.of(40), "cols", List.of(18, 18), "merges", List.of(),
+                "blocks", List.of(
+                        Map.of("id", "B1", "r", 0, "c", 0, "name", "重复Ⅰ", "kind", "PLANT", "inner", inner),
+                        Map.of("id", "B2", "r", 0, "c", 1, "name", "重复Ⅱ", "kind", "PLANT", "inner", inner)),
+                "nextBlockNo", 3, "defaultInner", Map.of("rows", 2, "cols", 3)));
+        Map<String, Object> req = new HashMap<>(Map.of("name", "区块试验田", "rowCount", 1, "colCount", 1, "layout", layout));
+        JsonNode created = call(teacher, post("/api/fields"), req, status().isOk());
+        long fieldId = created.get("field").get("id").asLong();
+        assertThat(created.get("layoutSaved").asBoolean()).isTrue();
+        assertThat(created.get("plots").size()).isEqualTo(12);
+        assertThat(created.get("field").get("colCount").asInt()).isEqualTo(6);
+        assertThat(created.get("field").has("layout")).isFalse();
+        // 18 尺宽分 3 列：每个小区宽 6 尺 = 2 m；40 尺长分 2 行：每行 20 尺 = 6.67 m
+        JsonNode p0 = created.get("plots").get(0);
+        assertThat(p0.get("widthM").decimalValue()).isEqualByComparingTo("2.00");
+        assertThat(p0.get("lengthM").decimalValue()).isEqualByComparingTo("6.67");
+        JsonNode b1 = created.get("layout").get("blocks").get(0);
+        assertThat(b1.get("inner").get("plots").size()).isEqualTo(6);
+
+        // 给第一个区块的一个小区分配品种
+        long trialId = call(teacher, post("/api/trials"), Map.of("fieldId", fieldId, "seasonYear", 2026,
+                "name", "布局试验", "trialType", "COMPARISON"), status().isOk()).get("id").asLong();
+        long busyPlot = b1.get("inner").get("plots").get("0,1").asLong();
+        call(teacher, put("/api/trials/" + trialId + "/plantings"), Map.of("plotIds", List.of(busyPlot),
+                "attribute", "VARIETY", "value", varietyId("布局品种", null)), status().isOk());
+
+        // 把第一个区块第一行的 3 格合并：会去掉有品种的小区，不允许
+        JsonNode saved = created.get("layout");
+        Map<String, Object> merged = json.convertValue(saved, Map.class);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> mb1 = (Map<String, Object>) ((List<Object>) merged.get("blocks")).get(0);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> mi = (Map<String, Object>) mb1.get("inner");
+        mi.put("merges", List.of(Map.of("r", 0, "c", 0, "rs", 1, "cs", 3)));
+        @SuppressWarnings("unchecked")
+        Map<String, Object> ids = new HashMap<>((Map<String, Object>) mi.get("plots"));
+        ids.remove("0,1");
+        ids.remove("0,2");
+        mi.put("plots", ids);
+        call(teacher, put("/api/fields/" + fieldId + "/layout"), merged, status().isConflict());
+
+        // 清掉品种后可以合并：少 2 个小区，合并的小区宽 18 尺 = 6 m
+        call(teacher, put("/api/trials/" + trialId + "/plantings"), Map.of("plotIds", List.of(busyPlot),
+                "attribute", "VARIETY"), status().isOk());
+        JsonNode after = call(teacher, put("/api/fields/" + fieldId + "/layout"), merged, status().isOk());
+        assertThat(after.get("plots").size()).isEqualTo(10);
+        long anchor = after.get("layout").get("blocks").get(0).get("inner").get("plots").get("0,0").asLong();
+        JsonNode anchorPlot = find(after.get("plots"), p -> p.get("id").asLong() == anchor);
+        assertThat(anchorPlot.get("widthM").decimalValue()).isEqualByComparingTo("6.00");
+
+        // 加一列区块：新区块的小区自动编号，接着用没用过的号
+        @SuppressWarnings("unchecked")
+        Map<String, Object> grown = json.convertValue(after.get("layout"), Map.class);
+        grown.put("cols", List.of(18, 18, 18));
+        @SuppressWarnings("unchecked")
+        List<Object> blocks = new ArrayList<>((List<Object>) grown.get("blocks"));
+        blocks.add(Map.of("id", "B3", "r", 0, "c", 2, "name", "重复Ⅲ", "kind", "PLANT", "inner", inner));
+        grown.put("blocks", blocks);
+        JsonNode three = call(teacher, put("/api/fields/" + fieldId + "/layout"), grown, status().isOk());
+        assertThat(three.get("plots").size()).isEqualTo(16);
+        List<String> codes = new ArrayList<>();
+        three.get("plots").forEach(p -> codes.add(p.get("code").asString()));
+        assertThat(codes).doesNotHaveDuplicates().contains("2", "3", "13", "14");
+
+        // 学生不能改布局；修改实验田名称不影响布局
+        call(student, put("/api/fields/" + fieldId + "/layout"), grown, status().isForbidden());
+        JsonNode renamed = call(teacher, put("/api/fields/" + fieldId),
+                Map.of("name", "区块试验田（改名）", "rowCount", 1, "colCount", 1), status().isOk());
+        assertThat(renamed.get("plots").size()).isEqualTo(16);
+        call(teacher, patch("/api/fields/" + fieldId + "/plots"), Map.of("plotIds", List.of(anchor), "lengthM", 3),
+                status().isBadRequest());
+    }
+
+    @Test
+    void legacyFieldsGetAOneBlockLayout() throws Exception {
+        JsonNode field = call(teacher, post("/api/fields"), Map.of("name", "老网格", "rowCount", 2, "colCount", 3,
+                "plotLengthM", 6.65, "plotWidthM", 2.0), status().isOk());
+        assertThat(field.get("layoutSaved").asBoolean()).isFalse();
+        JsonNode layout = field.get("layout");
+        assertThat(layout.get("blocks").size()).isEqualTo(1);
+        assertThat(layout.get("rows").get(0).asDouble()).isEqualTo(13.3);
+        assertThat(layout.get("blocks").get(0).get("inner").get("plots").size()).isEqualTo(6);
+        // 原样保存一次就变成区块布局，小区不变
+        long fieldId = field.get("field").get("id").asLong();
+        JsonNode saved = call(teacher, put("/api/fields/" + fieldId + "/layout"), layout, status().isOk());
+        assertThat(saved.get("layoutSaved").asBoolean()).isTrue();
+        List<Long> before = new ArrayList<>();
+        field.get("plots").forEach(p -> before.add(p.get("id").asLong()));
+        List<Long> after = new ArrayList<>();
+        saved.get("plots").forEach(p -> after.add(p.get("id").asLong()));
+        assertThat(after).containsExactlyElementsOf(before);
+    }
+
+    @Test
     void trialLayoutWithControlLink() throws Exception {
         Setup s = setup("西区试验田");
         String trialUrl = "/api/trials/" + s.trialId;

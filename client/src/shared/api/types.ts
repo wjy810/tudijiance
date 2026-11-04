@@ -1,3 +1,5 @@
+import type { FieldLayout } from '@/shared/fieldLayout'
+
 // 和后端接口对应的数据类型
 
 export type Role = 'SYS_ADMIN' | 'TEACHER' | 'STUDENT' | 'GUEST'
@@ -35,6 +37,8 @@ export interface Field {
 }
 
 export type FieldRequest = Omit<Field, 'id' | 'createdAt' | 'updatedAt'> & {
+  /** 新建时直接给区块布局，按布局生成小区 */
+  layout?: FieldLayout | null
   /** 新生成小区的默认长和宽（米） */
   plotLengthM?: number | null
   plotWidthM?: number | null
@@ -58,6 +62,9 @@ export interface Plot {
 export interface FieldDetail {
   field: Field
   plots: Plot[]
+  /** 区块布局；老的按行列建的实验田给的是算出来的（整块地一个区块），layoutSaved 为 false */
+  layout: FieldLayout
+  layoutSaved: boolean
 }
 
 export interface PlotPatch {

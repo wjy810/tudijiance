@@ -43,6 +43,8 @@ import type {
   VarietyRequest,
 } from './types'
 
+import type { FieldLayout } from '@/shared/fieldLayout'
+
 export * from './types'
 export { ApiError, isNetworkError, setToken, setUnauthorizedHandler } from './http'
 
@@ -66,6 +68,7 @@ export const fieldApi = {
   updateCodes: (id: number, codes: Record<number, string>) =>
     data<Plot[]>(http.put(`/api/fields/${id}/plot-codes`, { codes })),
   patchPlots: (id: number, patch: PlotPatch) => data<Plot[]>(http.patch(`/api/fields/${id}/plots`, patch)),
+  saveLayout: (id: number, layout: FieldLayout) => data<FieldDetail>(http.put(`/api/fields/${id}/layout`, layout)),
 }
 
 export const varietyApi = {

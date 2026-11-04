@@ -7,7 +7,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  ArrowDown, ArrowLeft, Close, EditPen, Notebook, PieChart, QuestionFilled, Rank, Setting, Warning, ZoomIn, ZoomOut,
+  ArrowDown, ArrowLeft, Close, EditPen, Notebook, PieChart, QuestionFilled, Rank, Warning, ZoomIn, ZoomOut,
 } from '@element-plus/icons-vue'
 
 import {
@@ -20,8 +20,8 @@ import { REPLICATE_COLORS, SEQUENTIAL_GRADIENT, VARIETY_COLORS, sequentialColor 
 import { rememberTrial } from '@/shared/composables/useTrialPicker'
 import { useAuthStore } from '@/stores/auth'
 import { useCatalogStore } from '@/stores/catalog'
-import PlotGrid from '@/desktop/components/PlotGrid.vue'
-import type { GridCell, GridDevice, GridLink } from '@/desktop/components/plotGrid'
+import FieldCanvas, { type CanvasCell, type CanvasDevice, type CanvasLink } from '@/desktop/components/FieldCanvas.vue'
+import { fieldSize, fmt, innerCells, type FieldLayout } from '@/shared/fieldLayout'
 import FieldFormDialog from '@/desktop/components/FieldFormDialog.vue'
 import TrialFormDialog from '@/desktop/components/TrialFormDialog.vue'
 import EntryDialog from '@/desktop/components/EntryDialog.vue'
@@ -47,6 +47,7 @@ const selected = ref<number[]>([])
 const loading = ref(false)
 
 const field = computed(() => detail.value?.field ?? null)
+const fieldLayout = computed<FieldLayout | null>(() => detail.value?.layout ?? null)
 const trial = computed(() => trials.value.find((t) => t.id === trialId.value) ?? null)
 const plots = computed(() => detail.value?.plots ?? [])
 const plotById = computed(() => new Map(plots.value.map((p) => [p.id, p])))
@@ -128,7 +129,7 @@ onMounted(async () => {
   await load()
   rememberTrial(fieldId.value, trialId.value)
   await nextTick()
-  fitWidth()
+  canvasRef.value?.fit()
 })
 
 // ---------- 模式和显示方式 ----------
@@ -146,22 +147,18 @@ watch(layout, (l, old) => {
 
 interface Display {
   view: ViewMode
-  cellW: number
-  cellH: number
   /** "按指标"着色时用的项目 */
   traitId: number | null
 }
 
-const DISPLAY_KEY = 'tudijiance.mapDisplay.v2'
+const DISPLAY_KEY = 'tudijiance.mapDisplay.v3'
 
 function loadDisplay(): Display {
-  const fallback: Display = { view: 'status', cellW: 108, cellH: 72, traitId: null }
+  const fallback: Display = { view: 'status', traitId: null }
   try {
     const saved = JSON.parse(localStorage.getItem(DISPLAY_KEY) || '{}') as Partial<Display>
     return {
       view: saved.view ?? fallback.view,
-      cellW: saved.cellW ?? fallback.cellW,
-      cellH: saved.cellH ?? fallback.cellH,
       traitId: saved.traitId ?? fallback.traitId,
     }
   } catch {
@@ -183,23 +180,57 @@ watch(mode, (m) => {
   display.value.view = m === 'layout' ? 'variety' : 'status'
 })
 
-const zoom = ref(1)
+/** 画布缩放比例（相对"正好放下"的百分比） */
+const zoom = ref(100)
 const panning = ref(false)
+const rotation = ref(0)
+const canvasRef = ref<InstanceType<typeof FieldCanvas> | null>(null)
 
-function zoomBy(step: number) {
-  zoom.value = Math.min(2.5, Math.max(0.3, Math.round((zoom.value + step) * 10) / 10))
+function zoomBy(factor: number) {
+  canvasRef.value?.zoomBy(factor)
 }
 
-/** 缩放到整块地正好放得下（不放大，最小 50%） */
-function fitWidth() {
-  const el = scroller.value
-  if (!el || !field.value) {
+function fitView() {
+  canvasRef.value?.fit()
+}
+
+// ---------- 进入区块 ----------
+
+/** 正在看的区块（"进入区块"），为空是整块地 */
+const focus = ref<string | null>(null)
+const focusBlock = computed(() => fieldLayout.value?.blocks.find((b) => b.id === focus.value) ?? null)
+
+function enterBlock(id: string) {
+  const b = fieldLayout.value?.blocks.find((x) => x.id === id)
+  if (!b || b.kind !== 'PLANT') {
     return
   }
-  // 和 PlotGrid 的边距、行号宽度一致
-  const gridWidth = 20 + 30 + field.value.colCount * display.value.cellW
-  zoom.value = Math.max(0.5, Math.min(1, Math.floor(((el.clientWidth - 8) / gridWidth) * 100) / 100))
+  focus.value = id
+  selected.value = []
 }
+
+function leaveBlock() {
+  focus.value = null
+}
+
+const layoutStats = computed(() => {
+  const l = fieldLayout.value
+  if (!l) {
+    return { blocks: 0, plots: 0, size: '' }
+  }
+  const s = fieldSize(l)
+  return {
+    blocks: l.blocks.filter((b) => b.kind === 'PLANT').length,
+    plots: plots.value.length,
+    size: `${fmt(s.w, l.unit)} × ${fmt(s.h, l.unit)}`,
+  }
+})
+
+watch(fieldLayout, (l) => {
+  if (focus.value && !l?.blocks.some((b) => b.id === focus.value)) {
+    focus.value = null
+  }
+})
 
 
 const varietyColor = computed(() => {
@@ -271,8 +302,9 @@ function fillOf(p: Plot): string {
     : '#f1ebdd'
 }
 
-const cells = computed<GridCell[]>(() =>
-  plots.value.map((p) => {
+const cells = computed(() => {
+  const out = new Map<number, CanvasCell>()
+  for (const p of plots.value) {
     const planting = plantingByPlot.value.get(p.id)
     const variety = planting?.varietyId ? catalog.varietyById.get(planting.varietyId) : undefined
     const st = statusByPlot.value.get(p.id)
@@ -290,21 +322,21 @@ const cells = computed<GridCell[]>(() =>
     }
     const badge = [variety?.controlType ? 'CK' : '', st?.status === 'ABNORMAL' ? '!' : ''].filter(Boolean).join(' ')
     const tip = [
-      `${code}（第 ${p.rowNo} 行第 ${p.colNo} 列）`,
+      `小区 ${code}`,
       p.kind === 'PLOT' ? `品种：${variety?.name ?? '未分配'}` : PLOT_KIND[p.kind],
       planting?.replicateNo ? `重复：${replicateLabel(planting.replicateNo)}` : '',
       p.kind === 'PLOT' && trial.value ? `状态：${PLOT_STATUS[plotStatus(p)].label}${st?.abnormalNote ? '（' + st.abnormalNote + '）' : ''}` : '',
       st?.enteredToday ? '今天录过数据' : '',
       display.value.view === 'trait' && metricTrait.value
         ? `${metricTrait.value.name}：${traitValues.value.get(p.id)?.displayValue ?? '无数据'}` : '',
-      p.lengthM && p.widthM ? `尺寸：${p.lengthM} × ${p.widthM} m` : '',
+      p.lengthM && p.widthM ? `尺寸：${p.widthM} m × ${p.lengthM} m` : '',
     ].filter(Boolean).join('\n')
-    return {
-      plotId: p.id, rowNo: p.rowNo, colNo: p.colNo, lines, fill: fillOf(p),
-      badge: badge || undefined, marker: st?.enteredToday, tooltip: tip,
-    }
-  }),
-)
+    out.set(p.id, {
+      lines, fill: fillOf(p), badge: badge || undefined, marker: st?.enteredToday, tooltip: tip, muted: p.kind !== 'PLOT',
+    })
+  }
+  return out
+})
 
 // 在右侧"对照关系"里点了哪一组；再点一次取消
 const pinnedLink = ref<number | null>(null)
@@ -336,7 +368,7 @@ watch(selected, (ids) => {
   }
 })
 
-const gridLinks = computed<GridLink[]>(() =>
+const gridLinks = computed<CanvasLink[]>(() =>
   visibleLinks.value.map((link) => {
     const controls = link.plots.filter((p) => p.control).map((p) => plotById.value.get(p.plotId)).filter((p): p is Plot => !!p)
     // 每个比较的小区连到离它最近的对照小区
@@ -353,14 +385,29 @@ const gridLinks = computed<GridLink[]>(() =>
   }),
 )
 
-const gridDevices = computed<GridDevice[]>(() =>
-  devices.value
-    .filter((d) => d.posRow && d.posCol)
-    .map((d) => ({ id: d.id, row: d.posRow!, col: d.posCol!, label: d.name, status: d.status })),
-)
+// 传感器（第二期）：登记时填的是第几行第几列，画在那个小区的中间
+const DEVICE_COLORS: Record<string, string> = { ONLINE: '#2f9e44', OFFLINE: '#868e96', NEVER: '#f08c00' }
 
-const colWidths = computed(() => (field.value ? Array(field.value.colCount).fill(display.value.cellW) : undefined))
-const rowHeights = computed(() => (field.value ? Array(field.value.rowCount).fill(display.value.cellH) : undefined))
+const gridDevices = computed<CanvasDevice[]>(() => {
+  const l = fieldLayout.value
+  if (!l) {
+    return []
+  }
+  const centerOf = new Map<number, { x: number; y: number }>()
+  for (const b of l.blocks) {
+    for (const c of innerCells(l, b)) {
+      if (c.plotId != null) {
+        centerOf.set(c.plotId, { x: c.rect.x + c.rect.w / 2, y: c.rect.y + c.rect.h / 2 })
+      }
+    }
+  }
+  return devices.value.flatMap((d) => {
+    const p = d.posRow && d.posCol
+      ? plots.value.find((x) => x.rowNo === Math.round(d.posRow!) && x.colNo === Math.round(d.posCol!)) : undefined
+    const at = p ? centerOf.get(p.id) : undefined
+    return at ? [{ id: d.id, ...at, label: d.name, color: DEVICE_COLORS[d.status] ?? '#868e96' }] : []
+  })
+})
 
 const legend = computed(() => {
   if (display.value.view === 'trait') {
@@ -381,45 +428,16 @@ const legend = computed(() => {
   }))
 })
 
-// ---------- 拖动画面、Ctrl+滚轮缩放 ----------
-
-const scroller = ref<HTMLElement | null>(null)
-let panStart: { x: number; y: number; left: number; top: number } | null = null
-
-function onPanDown(e: MouseEvent) {
-  // 拖动模式下左键拖动，任何时候都可以按住中键拖动
-  if (!scroller.value || !(e.button === 1 || (panning.value && e.button === 0))) {
-    return
-  }
-  e.preventDefault()
-  panStart = { x: e.clientX, y: e.clientY, left: scroller.value.scrollLeft, top: scroller.value.scrollTop }
-}
-
-function onPanMove(e: MouseEvent) {
-  if (panStart && scroller.value) {
-    scroller.value.scrollLeft = panStart.left - (e.clientX - panStart.x)
-    scroller.value.scrollTop = panStart.top - (e.clientY - panStart.y)
-  }
-}
-
-function onPanUp() {
-  panStart = null
-}
-
-function onWheel(e: WheelEvent) {
-  if (e.ctrlKey || e.metaKey) {
-    e.preventDefault()
-    zoomBy(e.deltaY < 0 ? 0.1 : -0.1)
-  }
-}
-
 // ---------- 右键菜单 ----------
 
 const menu = ref<{ x: number; y: number; plotId: number } | null>(null)
 
-function onContextMenu(plotId: number, x: number, y: number) {
+function onContextMenu(target: { plotId?: number }, x: number, y: number) {
+  if (target.plotId == null) {
+    return
+  }
   // 菜单不要超出窗口
-  menu.value = { plotId, x: Math.min(x, window.innerWidth - 200), y: Math.min(y, window.innerHeight - 320) }
+  menu.value = { plotId: target.plotId, x: Math.min(x, window.innerWidth - 200), y: Math.min(y, window.innerHeight - 320) }
 }
 
 function closeMenu() {
@@ -427,20 +445,28 @@ function closeMenu() {
 }
 
 function onKey(e: KeyboardEvent) {
+  const t = e.target as HTMLElement | null
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) {
+    return
+  }
   if (e.key === 'Escape') {
-    closeMenu()
+    if (menu.value) {
+      closeMenu()
+    } else if (focus.value) {
+      leaveBlock()
+    }
+  } else if (e.key === 'f' || e.key === 'F') {
+    fitView()
   }
 }
 
 onMounted(() => {
   window.addEventListener('click', closeMenu)
   window.addEventListener('keydown', onKey)
-  window.addEventListener('mouseup', onPanUp)
 })
 onBeforeUnmount(() => {
   window.removeEventListener('click', closeMenu)
   window.removeEventListener('keydown', onKey)
-  window.removeEventListener('mouseup', onPanUp)
 })
 
 const menuPlot = computed(() => (menu.value ? plotById.value.get(menu.value.plotId) ?? null : null))
@@ -672,14 +698,13 @@ function linkPlotsText(plotIds: number[]): string {
 // ---------- 其它 ----------
 
 function selectAllPlots() {
-  selected.value = plots.value.filter((p) => p.kind === 'PLOT').map((p) => p.id)
+  const inFocus = focusBlock.value ? new Set(Object.values(focusBlock.value.inner?.plots ?? {})) : null
+  selected.value = plots.value.filter((p) => p.kind === 'PLOT' && (!inFocus || inFocus.has(p.id))).map((p) => p.id)
 }
 
-const gridRef = ref<InstanceType<typeof PlotGrid> | null>(null)
-
 function exportMap() {
-  const name = [field.value?.name, trial.value?.seasonYear, '种植图'].filter(Boolean).join('-')
-  gridRef.value?.exportJpeg(`${name}.jpg`)
+  const name = [field.value?.name, focusBlock.value?.name, trial.value?.seasonYear, '种植图'].filter(Boolean).join('-')
+  canvasRef.value?.exportJpeg(`${name}.jpg`)
 }
 
 const ind = computed(() => status.value?.indicators ?? null)
@@ -704,7 +729,10 @@ const metricGroups = computed(() => {
         <div>
           <h2>{{ field?.name }}</h2>
           <div class="page-desc">
-            {{ field?.rowCount }} 行 × {{ field?.colCount }} 列
+            <template v-if="detail?.layoutSaved && fieldLayout">
+              {{ layoutStats.blocks }} 个区块 · {{ layoutStats.plots }} 个小区 · {{ layoutStats.size }}
+            </template>
+            <template v-else>{{ field?.rowCount }} 行 × {{ field?.colCount }} 列</template>
             <template v-if="field?.location"> · {{ field.location }}</template>
           </div>
         </div>
@@ -729,7 +757,7 @@ const metricGroups = computed(() => {
           <el-button>更多<el-icon class="el-icon--right"><ArrowDown /></el-icon></el-button>
           <template #dropdown>
             <el-dropdown-menu>
-              <el-dropdown-item v-if="auth.isTeacher" command="field">修改实验田（行列、尺寸）</el-dropdown-item>
+              <el-dropdown-item v-if="auth.isTeacher" command="field">修改实验田信息</el-dropdown-item>
               <el-dropdown-item v-if="auth.isTeacher" command="import">导入历史表格</el-dropdown-item>
               <el-dropdown-item command="export">导出种植图（jpg）</el-dropdown-item>
             </el-dropdown-menu>
@@ -806,68 +834,57 @@ const metricGroups = computed(() => {
             </el-option-group>
           </el-select>
           <div class="spacer" />
-          <el-button size="small" text @click="selectAllPlots">全选小区</el-button>
+          <el-button size="small" text @click="selectAllPlots">{{ focusBlock ? '全选本区块' : '全选小区' }}</el-button>
           <el-button-group size="small">
-            <el-button :icon="ZoomOut" @click="zoomBy(-0.1)" />
-            <el-tooltip content="点一下适应窗口" placement="top">
-              <el-button class="zoom-text" @click="fitWidth">{{ Math.round(zoom * 100) }}%</el-button>
+            <el-button :icon="ZoomOut" @click="zoomBy(1 / 1.25)" />
+            <el-tooltip content="点一下适应窗口（F）" placement="top">
+              <el-button class="zoom-text" @click="fitView">{{ zoom }}%</el-button>
             </el-tooltip>
-            <el-button :icon="ZoomIn" @click="zoomBy(0.1)" />
+            <el-button :icon="ZoomIn" @click="zoomBy(1.25)" />
           </el-button-group>
-          <el-tooltip content="打开后按住左键拖动画面（不打开时可以按住滚轮拖动）" placement="top">
+          <el-tooltip content="打开后按住左键拖动画面（也可以按住空格或滚轮拖动）" placement="top">
             <el-button size="small" :type="panning ? 'primary' : 'default'" :icon="Rank" @click="panning = !panning" />
           </el-tooltip>
-          <el-popover placement="bottom-end" :width="280" trigger="click">
-            <template #reference>
-              <el-button size="small" :icon="Setting" />
-            </template>
-            <div class="size-form">
-              <div class="pop-title">小区显示大小</div>
-              <div class="size-row">
-                <span>宽</span>
-                <el-slider v-model="display.cellW" :min="64" :max="220" :step="2" />
-              </div>
-              <div class="size-row">
-                <span>高</span>
-                <el-slider v-model="display.cellH" :min="48" :max="160" :step="2" />
-              </div>
-            </div>
-          </el-popover>
-          <el-popover placement="bottom-end" :width="300" trigger="hover">
+          <el-popover placement="bottom-end" :width="320" trigger="hover">
             <template #reference>
               <el-button size="small" :icon="QuestionFilled" text />
             </template>
             <div class="help">
-              <p><b>选择：</b>单击选一个；按住 Ctrl 或 Shift 单击多选；拖动鼠标框选；点行号、列号选整行、整列。</p>
+              <p><b>选择：</b>单击选一个；按住 Ctrl 或 Shift 单击多选；拖动鼠标框选；点区块的名称牌选中这个区块的所有小区。</p>
+              <p><b>区块：</b>双击区块的名称牌进入区块，只看这个区块；进去后点上面、左边的行号列号选整行整列；Esc 返回整块地。</p>
               <p><b>操作：</b>选中后底部出现操作条；右键小区弹出菜单；双击小区看详情。</p>
-              <p><b>画面：</b>Ctrl + 滚轮缩放；按住滚轮拖动画面。</p>
+              <p><b>画面：</b>滚轮缩放；按住空格或滚轮拖动画面；F 适应窗口。</p>
             </div>
           </el-popover>
         </div>
 
-        <div
-          ref="scroller"
-          class="grid-scroll"
-          :class="{ panning }"
-          @mousedown="onPanDown"
-          @mousemove="onPanMove"
-          @wheel="onWheel"
-        >
-          <PlotGrid
-            v-if="field"
-            ref="gridRef"
-            v-model:selected="selected"
-            :rows="field.rowCount"
-            :cols="field.colCount"
+        <div v-if="focusBlock" class="crumbs">
+          <button class="crumb" @click="leaveBlock">整块地</button>
+          <span class="crumb-sep">›</span>
+          <span class="crumb current">{{ focusBlock.name }}</span>
+          <span class="crumb-meta">
+            {{ focusBlock.inner?.rows.length }} 行 × {{ focusBlock.inner?.cols.length }} 列 · {{ Object.keys(focusBlock.inner?.plots ?? {}).length }} 个小区
+          </span>
+          <el-button size="small" text class="crumb-back" @click="leaveBlock">返回整块地（Esc）</el-button>
+        </div>
+
+        <div class="canvas-box">
+          <FieldCanvas
+            v-if="fieldLayout"
+            ref="canvasRef"
+            v-model:selected-plots="selected"
+            v-model:rotation="rotation"
+            :layout="fieldLayout"
             :cells="cells"
+            :focus="focus"
             :links="gridLinks"
             :devices="gridDevices"
-            :zoom="zoom"
-            :col-widths="colWidths"
-            :row-heights="rowHeights"
             :panning="panning"
+            pick="plot"
+            @zoom="(z: number) => (zoom = z)"
             @contextmenu="onContextMenu"
             @open="openDetail"
+            @enter="enterBlock"
           />
         </div>
 
@@ -984,7 +1001,7 @@ const metricGroups = computed(() => {
       :initial-trait-id="entryTraitId"
       @saved="onEntrySaved"
     />
-    <FieldFormDialog v-model="fieldDialog" :field="field" @saved="onFieldSaved" />
+    <FieldFormDialog v-model="fieldDialog" :field="field" :layout-saved="detail?.layoutSaved" @saved="onFieldSaved" />
     <TrialFormDialog v-model="trialDialog" :field-id="fieldId" :trial="editingTrial" @saved="onTrialSaved" @removed="onTrialRemoved" />
     <AssignVarietyDialog v-if="trialId" v-model="varietyDialog" :trial-id="trialId" :plot-ids="selectedTrialPlots.map((p) => p.id)" @saved="onLayoutSaved" />
     <ControlLinkDialog
@@ -1152,19 +1169,57 @@ const metricGroups = computed(() => {
   min-width: 58px;
 }
 
-.grid-scroll {
+.canvas-box {
   flex: 1;
-  overflow: auto;
   min-height: 0;
-  padding: 8px 8px 76px;
-  /* 小区之间露出田埂的土色 */
+  position: relative;
+  /* 地块外面露出土色 */
   background: #e9e1cd url('@/assets/art/soil.jpg') repeat;
   background-size: 256px;
   box-shadow: inset 0 2px 10px rgba(80, 60, 20, 0.12);
 }
 
-.grid-scroll.panning {
-  cursor: grab;
+.crumbs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--wheat-wash);
+  font-size: var(--fs-sm);
+}
+
+.crumb {
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--green);
+  cursor: pointer;
+  font-size: inherit;
+}
+
+.crumb:hover {
+  text-decoration: underline;
+}
+
+.crumb.current {
+  color: var(--forest);
+  font-weight: 700;
+  font-family: var(--font-serif);
+  font-size: var(--fs-md);
+}
+
+.crumb-sep {
+  color: var(--ink-3);
+}
+
+.crumb-meta {
+  color: var(--ink-3);
+  margin-left: 6px;
+}
+
+.crumb-back {
+  margin-left: auto;
 }
 
 .action-bar {
