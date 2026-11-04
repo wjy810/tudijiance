@@ -8,6 +8,7 @@ import { PLOT_STATUS, TRAIT_CATEGORY, replicateLabel } from '@/shared/labels'
 import { repo } from '../repo'
 import { db, type OutboxBatch } from '../db'
 import { useFieldStore } from '../stores/field'
+import { plotPlace } from '@/shared/fieldLayout'
 import { plotCode, timeAgo } from '../display'
 import EntrySheet from '../components/EntrySheet.vue'
 
@@ -65,7 +66,7 @@ async function onSaved() {
         <div class="info">
           <div class="variety">{{ detail?.variety?.name ?? '未分配品种' }}<span v-if="detail?.variety?.controlType" class="ck">CK</span></div>
           <div class="m-muted">
-            第 {{ plot.rowNo }} 行第 {{ plot.colNo }} 列
+            {{ plotPlace(field.blockLayout, plot.id) ?? `第 ${plot.rowNo} 行第 ${plot.colNo} 列` }}
             <template v-if="detail?.replicateNo"> · 重复 {{ replicateLabel(detail.replicateNo) }}</template>
           </div>
           <span class="status" :style="{ background: PLOT_STATUS[status].color }">{{ PLOT_STATUS[status].label }}</span>

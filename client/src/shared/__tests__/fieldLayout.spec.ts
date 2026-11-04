@@ -3,7 +3,8 @@ import { describe, expect, it } from 'vitest'
 import {
   UNIT_PRESETS, alignBlockFit, anchors, blockRect, createLayout, expandRect, fieldSize, innerCells, innerSizes,
   insertTrack, mergeBlocks, mergeInner, moveBlockFit, plotCount, removeTrack, removedPlots, resizeBlockGrid, resizeInner,
-  setBlockFit, setBlockKind, setInnerTrackSize, setTrackSize, setUnit, splitBlock, splitInner, type FieldLayout,
+  plotPlace, plotPlaces, setBlockFit, setBlockKind, setInnerTrackSize, setTrackSize, setUnit, splitBlock, splitInner,
+  type FieldLayout,
 } from '@/shared/fieldLayout'
 
 const METER = UNIT_PRESETS[0]!
@@ -181,5 +182,15 @@ describe('kinds and units', () => {
     const l = setUnit(saved(), chi, true)
     expect(l.cols).toEqual([18, 18, 18])
     expect(setUnit(saved(), chi, false).cols).toEqual([6, 6, 6])
+  })
+})
+
+describe('plotPlace', () => {
+  it('names the block and the row and column inside it', () => {
+    expect(plotPlace(saved(), 8)).toBe('区块2 · 第 1 行第 2 列')
+    const merged = mergeInner(saved(), 'B1', { r: 0, c: 0 }, { r: 0, c: 2 }).layout
+    expect(plotPlace(merged, 1)).toBe('区块1 · 第 1 行第 1–3 列')
+    expect(plotPlace(saved(), 999)).toBeNull()
+    expect(plotPlaces(saved()).get(36)).toBe('区块6 · 第 2 行第 3 列')
   })
 })

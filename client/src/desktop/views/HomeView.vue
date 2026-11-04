@@ -22,6 +22,7 @@ import { MAIN_STAGES, stageView } from '@/shared/growthStage'
 import { useAuthStore } from '@/stores/auth'
 import MiniPlotMap from '@/desktop/components/MiniPlotMap.vue'
 import BlockMiniMap from '@/desktop/components/BlockMiniMap.vue'
+import blocksArt from '@/assets/art/empty-blocks.webp'
 import { fieldSize } from '@/shared/fieldLayout'
 import FieldFormDialog from '@/desktop/components/FieldFormDialog.vue'
 import EmptyState from '@/desktop/components/EmptyState.vue'
@@ -306,9 +307,9 @@ function onFieldCreated(detail: FieldDetail) {
     <!-- 还没有实验田 -->
     <div v-else-if="cards.length === 0" class="panel">
       <EmptyState
-        art="field"
+        art="blocks"
         title="还没有实验田"
-        :desc="auth.isTeacher ? '新建一块实验田，设好行数和列数，就会自动生成小区网格。' : '请老师先建实验田，建好后这里会显示生育期和今天的录入情况。'"
+        :desc="auth.isTeacher ? '新建一块实验田：定好有几行几列区块、每块多大、里面分几行几列小区，就会自动生成小区。' : '请老师先建实验田，建好后这里会显示生育期和今天的录入情况。'"
         :size="150"
       >
         <el-button v-if="auth.isTeacher" class="btn-wheat" :icon="Plus" @click="fieldDialog = true">新建实验田</el-button>
@@ -539,7 +540,9 @@ function onFieldCreated(detail: FieldDetail) {
             </div>
           </article>
           <button v-if="auth.isTeacher" type="button" class="fcard add" @click="fieldDialog = true">
-            <el-icon><Plus /></el-icon>新建实验田
+            <img :src="blocksArt" alt="" class="add-art" draggable="false">
+            <span class="add-text"><el-icon><Plus /></el-icon>新建实验田</span>
+            <span class="add-hint">区块、道路、小区一次设好</span>
           </button>
         </div>
       </section>
@@ -1188,9 +1191,9 @@ function onFieldCreated(detail: FieldDetail) {
 .fcard.add {
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 6px;
   min-height: 240px;
-  flex-direction: row;
+  flex-direction: column;
   font: inherit;
   color: var(--ink-3);
   background: transparent;
@@ -1202,6 +1205,33 @@ function onFieldCreated(detail: FieldDetail) {
   color: var(--green);
   border-color: var(--green-2);
   background: rgba(255, 253, 248, 0.6);
+}
+
+.add-art {
+  width: 62%;
+  max-width: 220px;
+  opacity: 0.55;
+  filter: saturate(0.7);
+  transition: opacity var(--dur) var(--ease), filter var(--dur) var(--ease), transform var(--dur) var(--ease);
+}
+
+.fcard.add:hover .add-art {
+  opacity: 1;
+  filter: none;
+  transform: translateY(-2px);
+}
+
+.add-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+
+.add-hint {
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
 }
 
 /* ---------- 窄一点的窗口 ---------- */

@@ -23,7 +23,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useCatalogStore } from '@/stores/catalog'
 import FieldCanvas, { type CanvasCell, type CanvasDevice, type CanvasLink } from '@/desktop/components/FieldCanvas.vue'
 import {
-  anchors, checkLayout, fieldSize, fmt, innerCells, moveBlockFit, type FieldLayout,
+  anchors, checkLayout, fieldSize, fmt, innerCells, moveBlockFit, plotPlace, plotPlaces, type FieldLayout,
 } from '@/shared/fieldLayout'
 import { useLayoutDraft } from '@/desktop/components/layoutDraft'
 import LayoutEditPanel from '@/desktop/components/LayoutEditPanel.vue'
@@ -564,6 +564,9 @@ function fillOf(p: Plot): string {
     : '#f1ebdd'
 }
 
+/** 区块布局时每个小区在哪个区块的第几行第几列 */
+const placeById = computed(() => (detail.value?.layoutSaved ? plotPlaces(fieldLayout.value) : new Map<number, string>()))
+
 const cells = computed(() => {
   const out = new Map<number, CanvasCell>()
   for (const p of plots.value) {
@@ -583,8 +586,9 @@ const cells = computed(() => {
       }
     }
     const badge = [variety?.controlType ? 'CK' : '', st?.status === 'ABNORMAL' ? '!' : ''].filter(Boolean).join(' ')
+    const place = placeById.value.get(p.id) ?? null
     const tip = [
-      `小区 ${code}`,
+      place ? `小区 ${code} · ${place}` : `小区 ${code}`,
       p.kind === 'PLOT' ? `品种：${variety?.name ?? '未分配'}` : PLOT_KIND[p.kind],
       planting?.replicateNo ? `重复：${replicateLabel(planting.replicateNo)}` : '',
       p.kind === 'PLOT' && trial.value ? `状态：${PLOT_STATUS[plotStatus(p)].label}${st?.abnormalNote ? '（' + st.abnormalNote + '）' : ''}` : '',
@@ -1432,6 +1436,7 @@ const metricGroups = computed(() => {
       v-model="drawerOpen"
       :trial-id="trialId"
       :plot-id="drawerPlotId"
+      :place="drawerPlotId != null && detail?.layoutSaved ? plotPlace(fieldLayout, drawerPlotId) : null"
       @entry="entryFromDrawer"
       @changed="refreshStatus"
     />

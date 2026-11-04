@@ -10,7 +10,12 @@ import { useAuthStore } from '@/stores/auth'
 import ObservationEditDialog from './ObservationEditDialog.vue'
 import HistoryDialog from './HistoryDialog.vue'
 
-const props = defineProps<{ trialId: number | null; plotId: number | null }>()
+const props = defineProps<{
+  trialId: number | null
+  plotId: number | null
+  /** 小区在哪（区块布局时写区块和区块里的行列），不传时写第几行第几列 */
+  place?: string | null
+}>()
 const visible = defineModel<boolean>({ required: true })
 const emit = defineEmits<{
   /** 点了"录入数据"，可以带上默认项目 */
@@ -56,7 +61,7 @@ defineExpose({ reload: load })
 const plot = computed(() => detail.value?.plot ?? null)
 const title = computed(() => {
   const p = plot.value
-  return p ? `小区 ${p.code || '未编号'}（第 ${p.rowNo} 行第 ${p.colNo} 列）` : '小区详情'
+  return p ? `小区 ${p.code || '未编号'}（${props.place ?? `第 ${p.rowNo} 行第 ${p.colNo} 列`}）` : '小区详情'
 })
 const area = computed(() => {
   const p = plot.value

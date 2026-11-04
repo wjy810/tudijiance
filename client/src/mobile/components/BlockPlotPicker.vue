@@ -6,6 +6,7 @@ import { computed, ref, watch } from 'vue'
 
 import { anchors, keyOf, type FieldLayout, type LayoutBlock } from '@/shared/fieldLayout'
 import type { PickerCell } from './picker'
+import EmptyState from '@/desktop/components/EmptyState.vue'
 
 const props = withDefaults(defineProps<{
   layout: FieldLayout
@@ -169,7 +170,7 @@ function cancel() {
           </div>
         </div>
       </section>
-      <div v-if="blocks.length === 0" class="none">这块地还没有种植区块</div>
+      <EmptyState v-if="blocks.length === 0" art="blocks" title="这块地还没有种植区块" desc="请老师在电脑上的“编辑地块”里设好区块和小区" :size="110" />
     </div>
   </div>
 </template>

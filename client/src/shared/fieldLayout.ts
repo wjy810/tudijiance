@@ -238,6 +238,31 @@ export function locatePlot(l: FieldLayout, plotId: number): { block: LayoutBlock
   return null
 }
 
+/** 小区在哪：区块名称和在区块里的第几行第几列（合并的写跨几行几列）；找不到时 null */
+export function plotPlace(l: FieldLayout | null | undefined, plotId: number): string | null {
+  if (!l) return null
+  const hit = locatePlot(l, plotId)
+  if (!hit?.block.inner) return null
+  const [r, c] = parseKey(hit.key)
+  const s = spanOf(hit.block.inner.merges, r, c)
+  const rows = s.rs > 1 ? `第 ${r + 1}–${r + s.rs} 行` : `第 ${r + 1} 行`
+  const cols = s.cs > 1 ? `第 ${c + 1}–${c + s.cs} 列` : `第 ${c + 1} 列`
+  return `${hit.block.name} · ${rows}${cols}`
+}
+
+/** 所有小区在哪（一次算好，平面图上每个小区的说明用） */
+export function plotPlaces(l: FieldLayout | null | undefined): Map<number, string> {
+  const out = new Map<number, string>()
+  if (!l) return out
+  for (const b of l.blocks) {
+    for (const id of Object.values(b.inner?.plots ?? {})) {
+      const p = plotPlace({ ...l, blocks: [b] }, id)
+      if (p) out.set(id, p)
+    }
+  }
+  return out
+}
+
 // ---------- 新建 ----------
 
 export interface CreateOptions {

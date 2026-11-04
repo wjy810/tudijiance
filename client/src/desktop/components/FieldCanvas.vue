@@ -12,6 +12,8 @@ import type Konva from 'konva'
 import type { KonvaEventObject } from 'konva/lib/Node'
 
 import { saveFile } from '@/shared/api/http'
+import guardTileUrl from '@/assets/art/guard-tile.webp'
+import roadTileUrl from '@/assets/art/road-tile.webp'
 import {
   anchors, blockRect, blockSlot, blockSpan, fieldSize, fmt, innerCells, innerSizes, keyOf, round, sum, trackRect,
   type FieldLayout, type LayoutBlock, type Rect,
@@ -293,36 +295,34 @@ function inset(r: Rect, pxGap: number): Rect {
   return { x: r.x + g, y: r.y + g, w: r.w - g * 2, h: r.h - g * 2 }
 }
 
-// 保护区的斜线底纹
-const hatch = (() => {
-  if (typeof document === 'undefined') return undefined
-  const c = document.createElement('canvas')
-  c.width = 10
-  c.height = 10
-  const g = c.getContext('2d')
-  if (!g) return undefined
-  g.fillStyle = '#d6e3c6'
-  g.fillRect(0, 0, 10, 10)
-  g.strokeStyle = 'rgba(70, 110, 70, 0.35)'
-  g.lineWidth = 1.2
-  g.beginPath()
-  g.moveTo(-2, 12)
-  g.lineTo(12, -2)
-  g.moveTo(-2, 2)
-  g.lineTo(2, -2)
-  g.moveTo(8, 12)
-  g.lineTo(12, 8)
-  g.stroke()
-  return c as unknown as HTMLImageElement
-})()
+// 保护区、道路的底纹（生图后做成的无缝小图，和底色混过，不抢小区的颜色）
+function loadImage(url: string) {
+  const r = ref<HTMLImageElement | undefined>(undefined)
+  if (typeof Image !== 'undefined') {
+    const img = new Image()
+    img.onload = () => (r.value = img)
+    img.src = url
+  }
+  return r
+}
+
+const guardTile = loadImage(guardTileUrl)
+const roadTile = loadImage(roadTileUrl)
+
+/** 道路：土路底纹 */
+function roadFill() {
+  return roadTile.value
+    ? { fillPatternImage: roadTile.value, fillPatternRepeat: 'repeat', fillPatternScaleX: px(0.6), fillPatternScaleY: px(0.6) }
+    : { fill: ROAD }
+}
 
 function kindFill(kind: LayoutBlock['kind']) {
   if (kind === 'GUARD') {
-    return hatch
-      ? { fillPatternImage: hatch, fillPatternRepeat: 'repeat', fillPatternScaleX: px(1), fillPatternScaleY: px(1) }
+    return guardTile.value
+      ? { fillPatternImage: guardTile.value, fillPatternRepeat: 'repeat', fillPatternScaleX: px(0.75), fillPatternScaleY: px(0.75) }
       : { fill: '#d6e3c6' }
   }
-  if (kind === 'ROAD') return { fill: ROAD }
+  if (kind === 'ROAD') return roadFill()
   if (kind === 'BLANK') return { fill: '#eee6d4' }
   return { fill: '#e7dcc2' }
 }
@@ -831,7 +831,7 @@ const fieldRect = computed(() => trackRect(props.layout.rows, props.layout.cols,
             <v-rect
               v-for="(r, i) in slotRoads(s)"
               :key="`road-${s.block.id}-${i}`"
-              :config="{ ...box(r), fill: ROAD, listening: false }"
+              :config="{ ...box(r), ...roadFill(), listening: false }"
             />
             <v-line
               v-for="(r, i) in slotRoads(s)"

@@ -252,9 +252,19 @@ function setInfo(key: string, value: string | null | undefined) {
         class="prefill-tip"
         :title="`已按实验田、试验和小区的资料预先填好 ${prefilledCount} 项（年度、地点、对照品种、小区尺寸等），检查一下再点保存。`"
       />
-      <el-alert v-if="readonly" type="info" :closable="false" show-icon title="记载本由老师填写，这里只能查看。" class="prefill-tip" />
+      <el-alert v-if="readonly && book?.updatedAt" type="info" :closable="false" show-icon title="记载本由老师填写，这里只能查看。" class="prefill-tip" />
+      <SectionCard v-if="readonly && !book?.updatedAt">
+        <EmptyState
+          art="book"
+          :size="170"
+          title="老师还没填这个试验的记载本"
+          desc="封面、试验设计、栽培管理、气象资料和品种评价由老师填写。田间记载、考种、产量请在平面图上选小区录入。"
+        >
+          <el-button v-if="field" type="primary" :icon="MapLocation" @click="router.push({ path: `/fields/${field.id}`, query: { trial: trialId } })">去平面图录入</el-button>
+        </EmptyState>
+      </SectionCard>
 
-      <div class="book-tabs" role="tablist">
+      <div v-if="!readonly || book?.updatedAt" class="book-tabs" role="tablist">
         <button :class="{ on: tab === 'info' }" role="tab" @click="tab = 'info'">
           <el-icon><Document /></el-icon>基本情况
         </button>
@@ -268,7 +278,7 @@ function setInfo(key: string, value: string | null | undefined) {
       </div>
 
       <!-- 基本情况 -->
-      <div v-show="tab === 'info'" class="groups">
+      <div v-show="tab === 'info' && (!readonly || book?.updatedAt)" class="groups">
         <SectionCard
           v-for="(g, gi) in BOOK_GROUPS"
           :key="g.key"
@@ -339,7 +349,7 @@ function setInfo(key: string, value: string | null | undefined) {
 
       <!-- 气象资料 -->
       <SectionCard
-        v-show="tab === 'weather'"
+        v-show="tab === 'weather' && (!readonly || book?.updatedAt)"
         :title="`${trial ? `${trial.seasonYear - 1}-${trial.seasonYear} 年度` : ''}小麦生育期间气象资料`"
         sub="当年和常年对比。气象资料不好取时可以不填。"
         flush
@@ -387,7 +397,7 @@ function setInfo(key: string, value: string | null | undefined) {
       </SectionCard>
 
       <!-- 品种评价 -->
-      <div v-show="tab === 'evaluation'" class="groups">
+      <div v-show="tab === 'evaluation' && (!readonly || book?.updatedAt)" class="groups">
         <SectionCard title="气象分析" sub="本年度气候对小麦生长的影响">
           <el-input
             :model-value="info[WEATHER_ANALYSIS_KEY] ?? ''"
@@ -401,7 +411,7 @@ function setInfo(key: string, value: string | null | undefined) {
         <SectionCard title="分品种评价" :sub="`共 ${trialVarieties.length} 个品种，已写 ${evaluatedCount} 个`">
           <EmptyState
             v-if="trialVarieties.length === 0"
-            art="field"
+            art="book"
             title="这个试验还没分配品种"
             desc="在平面图的“布置试验”里给小区分配品种后，这里会列出各个品种。"
           />
