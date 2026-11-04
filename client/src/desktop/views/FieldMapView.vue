@@ -1644,7 +1644,8 @@ const metricGroups = computed(() => {
 .map-tools {
   position: absolute;
   z-index: 2;
-  bottom: 36px;
+  /* 放在底部操作条（约 64px 高）的上面，选中小区时不挡住"取消选择" */
+  bottom: 74px;
   right: 12px;
   display: flex;
   align-items: center;
@@ -1752,8 +1753,9 @@ const metricGroups = computed(() => {
 .pointer-at {
   position: absolute;
   z-index: 2;
-  right: 12px;
-  bottom: 10px;
+  /* 左下角，地块尺寸上面：不和底部操作条、右下角画面工具重叠 */
+  left: 12px;
+  bottom: 36px;
   font-size: 11px;
   color: var(--ink-2);
   background: rgba(255, 253, 248, 0.85);
