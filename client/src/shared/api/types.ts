@@ -164,6 +164,8 @@ export interface TraitDef {
   isStandard: boolean
   isComputed: boolean
   enabled: boolean
+  /** 重要项目：河南记载本里要填的都是；录入时排在前面、标星，数据质量检查看它有没有漏录 */
+  important: boolean
   sortOrder: number
   description: string | null
 }
@@ -262,6 +264,8 @@ export interface CustomTraitRequest {
   description?: string | null
   /** 同时记下的表头别名 */
   aliases?: string[]
+  /** 标为重要项目 */
+  important?: boolean
 }
 
 // ---------- 录入的数据 ----------

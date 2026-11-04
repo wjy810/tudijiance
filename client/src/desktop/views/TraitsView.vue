@@ -16,7 +16,8 @@ import { aliasKey } from '@/shared/importGuess'
 const auth = useAuthStore()
 const catalog = useCatalogStore()
 const loading = ref(false)
-const tab = ref<TraitCategory>('OPERATION')
+/** IMPORTANT：所有分类里的重要项目 */
+const tab = ref<TraitCategory | 'IMPORTANT'>('OPERATION')
 const customOpen = ref(false)
 const router = useRouter()
 const keyword = ref('')
@@ -26,11 +27,14 @@ const categories = computed(() => (Object.keys(TRAIT_CATEGORY) as TraitCategory[
 const rows = computed(() => {
   const kw = keyword.value.trim()
   if (!kw) {
-    return catalog.traits.filter((t) => t.trait.category === tab.value)
+    return tab.value === 'IMPORTANT'
+      ? catalog.traits.filter((t) => t.trait.important)
+      : catalog.traits.filter((t) => t.trait.category === tab.value)
   }
   const key = aliasKey(kw)
   return catalog.traits.filter((t) => t.trait.name.includes(kw) || t.aliases.some((a) => a.includes(key)))
 })
+const importantCount = computed(() => catalog.traits.filter((t) => t.trait.important).length)
 const aliasCount = computed(() => catalog.traits.reduce((n, t) => n + t.aliases.length, 0))
 const counts = computed(() => {
   const map = new Map<TraitCategory, number>()
@@ -64,6 +68,18 @@ async function toggle(t: TraitView, enabled: boolean) {
     await traitApi.setEnabled(t.trait.id, enabled)
     t.trait.enabled = enabled
     ElMessage.success(enabled ? `已启用"${t.trait.name}"` : `已停用"${t.trait.name}"，录入时不再显示`)
+  } catch (e) {
+    ElMessage.error((e as Error).message)
+  }
+}
+
+async function toggleImportant(t: TraitView) {
+  if (!auth.isTeacher) return
+  const important = !t.trait.important
+  try {
+    await traitApi.setImportant(t.trait.id, important)
+    t.trait.important = important
+    ElMessage.success(important ? `"${t.trait.name}"标为重要` : `"${t.trait.name}"不再是重要项目`)
   } catch (e) {
     ElMessage.error((e as Error).message)
   }
@@ -123,7 +139,8 @@ async function onCreated() {
     <div class="page-header">
       <div>
         <h2>录入项目</h2>
-        <div class="page-desc">标准项目按 NY/T 1301—2025《农作物品种试验规范 小麦》；不够用时老师可以新增自定义项目。停用的项目录入时不显示。</div>
+        <div class="page-desc">标准项目按 NY/T 1301—2025《农作物品种试验规范 小麦》；不够用时老师可以新增自定义项目。停用的项目录入时不显示。
+          标 ★ 的是重要项目（河南省记载本里要填的都是），录入时排在前面，数据质量检查会提醒漏录。</div>
       </div>
       <div class="page-actions">
         <el-input v-model="keyword" :prefix-icon="Search" clearable placeholder="按名称或表头找项目" class="search" />
@@ -143,6 +160,11 @@ async function onCreated() {
 
     <div class="layout">
       <nav class="cats panel">
+        <button type="button" class="cat important-tab" :class="{ active: tab === 'IMPORTANT' }" @click="tab = 'IMPORTANT'">
+          <span><i class="star-mark">★</i>重要项目</span>
+          <span class="count">{{ importantCount }}</span>
+        </button>
+        <div class="cat-sep" />
         <button
           v-for="c in categories"
           :key="c"
@@ -159,6 +181,20 @@ async function onCreated() {
 
       <div class="panel table-panel">
         <el-table v-loading="loading" :data="rows" :empty-text="tab === 'CUSTOM' ? '还没有自定义项目' : '没有项目'">
+          <el-table-column width="40" align="center" class-name="star-col">
+            <template #header><span title="重要项目">★</span></template>
+            <template #default="{ row }">
+              <button
+                type="button"
+                class="star-btn"
+                :class="{ on: row.trait.important, readonly: !auth.isTeacher }"
+                :title="row.trait.important ? (auth.isTeacher ? '重要项目，点一下取消' : '重要项目') : (auth.isTeacher ? '点一下标为重要' : '')"
+                :aria-label="row.trait.important ? '重要项目' : '不是重要项目'"
+                :aria-pressed="row.trait.important"
+                @click="toggleImportant(row)"
+              >{{ row.trait.important ? '★' : '☆' }}</button>
+            </template>
+          </el-table-column>
           <el-table-column label="项目" min-width="128">
             <template #default="{ row }">
               <div :class="{ disabled: !row.trait.enabled }">{{ row.trait.name }}</div>
@@ -386,5 +422,46 @@ async function onCreated() {
   margin-top: 2px;
   font-size: var(--fs-xs);
   color: var(--wheat-ink);
+}
+
+.important-tab .star-mark {
+  font-style: normal;
+  color: var(--wheat);
+  margin-right: 6px;
+}
+
+.cat-sep {
+  height: 1px;
+  background: var(--line);
+  margin: 6px 8px;
+}
+
+.star-btn {
+  border: none;
+  background: none;
+  padding: 0;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--ink-4);
+  cursor: pointer;
+}
+
+.star-btn.on {
+  color: var(--wheat);
+}
+
+.star-btn.readonly {
+  cursor: default;
+}
+
+.star-btn:not(.readonly):hover {
+  color: var(--wheat-bright);
+  transform: scale(1.15);
+}
+
+.star-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+  border-radius: 4px;
 }
 </style>

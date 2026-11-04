@@ -83,3 +83,15 @@ describe('prefillFromSetup', () => {
       .toEqual({ location: '新乡', recorder: '张三' })
   })
 })
+
+describe('RECORD_BOOK_TRAIT_CODES', () => {
+  it('matches the server migration that marks record book traits important', async () => {
+    const { readFileSync } = await import('node:fs')
+    const { resolve } = await import('node:path')
+    // vitest 在 client 目录下跑
+    const sql = readFileSync(resolve(process.cwd(), '../server/src/main/resources/db/migration/V8__trait_important.sql'), 'utf8')
+    const inSql = new Set([...sql.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]))
+    const { RECORD_BOOK_TRAIT_CODES } = await import('@/shared/recordBook')
+    expect([...RECORD_BOOK_TRAIT_CODES].sort()).toEqual([...inSql].sort())
+  })
+})

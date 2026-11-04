@@ -165,8 +165,8 @@ async function onCustomCreated(created: TraitView) {
     </div>
     <el-empty v-if="traitsInCategory.length === 0" :image-size="60" description="这个分类下还没有项目" />
     <el-radio-group v-else v-model="traitId" class="wrap">
-      <el-radio-button v-for="t in traitsInCategory" :key="t.trait.id" :value="t.trait.id">
-        {{ t.trait.name }}
+      <el-radio-button v-for="t in traitsInCategory" :key="t.trait.id" :value="t.trait.id" :class="{ important: t.trait.important }">
+        <span v-if="t.trait.important" class="star" title="重要项目">★</span>{{ t.trait.name }}
       </el-radio-button>
     </el-radio-group>
 
@@ -241,5 +241,15 @@ async function onCustomCreated(created: TraitView) {
   margin-top: -6px;
   margin-bottom: 10px;
   color: var(--wheat-ink);
+}
+
+.star {
+  color: var(--wheat);
+  margin-right: 3px;
+  font-size: 12px;
+}
+
+.is-active .star {
+  color: var(--wheat-bright);
 }
 </style>

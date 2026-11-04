@@ -11,7 +11,7 @@ function trait(id: number, code: string, name: string, isComputed = false, alias
   return {
     trait: {
       id, code, name, category: 'YIELD', dataType: 'NUMBER', unit: null, precisionDigits: 1, aggMethod: 'AVG',
-      surveyTime: null, stdClause: null, isStandard: true, isComputed, enabled: true, sortOrder: id, description: null,
+      surveyTime: null, stdClause: null, isStandard: true, isComputed, enabled: true, important: false, sortOrder: id, description: null,
     },
     options: [],
     aliases,

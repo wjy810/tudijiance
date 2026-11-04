@@ -3,6 +3,25 @@
 import type { Field, Layout, Plot, Trial, Variety } from '@/shared/api'
 import { TRIAL_TYPE } from '@/shared/labels'
 
+/**
+ * 《河南省小麦品种试验记载本》里要填的录入项目编码：这些项目默认标为"重要"。
+ * 和服务器迁移 V8__trait_important.sql 里的一样（离线版没有服务器，用这份）
+ */
+export const RECORD_BOOK_TRAIT_CODES = new Set([
+  'sowing_date', 'emergence_date', 'heading_date', 'maturity_date', 'whole_growth_days',
+  'seedling_habit', 'basic_seedlings', 'max_tillers', 'effective_spikes', 'spike_rate', 'plant_height',
+  'winter_freeze_date', 'winter_freeze_grade', 'spring_freeze_date', 'spring_freeze_grade', 'overwinter_rate',
+  'drought_date', 'drought_grade', 'dry_hot_date', 'dry_hot_grade', 'wet_date', 'wet_grade',
+  'lodging_first_date', 'lodging_first_grade', 'lodging_first_area',
+  'lodging_final_date', 'lodging_final_grade', 'lodging_final_area',
+  'stripe_rust_reaction', 'stripe_rust_severity', 'stripe_rust_incidence', 'powdery_mildew',
+  'leaf_rust_reaction', 'leaf_rust_severity', 'leaf_rust_incidence', 'scab_severity', 'scab_spike_rate',
+  'sharp_eyespot', 'sharp_eyespot_whitehead', 'root_rot_leaf', 'root_rot_spike', 'leaf_blight',
+  'sprouting_grade', 'shattering', 'maturity_appearance', 'off_type_count', 'plot_yield', 'field_evaluation',
+  'spike_shape', 'glume_color', 'awn', 'grains_per_spike', 'grain_color', 'plumpness', 'grain_texture',
+  'black_germ_rate', 'thousand_grain_weight', 'test_weight', 'off_type_rate', 'yield_per_mu',
+])
+
 export type BookFieldType = 'text' | 'number' | 'date' | 'select' | 'textarea'
 
 export interface BookField {

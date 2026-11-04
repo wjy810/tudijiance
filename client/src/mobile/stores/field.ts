@@ -53,6 +53,10 @@ export const useFieldStore = defineStore('mobile-field', () => {
         groups.set(t.trait.category, [...(groups.get(t.trait.category) ?? []), t])
       }
     }
+    // 重要项目排在前面
+    for (const list of groups.values()) {
+      list.sort((a, b) => Number(!!b.trait.important) - Number(!!a.trait.important) || a.trait.sortOrder - b.trait.sortOrder)
+    }
     return groups
   })
 

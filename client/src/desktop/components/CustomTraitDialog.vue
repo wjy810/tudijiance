@@ -33,6 +33,7 @@ const form = reactive({
   precisionDigits: 1,
   options: ['', ''] as string[],
   description: '',
+  important: false,
 })
 const saving = ref(false)
 
@@ -44,9 +45,9 @@ watch(visible, (open) => {
   Object.assign(form, p
     ? {
         name: p.name, dataType: p.dataType, unit: p.unit ?? '', precisionDigits: p.precisionDigits ?? 1,
-        options: p.options.length >= 2 ? [...p.options] : ['', ''], description: '',
+        options: p.options.length >= 2 ? [...p.options] : ['', ''], description: '', important: false,
       }
-    : { name: '', dataType: 'OPTION', unit: '', precisionDigits: 1, options: ['', ''], description: '' })
+    : { name: '', dataType: 'OPTION', unit: '', precisionDigits: 1, options: ['', ''], description: '', important: false })
 })
 
 async function save() {
@@ -70,6 +71,7 @@ async function save() {
       options: form.dataType === 'OPTION' ? options : [],
       description: form.description.trim() || null,
       aliases: props.preset?.header ? [props.preset.header] : [],
+      important: form.important,
     })
     ElMessage.success(`已新增项目"${name}"`)
     visible.value = false
@@ -121,6 +123,10 @@ async function save() {
       </template>
       <el-form-item label="说明">
         <el-input v-model="form.description" type="textarea" maxlength="200" placeholder="怎么调查、什么时候调查（可不填）" />
+      </el-form-item>
+      <el-form-item label="重要">
+        <el-checkbox v-model="form.important">标为重要项目</el-checkbox>
+        <div class="hint full">重要项目录入时排在前面、标 ★；数据质量检查会提醒哪些小区还没录。</div>
       </el-form-item>
     </el-form>
     <template #footer>

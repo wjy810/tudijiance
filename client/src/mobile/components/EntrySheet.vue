@@ -211,7 +211,8 @@ function openDate() {
           <van-tabs v-model:active="activeTab" swipeable shrink sticky :offset-top="0" class="tabs">
             <van-tab v-for="c in categories" :key="c.key" :title="c.label">
               <div class="grid pad">
-                <button v-for="t in c.items" :key="t.trait.id" type="button" class="trait" @click="pick(t)">
+                <button v-for="t in c.items" :key="t.trait.id" type="button" class="trait" :class="{ important: t.trait.important }" @click="pick(t)">
+                  <i v-if="t.trait.important" class="star" aria-label="重要">★</i>
                   <b>{{ t.trait.name }}</b><span>{{ traitMeta(t) }}</span>
                 </button>
               </div>
@@ -484,5 +485,18 @@ function openDate() {
   color: var(--wheat-ink);
   font-size: 12.5px;
   line-height: 1.5;
+}
+
+.trait {
+  position: relative;
+}
+
+.trait .star {
+  position: absolute;
+  top: 6px;
+  right: 9px;
+  font-style: normal;
+  font-size: 13px;
+  color: var(--wheat);
 }
 </style>

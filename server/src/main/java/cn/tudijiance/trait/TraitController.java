@@ -16,6 +16,7 @@ import cn.tudijiance.security.Roles;
 import cn.tudijiance.trait.TraitDtos.AliasRequest;
 import cn.tudijiance.trait.TraitDtos.CustomTraitRequest;
 import cn.tudijiance.trait.TraitDtos.EnabledRequest;
+import cn.tudijiance.trait.TraitDtos.ImportantRequest;
 import cn.tudijiance.trait.TraitDtos.TraitView;
 import jakarta.validation.Valid;
 
@@ -40,6 +41,12 @@ public class TraitController {
     @PreAuthorize(Roles.IS_TEACHER)
     public void setEnabled(@PathVariable Long id, @Valid @RequestBody EnabledRequest req) {
         traitService.setEnabled(id, req.enabled());
+    }
+
+    @PutMapping("/{id}/important")
+    @PreAuthorize(Roles.IS_TEACHER)
+    public void setImportant(@PathVariable Long id, @Valid @RequestBody ImportantRequest req) {
+        traitService.setImportant(id, req.important());
     }
 
     @PostMapping

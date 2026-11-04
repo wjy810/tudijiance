@@ -3,6 +3,7 @@ import type {
   Field, FieldDetail, Layout, ObservationView, Plot, PlotDetail, TraitDef, TraitView, Trial, TrialStatus, Variety,
 } from '@/shared/api'
 import { today } from '@/shared/traitValue'
+import { RECORD_BOOK_TRAIT_CODES } from '@/shared/recordBook'
 import traitSeed from '../../../server/src/main/resources/db/seed/traits-ny1301-2025.json'
 import { db as defaultDb, type MobileDb, type OutboxBatch } from './db'
 import type { NewBatch } from './outbox'
@@ -97,7 +98,8 @@ export async function initializeLocal(database: MobileDb = defaultDb): Promise<v
         id: i + 1, code: t.code, name: t.name, category: t.category, dataType: t.dataType,
         unit: t.unit ?? null, precisionDigits: t.precision ?? null, aggMethod: t.agg,
         surveyTime: t.survey ?? null, stdClause: t.clause ?? null, isStandard: t.standard !== false,
-        isComputed: t.computed === true, enabled: true, sortOrder: (i + 1) * 10, description: null,
+        isComputed: t.computed === true, enabled: true, important: RECORD_BOOK_TRAIT_CODES.has(t.code),
+        sortOrder: (i + 1) * 10, description: null,
       },
       options: (t.options ?? []).map((o, n) => ({
         id: (i + 1) * 100 + n, traitId: i + 1, valueCode: o.v, label: o.label,

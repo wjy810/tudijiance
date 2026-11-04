@@ -20,6 +20,9 @@ public final class TraitDtos {
     public record EnabledRequest(@NotNull Boolean enabled) {
     }
 
+    public record ImportantRequest(@NotNull Boolean important) {
+    }
+
     public record CustomTraitRequest(
             @NotBlank @Size(max = 50) String name,
             @NotBlank String dataType,
@@ -28,7 +31,9 @@ public final class TraitDtos {
             @Size(max = 50) List<String> options,
             @Size(max = 200) String description,
             /** 同时记下的表头别名，例如导入时按表头新建项目，就把这个表头记下来 */
-            @Size(max = 20) List<String> aliases) {
+            @Size(max = 20) List<String> aliases,
+            /** 标为重要项目 */
+            Boolean important) {
     }
 
     public record AliasRequest(@NotNull @Size(max = 50) List<String> aliases) {

@@ -67,6 +67,13 @@ public class TraitService {
         traitMapper.updateById(trait);
     }
 
+    /** 标为重要或取消：重要项目录入时排在前面，数据质量检查看它有没有漏录 */
+    public void setImportant(Long id, boolean important) {
+        TraitDef trait = catalog.get(id);
+        trait.setImportant(important);
+        traitMapper.updateById(trait);
+    }
+
     /** 新增自定义项目，例如"小区负责人""田间积水" */
     @Transactional
     public TraitView createCustom(CustomTraitRequest req) {
@@ -98,6 +105,7 @@ public class TraitService {
         trait.setIsStandard(false);
         trait.setIsComputed(false);
         trait.setEnabled(true);
+        trait.setImportant(Boolean.TRUE.equals(req.important()));
         long customCount = traitMapper.selectCount(Wrappers.<TraitDef>lambdaQuery().eq(TraitDef::getCategory, "CUSTOM"));
         trait.setSortOrder((int) (customCount + 1) * 10);
         traitMapper.insert(trait);

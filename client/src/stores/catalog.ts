@@ -50,6 +50,10 @@ export const useCatalogStore = defineStore('catalog', () => {
       list.push(t)
       groups.set(t.trait.category, list)
     }
+    // 重要项目排在前面，其余按原来的顺序
+    for (const list of groups.values()) {
+      list.sort((a, b) => Number(!!b.trait.important) - Number(!!a.trait.important) || a.trait.sortOrder - b.trait.sortOrder)
+    }
     return groups
   })
 

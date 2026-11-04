@@ -96,6 +96,7 @@ export const trialApi = {
 export const traitApi = {
   list: () => data<TraitView[]>(http.get('/api/traits')),
   setEnabled: (id: number, enabled: boolean) => data<void>(http.put(`/api/traits/${id}/enabled`, { enabled })),
+  setImportant: (id: number, important: boolean) => data<void>(http.put(`/api/traits/${id}/important`, { important })),
   createCustom: (req: CustomTraitRequest) => data<TraitView>(http.post('/api/traits', req)),
   removeCustom: (id: number) => data<void>(http.delete(`/api/traits/${id}`)),
   setAliases: (id: number, aliases: string[]) => data<string[]>(http.put(`/api/traits/${id}/aliases`, { aliases })),

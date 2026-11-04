@@ -28,6 +28,8 @@ public class TraitDef {
     private Boolean isStandard;
     private Boolean isComputed;
     private Boolean enabled;
+    /** 重要项目：录入时排在前面、标星，数据质量检查看它有没有漏录 */
+    private Boolean important;
     private Integer sortOrder;
     private String description;
 }

@@ -152,9 +152,31 @@ class ApiIntegrationTest {
         JsonNode lodging = find(traits, t -> t.get("trait").get("code").asString().equals("lodging_final_grade"));
         assertThat(lodging.get("aliases").toString()).contains("第2次倒伏程度");
         assertThat(lodging.get("trait").get("description").asString()).contains("第 2 次倒伏程度");
+        // 记载本里要填的项目都标为重要
+        assertThat(spikes.get("trait").get("important").asBoolean()).isTrue();
+        assertThat(sprouting.get("trait").get("important").asBoolean()).isTrue();
+        assertThat(find(traits, t -> t.get("trait").get("code").asString().equals("flowering_date"))
+                .get("trait").get("important").asBoolean()).isFalse();
         // 幼苗习性用 1、3、5 记：选项说明里补了级别
         JsonNode habit = find(traits, t -> t.get("trait").get("code").asString().equals("seedling_habit"));
         assertThat(habit.get("options").get(2).get("description").asString()).isEqualTo("5 级");
+    }
+
+    @Test
+    void importantTagCanBeSetOnCustomAndToggled() throws Exception {
+        JsonNode created = call(teacher, post("/api/traits"), Map.of("name", "田间积水天数", "dataType", "NUMBER",
+                "unit", "天", "precisionDigits", 0, "important", true), status().isOk());
+        long id = created.get("trait").get("id").asLong();
+        assertThat(created.get("trait").get("important").asBoolean()).isTrue();
+        call(student, put("/api/traits/" + id + "/important"), Map.of("important", false), status().isForbidden());
+        call(teacher, put("/api/traits/" + id + "/important"), Map.of("important", false), status().isOk());
+        JsonNode traits = call(teacher, get("/api/traits"), null, status().isOk());
+        assertThat(find(traits, t -> t.get("trait").get("id").asLong() == id).get("trait").get("important").asBoolean())
+                .isFalse();
+        // 不写 important 时默认不是重要项目
+        JsonNode plain = call(teacher, post("/api/traits"), Map.of("name", "小区负责人", "dataType", "TEXT"),
+                status().isOk());
+        assertThat(plain.get("trait").get("important").asBoolean()).isFalse();
     }
 
     @Test
