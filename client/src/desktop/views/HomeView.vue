@@ -20,6 +20,7 @@ import { PLOT_STATUS } from '@/shared/labels'
 import { rememberTrial } from '@/shared/composables/useTrialPicker'
 import { MAIN_STAGES, stageView } from '@/shared/growthStage'
 import { useAuthStore } from '@/stores/auth'
+import { useModuleStore } from '@/stores/modules'
 import MiniPlotMap from '@/desktop/components/MiniPlotMap.vue'
 import BlockMiniMap from '@/desktop/components/BlockMiniMap.vue'
 import blocksArt from '@/assets/art/empty-blocks.webp'
@@ -32,6 +33,7 @@ import StatCard from '@/desktop/components/StatCard.vue'
 import GrowthStageTrack from '@/desktop/components/GrowthStageTrack.vue'
 
 const auth = useAuthStore()
+const modules = useModuleStore()
 const router = useRouter()
 
 interface FieldCard {
@@ -370,7 +372,7 @@ function onFieldCreated(detail: FieldDetail) {
             <el-button class="btn-wheat" size="large" @click="openMap(primary.field.id)">
               {{ ind ? '进入平面图录入' : '进入平面图' }}<el-icon class="el-icon--right"><Right /></el-icon>
             </el-button>
-            <el-button v-if="ind" size="large" @click="openData(primary.field.id)">查看数据</el-button>
+            <el-button v-if="ind && modules.isOn('data')" size="large" @click="openData(primary.field.id)">查看数据</el-button>
           </div>
         </div>
 
@@ -472,7 +474,7 @@ function onFieldCreated(detail: FieldDetail) {
       <!-- ⑤ 最新录入 -->
       <SectionCard class="fade-up" title="最新录入" :sub="multiField ? '所有实验田' : primary.field.name" flush>
         <template #actions>
-          <el-button link type="primary" @click="openData(primary.field.id)">
+          <el-button v-if="modules.isOn('data')" link type="primary" @click="openData(primary.field.id)">
             去数据查看<el-icon class="el-icon--right"><ArrowRight /></el-icon>
           </el-button>
         </template>

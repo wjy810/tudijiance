@@ -5,19 +5,21 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch, type Compon
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
-  ArrowDown, ArrowRight, Check, Collection, Cpu, DataAnalysis, Document, Expand, Fold, Grid, HomeFilled, Lock,
-  Monitor, PieChart, Search, SwitchButton, Tickets, Upload, User,
+  ArrowDown, ArrowRight, Check, Collection, Cpu, DataAnalysis, Document, Expand, Fold, Grid, HomeFilled,
+  Link as LinkIcon, Lock, Menu, Monitor, PieChart, Search, SwitchButton, Tickets, TopRight, Upload, User,
 } from '@element-plus/icons-vue'
 
 import { authApi, fieldApi, type Field, type Role } from '@/shared/api'
 import { ROLE } from '@/shared/labels'
 import { useAuthStore } from '@/stores/auth'
+import { useModuleStore } from '@/stores/modules'
 import { getServerUrl } from '@/shared/settings'
 import CommandPalette, { type PaletteItem } from '@/desktop/components/CommandPalette.vue'
 import appIcon from '@/assets/art/app-icon.webp'
 import wheatArt from '@/assets/art/sidebar-wheat.webp'
 
 const auth = useAuthStore()
+const modules = useModuleStore()
 const route = useRoute()
 const router = useRouter()
 
@@ -28,6 +30,10 @@ interface MenuItem {
   roles: Role[]
   /** 菜单右边的小数字（例如待审核条数），没有或为 0 时不显示 */
   badge?: () => number | null | undefined
+  /** 属于哪个功能模块：模块停用时不显示 */
+  module?: string
+  /** 链接模块：在浏览器里打开的外部地址 */
+  href?: string
 }
 
 const RECORDERS: Role[] = ['TEACHER', 'STUDENT']
@@ -37,9 +43,9 @@ const GROUPS: { title: string; items: MenuItem[] }[] = [
     title: '日常',
     items: [
       { path: '/home', label: '首页', icon: HomeFilled, roles: RECORDERS },
-      { path: '/data', label: '数据查看', icon: Document, roles: RECORDERS },
-      { path: '/stats', label: '统计分析', icon: DataAnalysis, roles: RECORDERS },
-      { path: '/analysis', label: '自助分析', icon: PieChart, roles: RECORDERS },
+      { path: '/data', label: '数据查看', icon: Document, roles: RECORDERS, module: 'data' },
+      { path: '/stats', label: '统计分析', icon: DataAnalysis, roles: RECORDERS, module: 'stats' },
+      { path: '/analysis', label: '自助分析', icon: PieChart, roles: RECORDERS, module: 'analysis' },
     ],
   },
   {
@@ -47,28 +53,41 @@ const GROUPS: { title: string; items: MenuItem[] }[] = [
     items: [
       { path: '/varieties', label: '品种', icon: Collection, roles: RECORDERS },
       { path: '/traits', label: '录入项目', icon: Tickets, roles: RECORDERS },
-      { path: '/import', label: '导入历史表格', icon: Upload, roles: ['TEACHER'] },
+      { path: '/import', label: '导入历史表格', icon: Upload, roles: ['TEACHER'], module: 'import' },
     ],
   },
   {
     title: '系统',
     items: [
       { path: '/users', label: '用户管理', icon: User, roles: ['SYS_ADMIN'] },
-      { path: '/devices', label: '设备接入（预留）', icon: Cpu, roles: ['SYS_ADMIN'] },
+      { path: '/modules', label: '功能模块', icon: Menu, roles: ['SYS_ADMIN'] },
+      { path: '/devices', label: '设备接入（预留）', icon: Cpu, roles: ['SYS_ADMIN'], module: 'devices' },
     ],
   },
   {
     title: '展示',
     items: [
-      { path: '/screen', label: '数据大屏', icon: Monitor, roles: ['SYS_ADMIN', 'TEACHER', 'STUDENT'] },
+      { path: '/screen', label: '数据大屏', icon: Monitor, roles: ['SYS_ADMIN', 'TEACHER', 'STUDENT'], module: 'screen' },
     ],
   },
 ]
 
-const groups = computed(() =>
-  GROUPS.map((g) => ({ ...g, items: g.items.filter((m) => auth.role && m.roles.includes(auth.role)) }))
-    .filter((g) => g.items.length > 0),
-)
+const groups = computed(() => {
+  const list = GROUPS.map((g) => ({
+    ...g,
+    items: g.items.filter((m) => auth.role && m.roles.includes(auth.role) && modules.isOn(m.module)),
+  }))
+  // 系统管理员加的链接模块（服务器已经按角色筛过）
+  if (modules.links.length > 0) {
+    list.push({
+      title: '链接',
+      items: modules.links.map((l): MenuItem => ({
+        path: `/link/${l.code}`, label: l.name, icon: LinkIcon, roles: [], href: l.url ?? undefined,
+      })),
+    })
+  }
+  return list.filter((g) => g.items.length > 0)
+})
 
 // 平面图是从首页点进去的，菜单仍然高亮"首页"
 const activeMenu = computed(() =>
@@ -138,7 +157,7 @@ const paletteItems = computed<PaletteItem[]>(() => [
     label: m.label,
     desc: g.title,
     icon: m.icon,
-    run: () => router.push(m.path),
+    run: () => (m.href ? window.open(m.href, '_blank', 'noopener') : router.push(m.path)),
   }))),
   ...fields.value.map((f) => ({
     id: 'field:' + f.id,
@@ -247,7 +266,20 @@ async function savePassword() {
             :disabled="!collapsed"
             :show-after="200"
           >
+            <a
+              v-if="m.href"
+              :href="m.href"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="nav-item"
+              :title="m.href"
+            >
+              <el-icon class="nav-icon"><component :is="m.icon" /></el-icon>
+              <span class="nav-label">{{ m.label }}</span>
+              <el-icon class="nav-ext"><TopRight /></el-icon>
+            </a>
             <RouterLink
+              v-else
               :to="m.path"
               class="nav-item"
               :class="{ active: activeMenu === m.path }"
@@ -876,6 +908,11 @@ async function savePassword() {
   .st-text {
     display: none;
   }
+}
+.nav-ext {
+  margin-left: auto;
+  font-size: 12px;
+  opacity: 0.55;
 }
 </style>
 

@@ -38,6 +38,8 @@ import type {
   TrialRequest,
   TrialBook,
   TrialBookRequest,
+  AppModule,
+  LinkModuleRequest,
   UserView,
   Variety,
   VarietyRequest,
@@ -175,4 +177,12 @@ export const deviceApi = {
   regenerateToken: (id: number) => data<DeviceWithToken>(http.post(`/api/devices/${id}/token`)),
   readings: (id: number, metric: string, from: string, to: string, bucket: Bucket) =>
     data<Series>(http.get(`/api/devices/${id}/readings`, { params: { metric, from, to, bucket } })),
+}
+
+export const moduleApi = {
+  list: () => data<AppModule[]>(http.get('/api/modules')),
+  setEnabled: (code: string, enabled: boolean) => data<AppModule>(http.put(`/api/modules/${code}/enabled`, { enabled })),
+  createLink: (req: LinkModuleRequest) => data<AppModule>(http.post('/api/modules/links', req)),
+  updateLink: (code: string, req: LinkModuleRequest) => data<AppModule>(http.put(`/api/modules/links/${code}`, req)),
+  removeLink: (code: string) => data<void>(http.delete(`/api/modules/links/${code}`)),
 }

@@ -18,6 +18,7 @@ import {
   type ColumnTarget, type CustomTraitSuggestion,
 } from '@/shared/importGuess'
 import { useCatalogStore } from '@/stores/catalog'
+import { useModuleStore } from '@/stores/modules'
 import SheetGrid from '@/desktop/components/SheetGrid.vue'
 import type { FieldTone } from '@/desktop/components/sheetGrid'
 import EmptyState from '@/desktop/components/EmptyState.vue'
@@ -25,6 +26,7 @@ import CustomTraitDialog from '@/desktop/components/CustomTraitDialog.vue'
 
 const router = useRouter()
 const catalog = useCatalogStore()
+const modules = useModuleStore()
 const picker = useTrialPicker()
 
 const STEPS = ['选择文件', '整理表格', '检查', '完成']
@@ -564,7 +566,7 @@ const orientationHelp = computed(() => settings.orientation === 'COLUMNS'
     <section v-if="step === 3 && result" class="panel">
       <EmptyState art="data" title="导入完成" :size="140"
         :desc="`导入了 ${result.created} 个值${result.duplicates ? `，${result.duplicates} 个已经导入过跳过了` : ''}${result.errorCount ? `，${result.errorCount} 个格子有问题没有导入` : ''}${result.aliasesRemembered ? `；记住了 ${result.aliasesRemembered} 个表头，下次自动认出` : ''}。`">
-        <el-button type="primary" @click="router.push('/data')">查看数据</el-button>
+        <el-button v-if="modules.isOn('data')" type="primary" @click="router.push('/data')">查看数据</el-button>
         <el-button @click="router.push(`/fields/${picker.fieldId.value}`)">去平面图</el-button>
         <el-button @click="restart">再导入一份</el-button>
       </EmptyState>

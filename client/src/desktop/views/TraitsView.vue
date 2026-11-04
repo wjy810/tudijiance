@@ -10,11 +10,13 @@ import { traitApi, type TraitCategory, type TraitView } from '@/shared/api'
 import { TRAIT_CATEGORY, TRAIT_DATA_TYPE } from '@/shared/labels'
 import { useAuthStore } from '@/stores/auth'
 import { useCatalogStore } from '@/stores/catalog'
+import { useModuleStore } from '@/stores/modules'
 import CustomTraitDialog from '@/desktop/components/CustomTraitDialog.vue'
 import { aliasKey } from '@/shared/importGuess'
 
 const auth = useAuthStore()
 const catalog = useCatalogStore()
+const modules = useModuleStore()
 const loading = ref(false)
 /** IMPORTANT：所有分类里的重要项目 */
 const tab = ref<TraitCategory | 'IMPORTANT'>('OPERATION')
@@ -155,7 +157,7 @@ async function onCreated() {
         <span>导入表格时，表头是"导入时的表头"里这些写法的列会自动对应到这个项目；导入时确认过的对应关系也会自动记到这里。
           现在一共记了 <b class="num">{{ aliasCount }}</b> 种写法。</span>
       </div>
-      <el-button v-if="auth.isTeacher" @click="router.push('/import')">去导入</el-button>
+      <el-button v-if="auth.isTeacher && modules.isOn('import')" @click="router.push('/import')">去导入</el-button>
     </div>
 
     <div class="layout">

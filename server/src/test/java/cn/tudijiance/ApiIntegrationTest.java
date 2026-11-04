@@ -180,6 +180,48 @@ class ApiIntegrationTest {
     }
 
     @Test
+    void modulesCanBeStoppedAndLinksManaged() throws Exception {
+        JsonNode all = call(admin, get("/api/modules"), null, status().isOk());
+        assertThat(all.size()).isGreaterThanOrEqualTo(12);
+        // 必需模块不能停；老师不能改模块
+        call(admin, put("/api/modules/field_map/enabled"), Map.of("enabled", false), status().isBadRequest());
+        call(teacher, put("/api/modules/stats/enabled"), Map.of("enabled", false), status().isForbidden());
+        try {
+            call(admin, put("/api/modules/stats/enabled"), Map.of("enabled", false), status().isOk());
+            call(admin, put("/api/modules/screen/enabled"), Map.of("enabled", false), status().isOk());
+            JsonNode denied = call(teacher, get("/api/stats/multi-year?fieldId=1&traitId=1"), null, status().isForbidden());
+            assertThat(denied.get("message").asString()).contains("统计分析").contains("停用");
+            call(guest, get("/api/screen"), null, status().isForbidden());
+            // 录入不受影响
+            call(teacher, get("/api/fields"), null, status().isOk());
+            JsonNode forTeacher = call(teacher, get("/api/modules"), null, status().isOk());
+            assertThat(find(forTeacher, m -> m.get("code").asString().equals("stats")).get("on").asBoolean()).isFalse();
+        } finally {
+            call(admin, put("/api/modules/stats/enabled"), Map.of("enabled", true), status().isOk());
+            call(admin, put("/api/modules/screen/enabled"), Map.of("enabled", true), status().isOk());
+        }
+        call(guest, get("/api/screen"), null, status().isOk());
+
+        // 链接模块：增、改、删；学生只看到给学生的、开着的
+        call(admin, post("/api/modules/links"), Map.of("name", "教务", "url", "ftp://x"), status().isBadRequest());
+        JsonNode link = call(admin, post("/api/modules/links"), Map.of("name", "气象网站", "url", "https://weather.example.cn",
+                "roles", List.of("TEACHER")), status().isOk());
+        String code = link.get("code").asString();
+        assertThat(code).startsWith("link_");
+        JsonNode forStudent = call(student, get("/api/modules"), null, status().isOk());
+        assertThat(forStudent.toString()).doesNotContain(code);
+        JsonNode forTeacher = call(teacher, get("/api/modules"), null, status().isOk());
+        assertThat(forTeacher.toString()).contains("weather.example.cn");
+        call(admin, put("/api/modules/links/" + code), Map.of("name", "气象网站", "url", "https://weather.example.cn",
+                "roles", List.of("TEACHER", "STUDENT"), "enabled", false), status().isOk());
+        assertThat(call(teacher, get("/api/modules"), null, status().isOk()).toString()).doesNotContain(code);
+        call(admin, delete("/api/modules/stats"), null, status().isNotFound());
+        call(admin, delete("/api/modules/links/stats"), null, status().isBadRequest());
+        call(admin, delete("/api/modules/links/" + code), null, status().isOk());
+        assertThat(call(admin, get("/api/modules"), null, status().isOk()).toString()).doesNotContain(code);
+    }
+
+    @Test
     void trialRecordBookAndHarvestArea() throws Exception {
         Setup s = setup("记载本试验田");
         String bookUrl = "/api/trials/" + s.trialId + "/book";

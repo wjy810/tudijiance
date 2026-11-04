@@ -21,6 +21,7 @@ import { REPLICATE_COLORS, SEQUENTIAL_GRADIENT, VARIETY_COLORS, sequentialColor 
 import { rememberTrial } from '@/shared/composables/useTrialPicker'
 import { useAuthStore } from '@/stores/auth'
 import { useCatalogStore } from '@/stores/catalog'
+import { useModuleStore } from '@/stores/modules'
 import FieldCanvas, { type CanvasCell, type CanvasDevice, type CanvasLink } from '@/desktop/components/FieldCanvas.vue'
 import {
   anchors, checkLayout, fieldSize, fmt, innerCells, moveBlockFit, plotPlace, plotPlaces, type FieldLayout,
@@ -42,6 +43,7 @@ const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 const catalog = useCatalogStore()
+const modules = useModuleStore()
 
 const fieldId = computed(() => Number(route.params.id))
 const detail = ref<FieldDetail | null>(null)
@@ -1088,7 +1090,7 @@ const metricGroups = computed(() => {
         <el-select v-model="trialId" placeholder="还没有试验" class="trial-select" :disabled="trials.length === 0">
           <el-option v-for="t in trials" :key="t.id" :value="t.id" :label="`${t.seasonYear} 年 · ${t.name}`" />
         </el-select>
-        <el-tooltip v-if="trial" content="封面、试验设计、栽培管理、气象资料、品种评价" placement="bottom">
+        <el-tooltip v-if="trial && modules.isOn('record_book')" content="封面、试验设计、栽培管理、气象资料、品种评价" placement="bottom">
           <el-button :icon="Notebook" @click="router.push(`/trials/${trial.id}/book`)">记载本</el-button>
         </el-tooltip>
         <el-dropdown v-if="auth.isTeacher" trigger="click" @command="onTrialCommand">
@@ -1105,9 +1107,9 @@ const metricGroups = computed(() => {
           <template #dropdown>
             <el-dropdown-menu>
               <el-dropdown-item v-if="auth.isTeacher" command="field">修改实验田信息</el-dropdown-item>
-              <el-dropdown-item v-if="auth.isTeacher" command="import">导入历史表格</el-dropdown-item>
+              <el-dropdown-item v-if="auth.isTeacher && modules.isOn('import')" command="import">导入历史表格</el-dropdown-item>
               <el-dropdown-item command="export">导出种植图（jpg）</el-dropdown-item>
-              <el-dropdown-item command="book" :disabled="!trial">导出记载本（Excel）</el-dropdown-item>
+              <el-dropdown-item v-if="modules.isOn('record_book')" command="book" :disabled="!trial">导出记载本（Excel）</el-dropdown-item>
             </el-dropdown-menu>
           </template>
         </el-dropdown>
@@ -1316,7 +1318,7 @@ const metricGroups = computed(() => {
                 <el-button :icon="Warning" @click="toggleAbnormal(selectedPlots)">{{ allAbnormal ? '取消异常' : '标记异常' }}</el-button>
               </template>
               <el-button v-if="selected.length === 1" @click="openDetail(selected[0]!)">查看详情</el-button>
-              <el-button v-if="selected.length > 1" :icon="PieChart" @click="analyzeSelection">做图表</el-button>
+              <el-button v-if="selected.length > 1 && modules.isOn('analysis')" :icon="PieChart" @click="analyzeSelection">做图表</el-button>
             </template>
             <template v-else>
               <el-button type="primary" @click="openLayoutDialog('variety')">分配品种</el-button>

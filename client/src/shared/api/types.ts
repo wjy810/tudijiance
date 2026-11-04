@@ -609,3 +609,31 @@ export interface SavedChart<C = unknown> {
   createdByName: string | null
   updatedAt: string
 }
+
+// ---------- 功能模块 ----------
+
+/** 功能模块：内置模块（BUILTIN）可以停用，链接模块（LINK）是管理员加的菜单链接 */
+export interface AppModule {
+  code: string
+  name: string
+  description: string | null
+  kind: 'BUILTIN' | 'LINK'
+  /** 必需模块不能停用 */
+  required: boolean
+  enabled: boolean
+  /** 实际开没开（必需模块总是开着） */
+  on: boolean
+  url: string | null
+  /** 链接给哪些角色看，逗号分隔 */
+  roles: string | null
+  sortOrder: number
+  updatedAt: string | null
+}
+
+export interface LinkModuleRequest {
+  name: string
+  url: string
+  description?: string | null
+  roles: Role[]
+  enabled?: boolean
+}
