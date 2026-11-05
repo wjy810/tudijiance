@@ -889,8 +889,8 @@ watch(() => props.autoRotate, (v) => {
 
 .compass {
   position: absolute;
-  right: 14px;
-  top: 14px;
+  right: 16px;
+  bottom: 130px;
   z-index: 2;
   width: 56px;
   height: 56px;

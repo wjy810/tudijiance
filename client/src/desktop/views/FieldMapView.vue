@@ -7,14 +7,14 @@ import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, r
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  ArrowDown, ArrowLeft, Check, Close, EditPen, Notebook, Odometer, PieChart, Pointer, QuestionFilled, Rank, RefreshLeft,
-  RefreshRight, Warning, ZoomIn, ZoomOut,
+  ArrowDown, ArrowLeft, ArrowRight, Box, Check, Close, Crop, EditPen, Grid, Notebook, Odometer, PieChart, Pointer,
+  QuestionFilled, Rank, RefreshLeft, RefreshRight, Search, Warning, ZoomIn, ZoomOut,
 } from '@element-plus/icons-vue'
 
 import {
   deviceApi, fieldApi, observationApi, statsApi, trialApi,
-  type DeviceView, type FieldDetail, type Layout, type Plot, type PlotStatusCode, type PlotValue, type TraitView, type Trial,
-  type TrialStatus,
+  type DeviceView, type FieldDetail, type Layout, type Plot, type PlotDetail, type PlotStatusCode, type PlotValue,
+  type TraitView, type Trial, type TrialStatus,
 } from '@/shared/api'
 import { PLOT_KIND, PLOT_STATUS, TRAIT_CATEGORY, replicateLabel } from '@/shared/labels'
 import { REPLICATE_COLORS, SEQUENTIAL_GRADIENT, VARIETY_COLORS, sequentialColor } from '@/shared/colors'
@@ -26,8 +26,9 @@ import FieldCanvas, {
   type CanvasCell, type CanvasDevice, type CanvasLink, type CanvasTool, type TrackResize,
 } from '@/desktop/components/FieldCanvas.vue'
 import {
-  anchors, checkLayout, fieldSize, fmt, innerCells, keyOf, moveBlockFit, moveCells, parseKey, plotPlace, plotPlaces,
-  setInnerTrackPair, setTrackPair, swapBlocks, type FieldLayout,
+  BLOCK_KIND, CELL_KIND, anchors, blockSpan, checkLayout, fieldSize, fmt, innerCells, keyOf, mergeAt, moveBlockFit, moveCells,
+  parseKey, plotPlace, plotPlaces, removedPlots, setBlockKind, setCellKinds, setInnerTrackPair, setTrackPair, swapBlocks,
+  splitBlock, splitInner, type BlockKind, type CellKind, type FieldLayout,
 } from '@/shared/fieldLayout'
 import { useLayoutDraft } from '@/desktop/components/layoutDraft'
 import LayoutEditPanel from '@/desktop/components/LayoutEditPanel.vue'
@@ -197,6 +198,8 @@ const modeModel = computed<Mode>({
 })
 
 watch(mode, (m, old) => {
+  // 换模式时放好整块地（编辑地块多了标尺）
+  nextTick(() => canvasRef.value?.fit(true))
   selected.value = []
   selectedBlocks.value = []
   selectedCells.value = []
@@ -419,7 +422,7 @@ function zoomBy(factor: number) {
 const NO_LINKS: CanvasLink[] = []
 const NO_DEVICES: CanvasDevice[] = []
 /** 画布上浮着的工具条占的地方：上面模式切换，下面操作条 */
-const CANVAS_INSETS = { top: 8, right: 8, bottom: 64, left: 8 }
+const CANVAS_INSETS = { top: 58, right: 16, bottom: 66, left: 16 }
 
 // ---------- 视角和方位 ----------
 
@@ -750,24 +753,45 @@ const legend = computed(() => {
 
 const menu = ref<{ x: number; y: number; plotId: number } | null>(null)
 
-function onContextMenu(target: { plotId?: number }, x: number, y: number) {
+function onContextMenu(target: { plotId?: number; blockId?: string; cell?: string }, x: number, y: number) {
+  const at = { x: Math.min(x, window.innerWidth - 220), y: Math.min(y, window.innerHeight - 340) }
+  if (mode.value === 'edit') {
+    if (target.blockId || target.cell) editMenu.value = { ...at, blockId: target.blockId, cell: target.cell }
+    return
+  }
   if (target.plotId == null) {
     return
   }
   // 菜单不要超出窗口
-  menu.value = { plotId: target.plotId, x: Math.min(x, window.innerWidth - 200), y: Math.min(y, window.innerHeight - 320) }
+  menu.value = { plotId: target.plotId, ...at }
 }
 
 function closeMenu() {
   menu.value = null
+  editMenu.value = null
+}
+
+function typing(e: KeyboardEvent) {
+  const t = e.target as HTMLElement | null
+  return !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)
 }
 
 function onKey(e: KeyboardEvent) {
-  const t = e.target as HTMLElement | null
-  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) {
+  const ctrl = e.ctrlKey || e.metaKey
+  // 找小区：/ 或 Ctrl F（输入框里不拦）
+  if ((e.key === '/' && !typing(e)) || (ctrl && e.key.toLowerCase() === 'f')) {
+    e.preventDefault()
+    searchInput.value?.focus()
     return
   }
-  if (mode.value === 'edit' && (e.ctrlKey || e.metaKey) && !e.altKey) {
+  if (typing(e)) {
+    return
+  }
+  // 有弹窗、抽屉开着时不抢快捷键
+  if (document.querySelector('.el-overlay:not([style*="display: none"])')) {
+    return
+  }
+  if (mode.value === 'edit' && ctrl && !e.altKey) {
     const k = e.key.toLowerCase()
     if (k === 'z' && !e.shiftKey) {
       e.preventDefault()
@@ -785,30 +809,65 @@ function onKey(e: KeyboardEvent) {
       return
     }
   }
+  if (ctrl && e.key.toLowerCase() === 'a') {
+    e.preventDefault()
+    if (mode.value !== 'edit') {
+      selectAllPlots()
+    } else if (focusBlock.value?.inner) {
+      const b = focusBlock.value
+      selectedCells.value = anchors(b.inner!.rows.length, b.inner!.cols.length, b.inner!.merges).map((x) => keyOf(x.r, x.c))
+    } else {
+      selectedBlocks.value = (draft.draft.value?.blocks ?? []).map((b) => b.id)
+    }
+    return
+  }
+  if (ctrl || e.altKey) {
+    return
+  }
+  const arrows: Record<string, [number, number]> = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] }
+  if (arrows[e.key] && mode.value !== 'edit') {
+    if (stepSelection(...arrows[e.key]!)) e.preventDefault()
+    return
+  }
+  if (e.key === 'Enter' && mode.value === 'record' && selected.value.length > 0 && auth.canRecord && trial.value) {
+    e.preventDefault()
+    openEntry(selectedPlots.value)
+    return
+  }
   if (e.key === 'Escape') {
-    if (menu.value) {
+    if (menu.value || editMenu.value) {
       closeMenu()
     } else if (tool.value !== 'select') {
       tool.value = 'select'
-    } else if (selectedBlocks.value.length || selectedCells.value.length || track.value) {
+    } else if (selected.value.length || selectedBlocks.value.length || selectedCells.value.length || track.value) {
+      selected.value = []
       selectedBlocks.value = []
       selectedCells.value = []
       track.value = null
     } else if (focus.value) {
       leaveBlock()
     }
-  } else if ((e.key === 'f' || e.key === 'F') && !e.ctrlKey && !e.metaKey) {
+    return
+  }
+  const k = e.key.toLowerCase()
+  if (auth.isTeacher && (k === '1' || k === '2' || k === '3')) {
+    modeModel.value = (['record', 'layout', 'edit'] as Mode[])[Number(k) - 1]!
+  } else if (k === 'f') {
     fitView()
-  } else if ((e.key === 'n' || e.key === 'N') && !e.ctrlKey && !e.metaKey) {
+  } else if (k === 'n') {
     toggleNorth()
-  } else if ((e.key === 't' || e.key === 'T') && !e.ctrlKey && !e.metaKey && mode.value !== 'edit') {
+  } else if (k === 't' && mode.value !== 'edit') {
     view3d.value = !view3d.value
-  } else if ((e.key === 'm' || e.key === 'M') && !e.ctrlKey && !e.metaKey) {
+  } else if (k === 'm' && !view3d.value) {
     tool.value = tool.value === 'measure' ? 'select' : 'measure'
-  } else if ((e.key === 'h' || e.key === 'H') && !e.ctrlKey && !e.metaKey) {
+  } else if (k === 'h' && !view3d.value) {
     tool.value = tool.value === 'pan' ? 'select' : 'pan'
-  } else if ((e.key === 'v' || e.key === 'V') && !e.ctrlKey && !e.metaKey) {
+  } else if (k === 'v') {
     tool.value = 'select'
+  } else if (e.key === ']') {
+    inspectorOpen.value = !inspectorOpen.value
+  } else if (e.key === '?') {
+    shortcutsOpen.value = true
   }
 }
 
@@ -1124,237 +1183,475 @@ const metricGroups = computed(() => {
   }
   return [...groups.entries()].map(([label, items]) => ({ label, items }))
 })
+
+// ---------- 右侧面板：按选中的东西显示 ----------
+
+const INSPECTOR_KEY = 'tudijiance.mapInspector'
+const inspectorOpen = ref(localStorage.getItem(INSPECTOR_KEY) !== '0')
+watch(inspectorOpen, (v) => {
+  try {
+    localStorage.setItem(INSPECTOR_KEY, v ? '1' : '0')
+  } catch {
+    // 不记忆
+  }
+})
+
+/** 只选了一个小区时显示它的最近数据：选中后停一下再取，免得快速点选时连发请求 */
+const single = computed(() => (mode.value !== 'edit' && selectedPlots.value.length === 1 ? selectedPlots.value[0]! : null))
+const singleDetail = ref<PlotDetail | null>(null)
+const singleLoading = ref(false)
+let singleTimer = 0
+
+watch([single, trialId], ([p, t]) => {
+  clearTimeout(singleTimer)
+  singleDetail.value = null
+  if (!p || !t || p.kind !== 'PLOT') return
+  singleLoading.value = true
+  singleTimer = window.setTimeout(async () => {
+    try {
+      const d = await observationApi.plotDetail(t, p.id)
+      if (single.value?.id === p.id) singleDetail.value = d
+    } catch {
+      // 取不到只是少了最近数据
+    } finally {
+      singleLoading.value = false
+    }
+  }, 220)
+})
+
+/** 选中的小区：品种、重复、状态各有几个，点一下选中同样的 */
+interface Facet {
+  key: string
+  label: string
+  count: number
+  color: string
+  pick: () => void
+}
+
+function selectWhere(pred: (p: Plot) => boolean) {
+  const inFocus = focusBlock.value ? new Set(Object.values(focusBlock.value.inner?.plots ?? {})) : null
+  selected.value = plots.value.filter((p) => (!inFocus || inFocus.has(p.id)) && pred(p)).map((p) => p.id)
+}
+
+const facets = computed(() => {
+  const list = selectedTrialPlots.value
+  const varieties = new Map<number | null, number>()
+  const reps = new Map<number | null, number>()
+  const statuses = new Map<PlotStatusCode, number>()
+  for (const p of list) {
+    const pl = plantingByPlot.value.get(p.id)
+    varieties.set(pl?.varietyId ?? null, (varieties.get(pl?.varietyId ?? null) ?? 0) + 1)
+    reps.set(pl?.replicateNo ?? null, (reps.get(pl?.replicateNo ?? null) ?? 0) + 1)
+    const st = plotStatus(p)
+    statuses.set(st, (statuses.get(st) ?? 0) + 1)
+  }
+  const variety: Facet[] = [...varieties.entries()].sort((a, b) => b[1] - a[1]).map(([id, n]) => {
+    const v = id ? catalog.varietyById.get(id) : null
+    return {
+      key: `v${id}`, label: v ? `${v.name}${v.controlType ? '（CK）' : ''}` : '未分配品种', count: n,
+      color: id ? varietyColor.value.get(id) ?? '#ddd' : '#f1ebdd',
+      pick: () => selectWhere((p) => p.kind === 'PLOT' && (plantingByPlot.value.get(p.id)?.varietyId ?? null) === id),
+    }
+  })
+  const replicate: Facet[] = [...reps.entries()].sort((a, b) => (a[0] ?? 99) - (b[0] ?? 99)).map(([r, n]) => ({
+    key: `r${r}`, label: r ? `重复 ${replicateLabel(r)}` : '未设重复', count: n,
+    color: r ? REPLICATE_COLORS[(r - 1) % REPLICATE_COLORS.length]! : '#f1ebdd',
+    pick: () => selectWhere((p) => p.kind === 'PLOT' && (plantingByPlot.value.get(p.id)?.replicateNo ?? null) === r),
+  }))
+  const status: Facet[] = [...statuses.entries()].map(([st, n]) => ({
+    key: `s${st}`, label: PLOT_STATUS[st].label, count: n, color: PLOT_STATUS[st].color,
+    pick: () => selectWhere((p) => p.kind === 'PLOT' && plotStatus(p) === st),
+  }))
+  return { variety, replicate, status }
+})
+
+// ---------- 图例：点一项选中 ----------
+
+const VIEW_OPTIONS: { value: ViewMode; label: string }[] = [
+  { value: 'status', label: '按状态' },
+  { value: 'variety', label: '按品种' },
+  { value: 'replicate', label: '按重复' },
+  { value: 'trait', label: '按指标' },
+]
+
+function selectByLegend(label: string) {
+  if (display.value.view === 'status') {
+    const code = (Object.keys(PLOT_STATUS) as PlotStatusCode[]).find((k) => PLOT_STATUS[k].label === label)
+    if (code) selectWhere((p) => plotStatus(p) === code)
+  } else if (display.value.view === 'variety') {
+    const id = [...varietyColor.value.keys()].find((v) => {
+      const x = catalog.varietyById.get(v)
+      return (x ? `${x.name}${x.controlType ? '（CK）' : ''}` : `品种 ${v}`) === label
+    })
+    if (id != null) selectWhere((p) => p.kind === 'PLOT' && plantingByPlot.value.get(p.id)?.varietyId === id)
+  } else if (display.value.view === 'replicate') {
+    const r = [...new Set((layout.value?.plantings ?? []).map((x) => x.replicateNo))].find((n) => n && `重复 ${replicateLabel(n)}` === label)
+    if (r) selectWhere((p) => p.kind === 'PLOT' && plantingByPlot.value.get(p.id)?.replicateNo === r)
+  }
+}
+
+// ---------- 找小区 ----------
+
+const searchText = ref('')
+const searchOpen = ref(false)
+const searchInput = ref<{ focus: () => void } | null>(null)
+const searchIndex = ref(0)
+
+/** 全部匹配的小区：输数字只按编号找（编号开头一样的），输文字时也按品种名找 */
+const searchAll = computed(() => {
+  const q = searchText.value.trim().toLowerCase()
+  if (!q) return []
+  const numeric = /^[0-9-]+$/.test(q)
+  const out: { plot: Plot; text: string; sub: string; exact: boolean }[] = []
+  for (const p of plots.value) {
+    const code = (p.code || `${p.rowNo}-${p.colNo}`).toLowerCase()
+    const pl = plantingByPlot.value.get(p.id)
+    const v = pl?.varietyId ? catalog.varietyById.get(pl.varietyId) : undefined
+    const name = v?.name.toLowerCase() ?? ''
+    if (code.startsWith(q) || (!numeric && name.includes(q))) {
+      out.push({
+        plot: p, text: `小区 ${p.code || code}`, exact: code === q,
+        sub: [v?.name, pl?.replicateNo ? `重复 ${replicateLabel(pl.replicateNo)}` : '', placeById.value.get(p.id)].filter(Boolean).join(' · '),
+      })
+    }
+  }
+  // 编号完全一样的排前面
+  return out.sort((a, b) => Number(b.exact) - Number(a.exact))
+})
+
+const searchHits = computed(() => searchAll.value.slice(0, 8))
+
+watch(searchText, () => {
+  searchIndex.value = 0
+  searchOpen.value = true
+})
+
+/** 定位到小区：选中、放大过去（在别的区块里时先回到整块地） */
+function locatePlot(ids: number[]) {
+  if (ids.length === 0) return
+  if (focus.value && !ids.every((id) => Object.values(focusBlock.value?.inner?.plots ?? {}).includes(id))) {
+    focus.value = null
+  }
+  selected.value = ids
+  nextTick(() => {
+    if (view3d.value) sceneRef.value?.zoomToPlots(ids)
+    else canvasRef.value?.zoomToPlots(ids)
+  })
+}
+
+function pickHit(i: number) {
+  const hit = searchHits.value[i]
+  if (!hit) return
+  searchOpen.value = false
+  locatePlot([hit.plot.id])
+}
+
+function onSearchBlur() {
+  // 等一下再关，点结果的 mousedown 先处理
+  window.setTimeout(() => (searchOpen.value = false), 150)
+}
+
+function onSearchKey(e: KeyboardEvent) {
+  if (e.key === 'ArrowDown') {
+    e.preventDefault()
+    searchIndex.value = Math.min(searchHits.value.length - 1, searchIndex.value + 1)
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault()
+    searchIndex.value = Math.max(0, searchIndex.value - 1)
+  } else if (e.key === 'Enter') {
+    // 回车定位到亮着的那个；Shift 回车选中全部匹配的（例如按品种找）
+    if (e.shiftKey && searchAll.value.length > 1) {
+      searchOpen.value = false
+      locatePlot(searchAll.value.map((h) => h.plot.id))
+    } else {
+      pickHit(searchIndex.value)
+    }
+  } else if (e.key === 'Escape') {
+    searchOpen.value = false
+    ;(e.target as HTMLElement).blur()
+  }
+}
+
+// ---------- 方向键挪选中 ----------
+
+/** 只选了一个小区时，方向键选旁边的小区（按拉平后的行列），回车录入 */
+function stepSelection(dr: number, dc: number) {
+  const p = selectedPlots.value.length === 1 ? selectedPlots.value[0]! : null
+  if (!p) return false
+  for (let k = 1; k <= 4; k++) {
+    const next = plots.value.find((x) => x.rowNo === p.rowNo + dr * k && x.colNo === p.colNo + dc * k)
+    if (next) {
+      selected.value = [next.id]
+      return true
+    }
+  }
+  return false
+}
+
+// ---------- 快捷键说明 ----------
+
+const shortcutsOpen = ref(false)
+
+const SHORTCUTS: { keys: string; text: string }[] = [
+  { keys: '1 / 2 / 3', text: '录入数据 / 布置试验 / 编辑地块（老师）' },
+  { keys: 'T', text: '俯视图和 3D 切换' },
+  { keys: '/ 或 Ctrl F', text: '找小区（编号或品种）' },
+  { keys: 'Ctrl A', text: '选中全部小区（区块里时选这个区块的）' },
+  { keys: '方向键', text: '只选了一个小区时，选旁边的小区' },
+  { keys: 'Enter', text: '给选中的小区录入数据' },
+  { keys: 'Esc', text: '取消选择；再按回到整块地' },
+  { keys: 'F', text: '适应窗口（3D 里回到默认视角）' },
+  { keys: 'N', text: '图纸朝上和正北朝上切换' },
+  { keys: 'V / H / M', text: '选择 / 拖动画面 / 测距' },
+  { keys: '空格 + 拖动', text: '拖动画面（滚轮缩放）' },
+  { keys: 'Ctrl / Shift + 点', text: '加选；拖动框选' },
+  { keys: 'Ctrl Z / Ctrl Y / Ctrl S', text: '编辑地块：撤销 / 重做 / 保存' },
+  { keys: ']', text: '收起、展开右侧面板' },
+  { keys: '?', text: '这张说明' },
+]
+
+// ---------- 编辑地块的右键菜单 ----------
+
+const editMenu = ref<{ x: number; y: number; blockId?: string; cell?: string } | null>(null)
+const editPanelRef = ref<InstanceType<typeof LayoutEditPanel> | null>(null)
+
+function applyCellKind(kind: CellKind) {
+  const l = draft.draft.value
+  if (!l || !focus.value) return
+  draft.apply(setCellKinds(l, focus.value, selectedCells.value, kind))
+}
+
+function applyBlockKind(kind: BlockKind) {
+  const l = draft.draft.value
+  if (!l) return
+  const next = setBlockKind(l, selectedBlocks.value, kind)
+  if (removedPlots(l, next).length > 0) {
+    ElMessage.warning('改成这个类型会去掉区块里的小区，请在右边面板里改，会先提醒你')
+    return
+  }
+  draft.apply(next)
+}
+
+function runEdit(fn: () => void) {
+  editMenu.value = null
+  fn()
+}
 </script>
 
 <template>
   <div class="map-page" v-loading="loading">
-    <!-- 页头：实验田、试验 -->
-    <header class="head">
-      <div class="head-left">
-        <el-button :icon="ArrowLeft" text class="back" @click="router.push('/home')">首页</el-button>
-        <div>
-          <h2>{{ field?.name }}</h2>
-          <div class="page-desc">
-            <template v-if="detail?.layoutSaved && fieldLayout">
-              {{ layoutStats.blocks }} 个区块 · {{ layoutStats.plots }} 个小区 · {{ layoutStats.size }}
-            </template>
-            <template v-else>{{ field?.rowCount }} 行 × {{ field?.colCount }} 列</template>
-            <template v-if="field?.location"> · {{ field.location }}</template>
-          </div>
-        </div>
-      </div>
-      <div class="head-right">
-        <el-select v-model="trialId" placeholder="还没有试验" class="trial-select" :disabled="trials.length === 0">
-          <el-option v-for="t in trials" :key="t.id" :value="t.id" :label="`${t.seasonYear} 年 · ${t.name}`" />
-        </el-select>
-        <el-tooltip v-if="trial && modules.isOn('record_book')" content="封面、试验设计、栽培管理、气象资料、品种评价" placement="bottom">
-          <el-button :icon="Notebook" @click="router.push(`/trials/${trial.id}/book`)">记载本</el-button>
-        </el-tooltip>
-        <el-dropdown v-if="auth.isTeacher" trigger="click" @command="onTrialCommand">
-          <el-button>试验<el-icon class="el-icon--right"><ArrowDown /></el-icon></el-button>
-          <template #dropdown>
-            <el-dropdown-menu>
-              <el-dropdown-item command="new">新建试验</el-dropdown-item>
-              <el-dropdown-item command="edit" :disabled="!trial">修改或删除当前试验</el-dropdown-item>
-            </el-dropdown-menu>
-          </template>
-        </el-dropdown>
-        <el-dropdown trigger="click" @command="onMoreCommand">
-          <el-button>更多<el-icon class="el-icon--right"><ArrowDown /></el-icon></el-button>
-          <template #dropdown>
-            <el-dropdown-menu>
-              <el-dropdown-item v-if="auth.isTeacher" command="field">修改实验田信息</el-dropdown-item>
-              <el-dropdown-item v-if="auth.isTeacher && modules.isOn('import')" command="import">导入历史表格</el-dropdown-item>
-              <el-dropdown-item command="export">导出种植图（jpg）</el-dropdown-item>
-              <el-dropdown-item v-if="modules.isOn('record_book')" command="book" :disabled="!trial">导出记载本（Excel）</el-dropdown-item>
-            </el-dropdown-menu>
-          </template>
-        </el-dropdown>
-      </div>
-    </header>
-
-    <!-- 状态条 -->
-    <div v-if="ind" class="stats panel">
-      <div class="stat stage">
-        <span class="stat-label">当前生育期</span>
-        <span class="stage-badge">{{ ind.currentStage ?? '未开始' }}</span>
-      </div>
-      <div class="stat">
-        <span class="stat-label">今天已录</span>
-        <span class="stat-value num">{{ ind.enteredToday }}<small> / {{ ind.totalPlots }}</small></span>
-      </div>
-      <div class="stat">
-        <span class="stat-label">已种植</span>
-        <span class="stat-value num">{{ ind.planted }}</span>
-      </div>
-      <div class="stat">
-        <span class="stat-label">已收获</span>
-        <span class="stat-value num">{{ ind.harvested }}</span>
-      </div>
-      <div class="stat" :class="{ danger: ind.abnormal > 0 }">
-        <span class="stat-label">有异常</span>
-        <span class="stat-value num">
-          <el-icon v-if="ind.abnormal > 0"><Warning /></el-icon>{{ ind.abnormal }}
+    <!-- 页头：一行放下实验田、试验、今天的情况和操作 -->
+    <header class="bar">
+      <el-tooltip content="回首页" placement="bottom">
+        <button type="button" class="icon-btn" aria-label="回首页" @click="router.push('/home')"><el-icon><ArrowLeft /></el-icon></button>
+      </el-tooltip>
+      <div class="title">
+        <h2>{{ field?.name }}</h2>
+        <span class="meta">
+          <template v-if="detail?.layoutSaved && fieldLayout">{{ layoutStats.blocks }} 个区块 · {{ layoutStats.plots }} 个小区 · {{ layoutStats.size }}</template>
+          <template v-else>{{ field?.rowCount }} 行 × {{ field?.colCount }} 列</template>
         </span>
       </div>
-      <div class="stat">
-        <span class="stat-label">本周录入</span>
-        <span class="stat-value num">{{ ind.weekEntries }}<small> 条</small></span>
+      <el-select v-model="trialId" placeholder="还没有试验" class="trial-select" :disabled="trials.length === 0">
+        <el-option v-for="t in trials" :key="t.id" :value="t.id" :label="`${t.seasonYear} 年 · ${t.name}`" />
+      </el-select>
+      <div v-if="ind" class="chips">
+        <span class="chip-stat stage" title="当前生育期">{{ ind.currentStage ?? '未开始' }}</span>
+        <span class="chip-stat" title="今天录过数据的小区"><em>今天</em><b class="num">{{ ind.enteredToday }}</b><small>/{{ ind.totalPlots }}</small></span>
+        <span class="chip-stat" :class="{ danger: ind.abnormal > 0 }" title="标了异常的小区">
+          <el-icon v-if="ind.abnormal > 0"><Warning /></el-icon><em>异常</em><b class="num">{{ ind.abnormal }}</b>
+        </span>
+        <span class="chip-stat" title="最近 7 天录入的条数"><em>本周</em><b class="num">{{ ind.weekEntries }}</b><small>条</small></span>
       </div>
-    </div>
+      <div class="spacer" />
+      <el-tooltip v-if="trial && modules.isOn('record_book')" content="封面、试验设计、栽培管理、气象资料、品种评价" placement="bottom">
+        <el-button :icon="Notebook" @click="router.push(`/trials/${trial.id}/book`)">记载本</el-button>
+      </el-tooltip>
+      <el-dropdown v-if="auth.isTeacher" trigger="click" @command="onTrialCommand">
+        <el-button>试验<el-icon class="el-icon--right"><ArrowDown /></el-icon></el-button>
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item command="new">新建试验</el-dropdown-item>
+            <el-dropdown-item command="edit" :disabled="!trial">修改或删除当前试验</el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
+      <el-dropdown trigger="click" @command="onMoreCommand">
+        <el-button>更多<el-icon class="el-icon--right"><ArrowDown /></el-icon></el-button>
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item v-if="auth.isTeacher" command="field">修改实验田信息</el-dropdown-item>
+            <el-dropdown-item v-if="auth.isTeacher && modules.isOn('import')" command="import">导入历史表格</el-dropdown-item>
+            <el-dropdown-item command="export">导出{{ view3d ? ' 3D 画面' : '种植图' }}（jpg）</el-dropdown-item>
+            <el-dropdown-item v-if="modules.isOn('record_book')" command="book" :disabled="!trial">导出记载本（Excel）</el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
+    </header>
+
     <el-alert
-      v-else-if="!loading && field && trials.length === 0"
+      v-if="!loading && field && trials.length === 0"
       type="info"
       show-icon
       :closable="false"
+      class="no-trial"
       :title="auth.isTeacher ? '这块地还没有试验。点右上角&quot;试验&quot; → 新建试验，再分配品种、录入数据。' : '老师还没有给这块地建试验，暂时不能录入。'"
     />
 
-    <div class="workspace">
-      <section class="map-panel panel">
-        <div class="toolbar">
-          <el-radio-group v-if="auth.isTeacher" v-model="modeModel" class="mode">
-            <el-radio-button value="record">录入数据</el-radio-button>
-            <el-radio-button value="layout">布置试验</el-radio-button>
-            <el-radio-button value="edit">编辑地块</el-radio-button>
-          </el-radio-group>
-          <el-radio-group v-if="mode !== 'edit'" v-model="display.view" size="small">
-            <el-radio-button value="status">按状态</el-radio-button>
-            <el-radio-button value="variety">按品种</el-radio-button>
-            <el-radio-button value="replicate">按重复</el-radio-button>
-            <el-radio-button value="trait">按指标</el-radio-button>
-          </el-radio-group>
-          <el-select
-            v-if="display.view === 'trait' && mode !== 'edit'"
-            v-model="display.traitId"
-            size="small"
-            filterable
-            placeholder="选择指标"
-            class="metric-select"
-          >
-            <el-option-group v-for="g in metricGroups" :key="g.label" :label="g.label">
-              <el-option
-                v-for="t in g.items"
-                :key="t.trait.id"
-                :value="t.trait.id"
-                :label="t.trait.unit && t.trait.unit !== '级' ? `${t.trait.name}（${t.trait.unit}）` : t.trait.name"
-              />
-            </el-option-group>
-          </el-select>
-          <div class="spacer" />
-          <el-button v-if="mode !== 'edit'" size="small" text @click="selectAllPlots">{{ focusBlock ? '全选本区块' : '全选小区' }}</el-button>
-          <el-popover placement="bottom-end" :width="320" trigger="hover">
-            <template #reference>
-              <el-button size="small" :icon="QuestionFilled" text />
-            </template>
-            <div class="help">
-              <p><b>选择：</b>单击选一个；按住 Ctrl 或 Shift 单击多选；拖动鼠标框选；点区块的名称牌选中这个区块的所有小区。</p>
-              <p><b>区块：</b>双击区块的名称牌进入区块，只看这个区块；进去后点上面、左边的行号列号选整行整列；Esc 返回整块地。</p>
-              <p><b>操作：</b>选中后底部出现操作条；右键小区弹出菜单；双击小区看详情。</p>
-              <p><b>画面：</b>滚轮缩放；按住空格或滚轮拖动画面；F 适应窗口；M 测距。</p>
-              <p><b>方位：</b>N 或点指北针在“图纸朝上”和“正北朝上”之间切换。</p>
-            </div>
-          </el-popover>
-        </div>
+    <div class="workspace" :class="{ 'inspector-closed': !inspectorOpen }">
+      <section class="stage">
+        <FieldScene3D
+          v-if="shownLayout && view3d"
+          ref="sceneRef"
+          v-model:selected-plots="selected"
+          :layout="shownLayout"
+          :cells="cells"
+          :heights="heights"
+          :focus="focus"
+          :links="gridLinks"
+          :devices="gridDevices"
+          :auto-rotate="autoRotate"
+          @open="openDetail"
+          @contextmenu="onContextMenu"
+        />
+        <FieldCanvas
+          v-else-if="shownLayout"
+          ref="canvasRef"
+          v-model:selected-plots="selected"
+          v-model:selected-blocks="selectedBlocks"
+          v-model:selected-cells="selectedCells"
+          :rotation="rotation"
+          :layout="shownLayout"
+          :cells="cells"
+          :focus="focus"
+          :links="mode === 'edit' ? NO_LINKS : gridLinks"
+          :devices="mode === 'edit' ? NO_DEVICES : gridDevices"
+          :tool="tool"
+          :pick="mode === 'edit' ? (focus ? 'cell' : 'block') : 'plot'"
+          :rulers="mode === 'edit'"
+          :editable="mode === 'edit'"
+          :insets="CANVAS_INSETS"
+          @zoom="(z: number) => (zoom = z)"
+          @contextmenu="onContextMenu"
+          @open="openDetail"
+          @enter="enterBlock"
+          @track="onTrack"
+          @move-fit="onMoveFit"
+          @resize-track="onResizeTrack"
+          @move-cells="onMoveCells"
+          @swap-blocks="onSwapBlocks"
+        />
 
-        <div v-if="focusBlock" class="crumbs">
-          <button class="crumb" @click="leaveBlock">整块地</button>
-          <span class="crumb-sep">›</span>
-          <span class="crumb current">{{ focusBlock.name }}</span>
-          <span class="crumb-meta">
-            {{ focusBlock.inner?.rows.length }} 行 × {{ focusBlock.inner?.cols.length }} 列 · {{ Object.keys(focusBlock.inner?.plots ?? {}).length }} 个小区
-          </span>
-          <el-button size="small" text class="crumb-back" @click="leaveBlock">返回整块地（Esc）</el-button>
-        </div>
+        <template v-if="shownLayout">
+          <!-- 四边方位（俯视图） -->
+          <template v-if="!view3d">
+            <span class="edge top">{{ edges.top }}</span>
+            <span class="edge right">{{ edges.right }}</span>
+            <span class="edge bottom">{{ edges.bottom }}</span>
+            <span class="edge left">{{ edges.left }}</span>
+          </template>
 
-        <div class="canvas-box">
-          <FieldScene3D
-            v-if="shownLayout && view3d"
-            ref="sceneRef"
-            v-model:selected-plots="selected"
-            :layout="shownLayout"
-            :cells="cells"
-            :heights="heights"
-            :focus="focus"
-            :links="gridLinks"
-            :devices="gridDevices"
-            :auto-rotate="autoRotate"
-            @open="openDetail"
-            @contextmenu="onContextMenu"
-          />
-          <FieldCanvas
-            v-else-if="shownLayout"
-            ref="canvasRef"
-            v-model:selected-plots="selected"
-            v-model:selected-blocks="selectedBlocks"
-            v-model:selected-cells="selectedCells"
-            :rotation="rotation"
-            :layout="shownLayout"
-            :cells="cells"
-            :focus="focus"
-            :links="mode === 'edit' ? NO_LINKS : gridLinks"
-            :devices="mode === 'edit' ? NO_DEVICES : gridDevices"
-            :tool="tool"
-            :pick="mode === 'edit' ? (focus ? 'cell' : 'block') : 'plot'"
-            :rulers="mode === 'edit'"
-            :editable="mode === 'edit'"
-            :insets="CANVAS_INSETS"
-            @zoom="(z: number) => (zoom = z)"
-            @contextmenu="onContextMenu"
-            @open="openDetail"
-            @enter="enterBlock"
-            @track="onTrack"
-            @move-fit="onMoveFit"
-            @resize-track="onResizeTrack"
-            @move-cells="onMoveCells"
-            @swap-blocks="onSwapBlocks"
-          />
-          <template v-if="shownLayout">
-            <template v-if="!view3d">
-              <span class="edge top">{{ edges.top }}</span>
-              <span class="edge right">{{ edges.right }}</span>
-              <span class="edge bottom">{{ edges.bottom }}</span>
-              <span class="edge left">{{ edges.left }}</span>
-            </template>
-            <div class="view-switch">
-              <div class="seg" role="tablist" aria-label="视角">
-                <button role="tab" :class="{ on: !view3d }" title="平面俯视图，能选、能编辑（T 切换）" @click="view3d = false">俯视图</button>
-                <el-tooltip :disabled="mode !== 'edit'" content="编辑地块要在俯视图里" placement="bottom">
-                  <button role="tab" :class="{ on: view3d }" :disabled="mode === 'edit'" title="自由转动看立体样子（T 切换）" @click="view3d = true">3D</button>
-                </el-tooltip>
-              </div>
-              <div v-if="!view3d" class="seg small">
-                <button :class="{ on: facing === 'drawing' }" title="按图纸画，图纸上方朝上" @click="facing = 'drawing'">图纸朝上</button>
-                <button :class="{ on: facing === 'north' }" title="按真北方向转，正北朝上（N）" @click="facing = 'north'">正北朝上</button>
-              </div>
-              <div v-else class="seg small">
-                <button title="正上方往下看" @click="sceneRef?.preset('top')">俯看</button>
-                <button title="从图纸下方斜着看" @click="sceneRef?.preset('oblique')">斜看</button>
-                <button title="站在南边往北看" @click="sceneRef?.preset('south')">南</button>
-                <button title="站在东边往西看" @click="sceneRef?.preset('east')">东</button>
-                <button title="站在北边往南看" @click="sceneRef?.preset('north')">北</button>
-                <button title="站在西边往东看" @click="sceneRef?.preset('west')">西</button>
-                <button :class="{ on: autoRotate }" title="慢慢转着看（投屏展示）" @click="autoRotate = !autoRotate">转</button>
-              </div>
+          <!-- 左上：模式、进入区块时的位置 -->
+          <div class="ov ov-tl">
+            <div class="tl-row">
+            <div v-if="auth.isTeacher" class="seg modes" role="tablist" aria-label="模式">
+              <button role="tab" :class="{ on: mode === 'record' }" title="选小区录入数据、标异常（1）" @click="modeModel = 'record'">
+                <el-icon><EditPen /></el-icon>录入数据
+              </button>
+              <button role="tab" :class="{ on: mode === 'layout' }" title="分配品种、设重复、设对照、编号（2）" @click="modeModel = 'layout'">
+                <el-icon><Grid /></el-icon>布置试验
+              </button>
+              <button role="tab" :class="{ on: mode === 'edit' }" title="区块和小区的大小、合并、类型（3）" @click="modeModel = 'edit'">
+                <el-icon><Crop /></el-icon>编辑地块
+              </button>
             </div>
-            <div class="map-tools">
-              <template v-if="!view3d">
-                <button class="tool" :class="{ on: tool === 'select' }" title="选择（V）" aria-label="选择" @click="tool = 'select'"><el-icon><Pointer /></el-icon></button>
-                <button
-                  class="tool" :class="{ on: tool === 'pan' }" title="拖动画面（H，也可以按住空格或滚轮拖动）"
-                  aria-label="拖动画面" @click="tool = tool === 'pan' ? 'select' : 'pan'"
-                >
-                  <el-icon><Rank /></el-icon>
-                </button>
-                <button class="tool" :class="{ on: tool === 'measure' }" title="测距（M）：点两下量距离" aria-label="测距" @click="tool = tool === 'measure' ? 'select' : 'measure'">
-                  <el-icon><Odometer /></el-icon>
-                </button>
-                <span class="tool-sep" />
-              </template>
-              <button class="tool" title="缩小" aria-label="缩小" @click="zoomBy(1 / 1.25)"><el-icon><ZoomOut /></el-icon></button>
-              <button class="tool zoom num" :title="view3d ? '回到默认视角（F）' : '适应窗口（F）'" @click="fitView">{{ view3d ? '复位' : `${zoom}%` }}</button>
-              <button class="tool" title="放大" aria-label="放大" @click="zoomBy(1.25)"><el-icon><ZoomIn /></el-icon></button>
+            <!-- 找小区 -->
+            <div class="search" @keydown.stop>
+            <el-input
+              ref="searchInput"
+              v-model="searchText"
+              :prefix-icon="Search"
+              clearable
+              placeholder="找小区：编号或品种（/）"
+              class="search-input"
+              @focus="searchOpen = true"
+              @blur="onSearchBlur"
+              @keydown="onSearchKey"
+            />
+            <div v-if="searchOpen && searchText.trim()" class="search-pop">
+              <button
+                v-for="(h, i) in searchHits" :key="h.plot.id" type="button" class="hit" :class="{ on: i === searchIndex }"
+                @mousedown.prevent="pickHit(i)" @mouseenter="searchIndex = i"
+              >
+                <b>{{ h.text }}</b><span>{{ h.sub || PLOT_KIND[h.plot.kind] }}</span>
+              </button>
+              <div v-if="searchHits.length === 0" class="hit empty">没找到。可以输小区编号，或者品种名的一部分</div>
+              <button
+                v-else-if="searchAll.length > 1" type="button" class="hit all"
+                @mousedown.prevent="locatePlot(searchAll.map((h) => h.plot.id)); searchOpen = false"
+              >
+                全部选中（{{ searchAll.length }} 个，Shift 回车）
+              </button>
             </div>
+          </div>
+
+            </div>
+            <div v-if="focusBlock" class="crumbs">
+              <button type="button" class="crumb" @click="leaveBlock">整块地</button>
+              <span class="crumb-sep">›</span>
+              <b>{{ focusBlock.name }}</b>
+              <span class="crumb-meta num">{{ focusBlock.inner?.rows.length }} × {{ focusBlock.inner?.cols.length }}</span>
+              <button type="button" class="crumb-x" title="回到整块地（Esc）" aria-label="回到整块地" @click="leaveBlock"><el-icon><Close /></el-icon></button>
+            </div>
+          </div>
+
+          <!-- 右上：视角、着色 -->
+          <div class="ov ov-tr">
+            <div class="seg" role="tablist" aria-label="视角">
+              <button role="tab" :class="{ on: !view3d }" title="平面俯视图，能选、能编辑（T）" @click="view3d = false">俯视图</button>
+              <el-tooltip :disabled="mode !== 'edit'" content="编辑地块要在俯视图里" placement="bottom">
+                <button role="tab" :class="{ on: view3d }" :disabled="mode === 'edit'" title="自由转动看立体样子（T）" @click="view3d = true">
+                  <el-icon><Box /></el-icon>3D
+                </button>
+              </el-tooltip>
+            </div>
+            <div v-if="mode !== 'edit'" class="seg small" role="tablist" aria-label="着色">
+              <button v-for="o in VIEW_OPTIONS" :key="o.value" role="tab" :class="{ on: display.view === o.value }" @click="display.view = o.value">{{ o.label }}</button>
+            </div>
+            <el-select
+              v-if="display.view === 'trait' && mode !== 'edit'"
+              v-model="display.traitId"
+              size="small"
+              filterable
+              placeholder="选择指标"
+              class="metric-select"
+            >
+              <el-option-group v-for="g in metricGroups" :key="g.label" :label="g.label">
+                <el-option
+                  v-for="t in g.items"
+                  :key="t.trait.id"
+                  :value="t.trait.id"
+                  :label="t.trait.unit && t.trait.unit !== '级' ? `${t.trait.name}（${t.trait.unit}）` : t.trait.name"
+                />
+              </el-option-group>
+            </el-select>
+            <div v-if="view3d" class="seg small presets">
+              <button title="正上方往下看" @click="sceneRef?.preset('top')">俯看</button>
+              <button title="从图纸下方斜着看" @click="sceneRef?.preset('oblique')">斜看</button>
+              <button title="站在南边往北看" @click="sceneRef?.preset('south')">南</button>
+              <button title="站在东边往西看" @click="sceneRef?.preset('east')">东</button>
+              <button title="站在北边往南看" @click="sceneRef?.preset('north')">北</button>
+              <button title="站在西边往东看" @click="sceneRef?.preset('west')">西</button>
+              <button :class="{ on: autoRotate }" title="慢慢转着看（投屏展示）" @click="autoRotate = !autoRotate">转</button>
+            </div>
+            <div v-else class="seg small">
+              <button :class="{ on: facing === 'drawing' }" title="按图纸画，图纸上方朝上" @click="facing = 'drawing'">图纸朝上</button>
+              <button :class="{ on: facing === 'north' }" title="按真北方向转，正北朝上（N）" @click="facing = 'north'">正北朝上</button>
+            </div>
+          </div>
+
+          <!-- 右下：工具、缩放、指北针 -->
+          <div class="ov ov-br">
             <MapCompass
               v-if="!view3d"
               class="map-compass"
@@ -1363,11 +1660,24 @@ const metricGroups = computed(() => {
               :rotatable="false"
               @north-up="toggleNorth"
             />
-            <div v-if="view3d" class="hint-3d">左键拖动转 · 右键拖动平移 · 滚轮缩放 · 单击选 · Shift 拖动框选</div>
-          </template>
-        </div>
+            <div class="tools">
+              <template v-if="!view3d">
+                <button class="tool" :class="{ on: tool === 'select' }" title="选择（V）" aria-label="选择" @click="tool = 'select'"><el-icon><Pointer /></el-icon></button>
+                <button class="tool" :class="{ on: tool === 'pan' }" title="拖动画面（H，也可以按住空格或滚轮拖动）" aria-label="拖动画面" @click="tool = tool === 'pan' ? 'select' : 'pan'"><el-icon><Rank /></el-icon></button>
+                <button class="tool" :class="{ on: tool === 'measure' }" title="测距（M）：点两下量距离" aria-label="测距" @click="tool = tool === 'measure' ? 'select' : 'measure'"><el-icon><Odometer /></el-icon></button>
+                <span class="tool-sep" />
+              </template>
+              <button class="tool" title="缩小" aria-label="缩小" @click="zoomBy(1 / 1.25)"><el-icon><ZoomOut /></el-icon></button>
+              <button class="tool zoom num" :title="view3d ? '回到默认视角（F）' : '适应窗口（F）'" @click="fitView">{{ view3d ? '复位' : `${zoom}%` }}</button>
+              <button class="tool" title="放大" aria-label="放大" @click="zoomBy(1.25)"><el-icon><ZoomIn /></el-icon></button>
+              <span class="tool-sep" />
+              <button class="tool" title="快捷键（?）" aria-label="快捷键" @click="shortcutsOpen = true"><el-icon><QuestionFilled /></el-icon></button>
+            </div>
+          </div>
+          <div v-if="view3d" class="hint-3d">左键拖动转 · 右键拖动平移 · 滚轮缩放 · 单击选 · Shift 拖动框选</div>
+        </template>
 
-        <!-- 编辑地块：撤销、重做、保存 -->
+        <!-- 下方中间：编辑地块的保存条、选中后的操作条 -->
         <div v-if="mode === 'edit'" class="action-bar edit-bar">
           <el-tooltip content="撤销（Ctrl Z）" placement="top">
             <el-button :icon="RefreshLeft" :disabled="!draft.canUndo.value" @click="draft.undo()" />
@@ -1386,17 +1696,15 @@ const metricGroups = computed(() => {
           <el-button :disabled="!draft.dirty.value" @click="discardLayout">放弃改动</el-button>
           <el-button type="primary" :icon="Check" :loading="savingLayout" :disabled="!draft.dirty.value" @click="saveLayout">保存布局</el-button>
         </div>
-
-        <!-- 选中小区后浮出的操作条 -->
-        <transition v-if="mode !== 'edit'" name="rise">
+        <transition v-else name="rise">
           <div v-if="selected.length > 0" class="action-bar">
             <span class="sel">已选 <b>{{ selected.length }}</b> 个小区</span>
             <template v-if="mode === 'record'">
               <template v-if="auth.canRecord && trial">
-                <el-button type="primary" :icon="EditPen" @click="openEntry(selectedPlots)">录入数据</el-button>
+                <el-button type="primary" :icon="EditPen" @click="openEntry(selectedPlots)">录入数据<kbd>Enter</kbd></el-button>
                 <el-button :icon="Warning" @click="toggleAbnormal(selectedPlots)">{{ allAbnormal ? '取消异常' : '标记异常' }}</el-button>
               </template>
-              <el-button v-if="selected.length === 1" @click="openDetail(selected[0]!)">查看详情</el-button>
+              <el-button v-if="selected.length === 1" @click="openDetail(selected[0]!)">详情</el-button>
               <el-button v-if="selected.length > 1 && modules.isOn('analysis')" :icon="PieChart" @click="analyzeSelection">做图表</el-button>
             </template>
             <template v-else>
@@ -1404,18 +1712,27 @@ const metricGroups = computed(() => {
               <el-button @click="assignReplicate">设重复</el-button>
               <el-button @click="openLayoutDialog('link')">设对照</el-button>
               <el-button @click="numberingDialog = true">编号</el-button>
-              <el-button @click="plotDialog = true">{{ detail?.layoutSaved ? '小区类型' : '小区类型和尺寸' }}</el-button>
+              <el-button @click="plotDialog = true">{{ detail?.layoutSaved ? '小区类型' : '类型和尺寸' }}</el-button>
             </template>
-            <el-button text :icon="Close" class="clear" @click="selected = []">取消选择</el-button>
+            <el-button text :icon="Close" class="clear" title="取消选择（Esc）" @click="selected = []" />
           </div>
-          <div v-else-if="trial" class="idle-hint">
-            {{ mode === 'record' ? '点选或框选小区，开始录入数据' : '选中小区后分配品种、设重复、设对照' }}
+          <div v-else-if="trial && shownLayout" class="idle-hint">
+            {{ mode === 'record' ? '点选或框选小区开始录入 · 双击看详情 · 右键更多' : '选中小区后分配品种、设重复、设对照 · 点区块名称牌选整个区块' }}
           </div>
         </transition>
       </section>
 
-      <aside v-if="mode === 'edit' && draft.draft.value" class="side side-edit">
+      <!-- 右侧面板 -->
+      <button
+        type="button" class="inspector-toggle" :title="inspectorOpen ? '收起右侧面板（]）' : '展开右侧面板（]）'"
+        :aria-label="inspectorOpen ? '收起右侧面板' : '展开右侧面板'" @click="inspectorOpen = !inspectorOpen"
+      >
+        <el-icon><component :is="inspectorOpen ? ArrowRight : ArrowLeft" /></el-icon>
+      </button>
+      <aside v-show="inspectorOpen" class="inspector">
         <LayoutEditPanel
+          v-if="mode === 'edit' && draft.draft.value"
+          ref="editPanelRef"
           v-model:selected-blocks="selectedBlocks"
           v-model:selected-cells="selectedCells"
           v-model:track="track"
@@ -1427,80 +1744,168 @@ const metricGroups = computed(() => {
           @enter="enterBlock"
           @leave="leaveBlock"
         />
-      </aside>
-      <aside v-else class="side">
-        <section class="panel panel-pad">
-          <div class="panel-title">图例</div>
-          <template v-if="display.view === 'trait'">
-            <div class="metric-name">{{ metricTrait?.name ?? '选择指标' }}<span v-if="metricTrait?.unit && metricTrait.unit !== '级'" class="muted">（{{ metricTrait.unit }}）</span></div>
-            <template v-if="metricRange">
-              <div class="ramp" :style="{ background: SEQUENTIAL_GRADIENT }" />
-              <div class="ramp-labels num"><span>{{ metricRange.min }}</span><span>{{ metricRange.max }}</span></div>
-            </template>
-            <div v-else class="hint">这个试验还没有这项数据</div>
-            <div class="legend-row"><span class="swatch" style="background: #f1ebdd" />无数据</div>
-          </template>
-          <template v-else>
-            <div v-for="l in legend" :key="l.label" class="legend-row">
-              <span class="swatch" :style="{ background: l.color }" />{{ l.label }}
-            </div>
-            <div v-if="legend.length === 0" class="hint">还没有分配</div>
-          </template>
-          <div class="legend-sep" />
-          <div class="legend-row"><span class="dot" />今天录过数据</div>
-          <div class="legend-row"><b class="ck">CK</b>对照品种</div>
-          <div class="legend-row"><b class="ck alert">!</b>有异常</div>
-        </section>
 
-        <section v-if="trial && mode === 'layout' && plantBlocks.length > 1" class="panel panel-pad">
-          <div class="panel-title">区块和重复<span class="sub">{{ plantBlocks.length }} 个区块</span></div>
-          <div v-for="x in blockReplicates" :key="x.block.id" class="rep-row">
-            <span>{{ x.block.name }}</span>
-            <span v-if="x.rep" class="chip green">重复 {{ replicateLabel(x.rep) }}</span>
-            <span v-else-if="x.mixed" class="chip wheat">几个重复</span>
-            <span v-else class="faint">未设</span>
-          </div>
-          <el-button size="small" type="primary" plain :loading="assigningReps" class="rep-btn" @click="replicatesByBlock">
-            一个区块一个重复
-          </el-button>
-          <div class="hint">记载本里一个重复通常种在一个区块。也可以点区块的名称牌选中整个区块，再点“设重复”。</div>
-        </section>
-
-        <section v-if="trial" class="panel panel-pad">
-          <div class="panel-title">对照关系<span class="sub">{{ layout?.links.length ?? 0 }} 组</span></div>
-          <div v-if="!layout?.links.length" class="hint">
-            {{ auth.isTeacher ? '在"布置试验"里选中对照小区和要比较的小区，点"设对照"。' : '还没有设对照关系。' }}
-          </div>
-          <div
-            v-for="l in layout?.links ?? []"
-            :key="l.id"
-            class="link-row"
-            :class="{ active: pinnedLink === l.id }"
-            @click="togglePinnedLink(l.id)"
-          >
-            <div>
-              <div class="link-label">{{ l.label }}</div>
-              <div class="hint">
-                对照 {{ linkPlotsText(l.plots.filter((p) => p.control).map((p) => p.plotId)) }} ·
-                比较 {{ linkPlotsText(l.plots.filter((p) => !p.control).map((p) => p.plotId)) }}
+        <!-- 选了一个小区：它的情况和最近数据 -->
+        <template v-else-if="single">
+          <section class="panel panel-pad plot-card">
+            <div class="plot-head">
+              <span class="plot-code serif">{{ single.code || `${single.rowNo}-${single.colNo}` }}</span>
+              <div class="plot-head-text">
+                <b>{{ single.kind === 'PLOT' ? (catalog.varietyById.get(plantingByPlot.get(single.id)?.varietyId ?? -1)?.name ?? '未分配品种') : PLOT_KIND[single.kind] }}</b>
+                <span class="muted small">{{ placeById.get(single.id) ?? `第 ${single.rowNo} 行第 ${single.colNo} 列` }}</span>
               </div>
             </div>
-            <el-button v-if="auth.isTeacher && mode === 'layout'" link type="danger" size="small" @click.stop="removeLink(l.id, l.label)">删除</el-button>
-          </div>
-          <div v-if="layout?.links.length" class="hint link-tip">单击有对照关系的小区，或点上面的某一组，平面图上才显示这一组的虚线。</div>
-        </section>
+            <div class="kv">
+              <span>重复</span><b>{{ plantingByPlot.get(single.id)?.replicateNo ? replicateLabel(plantingByPlot.get(single.id)!.replicateNo!) : '—' }}</b>
+              <span>状态</span>
+              <b><i class="dot-status" :style="{ background: PLOT_STATUS[plotStatus(single)].color }" />{{ PLOT_STATUS[plotStatus(single)].label }}</b>
+              <template v-if="statusByPlot.get(single.id)?.abnormalNote">
+                <span>异常</span><b class="danger-text">{{ statusByPlot.get(single.id)!.abnormalNote }}</b>
+              </template>
+              <template v-if="single.widthM && single.lengthM"><span>大小</span><b class="num">{{ single.widthM }} × {{ single.lengthM }} m</b></template>
+            </div>
+            <div class="plot-actions">
+              <el-button v-if="mode === 'record' && auth.canRecord && trial && single.kind === 'PLOT'" type="primary" :icon="EditPen" @click="openEntry([single])">录入</el-button>
+              <el-button v-if="trial" @click="openDetail(single.id)">全部记录</el-button>
+            </div>
+          </section>
+          <section v-if="single.kind === 'PLOT' && trial" class="panel panel-pad">
+            <div class="panel-title">最近录的数据</div>
+            <div v-if="singleLoading && !singleDetail" class="skeleton" style="height: 120px" />
+            <div v-else-if="singleDetail && singleDetail.latest.length === 0" class="hint">这个小区还没有录过数据</div>
+            <div v-else-if="singleDetail" class="latest">
+              <div v-for="v in singleDetail.latest.slice(0, 10)" :key="v.traitId" class="latest-row">
+                <span class="name">{{ v.traitName }}</span>
+                <b class="num">{{ v.displayValue }}</b>
+                <span class="faint num">{{ v.observedOn?.slice(5) ?? '' }}</span>
+              </div>
+              <el-button v-if="singleDetail.latest.length > 10" link type="primary" size="small" @click="openDetail(single.id)">
+                还有 {{ singleDetail.latest.length - 10 }} 项
+              </el-button>
+            </div>
+            <div class="hint">方向键选旁边的小区，回车录入。</div>
+          </section>
+        </template>
+
+        <!-- 选了好几个小区：分布，点一下选中同样的 -->
+        <template v-else-if="selected.length > 1">
+          <section class="panel panel-pad">
+            <div class="panel-title">已选 {{ selected.length }} 个小区<span v-if="selected.length !== selectedTrialPlots.length" class="sub">其中试验小区 {{ selectedTrialPlots.length }} 个</span></div>
+            <div class="facet-group">
+              <div class="facet-title">品种</div>
+              <button v-for="f in facets.variety" :key="f.key" type="button" class="facet" title="选中所有这个品种的小区" @click="f.pick()">
+                <i :style="{ background: f.color }" /><span>{{ f.label }}</span><b class="num">{{ f.count }}</b>
+              </button>
+            </div>
+            <div class="facet-group">
+              <div class="facet-title">重复</div>
+              <button v-for="f in facets.replicate" :key="f.key" type="button" class="facet" title="选中这个重复的所有小区" @click="f.pick()">
+                <i :style="{ background: f.color }" /><span>{{ f.label }}</span><b class="num">{{ f.count }}</b>
+              </button>
+            </div>
+            <div v-if="trial" class="facet-group">
+              <div class="facet-title">状态</div>
+              <button v-for="f in facets.status" :key="f.key" type="button" class="facet" title="选中这个状态的所有小区" @click="f.pick()">
+                <i :style="{ background: f.color }" /><span>{{ f.label }}</span><b class="num">{{ f.count }}</b>
+              </button>
+            </div>
+            <div class="hint">点一项，选中地里所有同样的小区（进入区块时只在这个区块里选）。</div>
+          </section>
+        </template>
+
+        <!-- 什么都没选：图例、区块和重复、对照关系 -->
+        <template v-else>
+          <section class="panel panel-pad">
+            <div class="panel-title">图例<span class="sub">{{ VIEW_OPTIONS.find((o) => o.value === display.view)?.label }}</span></div>
+            <template v-if="display.view === 'trait'">
+              <div class="metric-name">{{ metricTrait?.name ?? '选择指标' }}<span v-if="metricTrait?.unit && metricTrait.unit !== '级'" class="muted">（{{ metricTrait.unit }}）</span></div>
+              <template v-if="metricRange">
+                <div class="ramp" :style="{ background: SEQUENTIAL_GRADIENT }" />
+                <div class="ramp-labels num"><span>{{ metricRange.min }}</span><span>{{ metricRange.max }}</span></div>
+                <div v-if="view3d" class="hint">3D 里小区越高，这项的值越大。</div>
+              </template>
+              <div v-else class="hint">这个试验还没有这项数据</div>
+              <div class="legend-row"><span class="swatch" style="background: #f1ebdd" />无数据</div>
+            </template>
+            <template v-else>
+              <button
+                v-for="l in legend" :key="l.label" type="button" class="legend-row clickable" :title="`选中：${l.label}`"
+                @click="selectByLegend(l.label)"
+              >
+                <span class="swatch" :style="{ background: l.color }" />{{ l.label }}
+              </button>
+              <div v-if="legend.length === 0" class="hint">还没有分配</div>
+              <div v-if="view3d && display.view === 'status'" class="hint">3D 里小区的高度按长势：生长中最高，收获后变矮。</div>
+            </template>
+            <div class="legend-sep" />
+            <div class="legend-row"><span class="dot" />今天录过数据</div>
+            <div class="legend-row"><b class="ck">CK</b>对照品种</div>
+            <div class="legend-row"><b class="ck alert">!</b>有异常</div>
+          </section>
+
+          <section v-if="trial && mode === 'layout' && plantBlocks.length > 1" class="panel panel-pad">
+            <div class="panel-title">区块和重复<span class="sub">{{ plantBlocks.length }} 个区块</span></div>
+            <div v-for="x in blockReplicates" :key="x.block.id" class="rep-row">
+              <span>{{ x.block.name }}</span>
+              <span v-if="x.rep" class="chip green">重复 {{ replicateLabel(x.rep) }}</span>
+              <span v-else-if="x.mixed" class="chip wheat">几个重复</span>
+              <span v-else class="faint">未设</span>
+            </div>
+            <el-button size="small" type="primary" plain :loading="assigningReps" class="rep-btn" @click="replicatesByBlock">
+              一个区块一个重复
+            </el-button>
+          </section>
+
+          <section v-if="trial" class="panel panel-pad">
+            <div class="panel-title">对照关系<span class="sub">{{ layout?.links.length ?? 0 }} 组</span></div>
+            <div v-if="!layout?.links.length" class="hint">
+              {{ auth.isTeacher ? '在"布置试验"里选中对照小区和要比较的小区，点"设对照"。' : '还没有设对照关系。' }}
+            </div>
+            <div
+              v-for="l in layout?.links ?? []"
+              :key="l.id"
+              class="link-row"
+              :class="{ active: pinnedLink === l.id }"
+              @click="togglePinnedLink(l.id)"
+            >
+              <div>
+                <div class="link-label">{{ l.label }}</div>
+                <div class="hint">
+                  对照 {{ linkPlotsText(l.plots.filter((p) => p.control).map((p) => p.plotId)) }} ·
+                  比较 {{ linkPlotsText(l.plots.filter((p) => !p.control).map((p) => p.plotId)) }}
+                </div>
+              </div>
+              <el-button v-if="auth.isTeacher && mode === 'layout'" link type="danger" size="small" @click.stop="removeLink(l.id, l.label)">删除</el-button>
+            </div>
+          </section>
+
+          <section class="panel panel-pad tips">
+            <div class="panel-title">怎么用</div>
+            <ul>
+              <li>点小区选中，<kbd>Ctrl</kbd> 点加选，拖动框选</li>
+              <li>双击区块名称牌进入区块；<kbd>Esc</kbd> 返回</li>
+              <li><kbd>/</kbd> 找小区，<kbd>T</kbd> 切换 3D</li>
+              <li>按 <kbd>?</kbd> 看全部快捷键</li>
+            </ul>
+          </section>
+        </template>
       </aside>
     </div>
 
-    <!-- 右键菜单 -->
+    <!-- 右键菜单：录入、布置 -->
     <div v-if="menu && menuPlot" class="context-menu" :style="{ left: menu.x + 'px', top: menu.y + 'px' }" @click.stop>
-      <div class="menu-title">{{ menuPlot.code || `${menuPlot.rowNo}-${menuPlot.colNo}` }}<span v-if="selected.length > 1" class="muted">（已选 {{ selected.length }} 个）</span></div>
+      <div class="menu-title">小区 {{ menuPlot.code || `${menuPlot.rowNo}-${menuPlot.colNo}` }}<span v-if="selected.length > 1" class="muted">（已选 {{ selected.length }} 个）</span></div>
       <div class="menu-item" @click="runMenu((p) => openDetail(p.id))">查看详情</div>
       <template v-if="auth.canRecord && trial && menuPlot.kind === 'PLOT'">
         <div class="menu-item" @click="runMenu(() => openEntry(selectedPlots))">
-          录入数据{{ selected.length > 1 ? `（${selected.length} 个小区）` : '' }}
+          录入数据{{ selected.length > 1 ? `（${selected.length} 个小区）` : '' }}<kbd>Enter</kbd>
         </div>
         <div class="menu-item" @click="runMenu(() => toggleAbnormal(selectedPlots))">{{ allAbnormal ? '取消异常' : '标记异常' }}</div>
+      </template>
+      <template v-if="menuPlot.kind === 'PLOT'">
+        <div class="menu-sep" />
+        <div v-if="plantingByPlot.get(menuPlot.id)?.varietyId" class="menu-item" @click="runMenu((p) => selectWhere((x) => x.kind === 'PLOT' && plantingByPlot.get(x.id)?.varietyId === plantingByPlot.get(p.id)?.varietyId))">选中同品种的小区</div>
+        <div v-if="plantingByPlot.get(menuPlot.id)?.replicateNo" class="menu-item" @click="runMenu((p) => selectWhere((x) => x.kind === 'PLOT' && plantingByPlot.get(x.id)?.replicateNo === plantingByPlot.get(p.id)?.replicateNo))">选中同一重复的小区</div>
       </template>
       <template v-if="auth.isTeacher">
         <div class="menu-sep" />
@@ -1511,6 +1916,41 @@ const metricGroups = computed(() => {
         <div class="menu-item" @click="runMenu(() => (plotDialog = true))">小区类型和尺寸</div>
       </template>
     </div>
+
+    <!-- 右键菜单：编辑地块 -->
+    <div v-if="editMenu" class="context-menu" :style="{ left: editMenu.x + 'px', top: editMenu.y + 'px' }" @click.stop>
+      <template v-if="editMenu.cell && focus">
+        <div class="menu-title">选中的 {{ selectedCells.length }} 个格子</div>
+        <div v-for="k in (['PLANT', 'ROAD', 'GUARD', 'BLANK'] as CellKind[])" :key="k" class="menu-item" @click="runEdit(() => applyCellKind(k))">设成{{ CELL_KIND[k] }}</div>
+        <template v-if="selectedCells.length === 1 && draft.draft.value && focusBlock?.inner && mergeAt(focusBlock.inner.merges, ...parseKey(selectedCells[0]!))">
+          <div class="menu-sep" />
+          <div class="menu-item" @click="runEdit(() => { const [r, c] = parseKey(selectedCells[0]!); draft.apply(splitInner(draft.draft.value!, focus!, r, c)) })">拆开合并的小区</div>
+        </template>
+        <div class="menu-sep" />
+        <div class="menu-item" @click="runEdit(leaveBlock)">回到整块地<kbd>Esc</kbd></div>
+      </template>
+      <template v-else-if="editMenu.blockId">
+        <div class="menu-title">{{ selectedBlocks.length > 1 ? `选中的 ${selectedBlocks.length} 个区块` : draft.draft.value?.blocks.find((b) => b.id === editMenu!.blockId)?.name }}</div>
+        <div v-if="selectedBlocks.length === 1 && draft.draft.value?.blocks.find((b) => b.id === editMenu!.blockId)?.kind === 'PLANT'" class="menu-item" @click="runEdit(() => enterBlock(editMenu!.blockId!))">进入区块改小区</div>
+        <div v-if="selectedBlocks.length > 1" class="menu-item" @click="runEdit(() => editPanelRef?.merge())">合并成一个区块…</div>
+        <div
+          v-if="selectedBlocks.length === 1 && draft.draft.value && (() => { const b = draft.draft.value!.blocks.find((x) => x.id === editMenu!.blockId); if (!b) return false; const sp = blockSpan(draft.draft.value!, b); return sp.rs * sp.cs > 1 })()"
+          class="menu-item" @click="runEdit(() => draft.apply(splitBlock(draft.draft.value!, editMenu!.blockId!)))"
+        >
+          拆开
+        </div>
+        <div class="menu-sep" />
+        <div v-for="k in (['PLANT', 'ROAD', 'GUARD', 'BLANK'] as BlockKind[])" :key="k" class="menu-item" @click="runEdit(() => applyBlockKind(k))">设成{{ BLOCK_KIND[k] }}</div>
+      </template>
+    </div>
+
+    <el-dialog v-model="shortcutsOpen" title="快捷键" width="520px" append-to-body>
+      <div class="shortcuts">
+        <template v-for="k in SHORTCUTS" :key="k.keys">
+          <kbd>{{ k.keys }}</kbd><span>{{ k.text }}</span>
+        </template>
+      </div>
+    </el-dialog>
 
     <PlotDetailDrawer
       ref="drawerRef"
@@ -1551,197 +1991,230 @@ const metricGroups = computed(() => {
   100% { opacity: 0; }
 }
 
+/* ---------- 整页：页头一行，下面全是地图 ---------- */
+
 .map-page {
   display: flex;
   flex-direction: column;
   height: 100%;
-  padding: 18px 24px 20px;
   box-sizing: border-box;
-  gap: 14px;
 }
 
-.head {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-end;
-  gap: 16px;
-}
-
-.head-left {
-  display: flex;
-  align-items: flex-end;
-  gap: 8px;
-}
-
-.back {
-  margin-bottom: 2px;
-}
-
-.head h2 {
-  margin: 0;
-  font-family: var(--font-serif);
-  font-size: 24px;
-  font-weight: 700;
-  color: var(--forest);
-  letter-spacing: 1px;
-}
-
-.head-right {
+.bar {
   display: flex;
   align-items: center;
-  gap: 8px;
-}
-
-.trial-select {
-  width: 300px;
-}
-
-/* 状态条 */
-.stats {
-  display: flex;
-  align-items: stretch;
-  padding: 0;
-  flex-shrink: 0;
-}
-
-.stat {
-  flex: 1;
-  padding: 10px 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  border-left: 1px solid var(--app-border);
-}
-
-.stat:first-child {
-  border-left: none;
-}
-
-.stat-label {
-  font-size: 12px;
-  color: var(--app-text-secondary);
-}
-
-.stat-value {
-  font-family: var(--font-serif);
-  font-size: 24px;
-  font-weight: 700;
-  color: var(--forest);
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.stat-value small {
-  font-size: 13px;
-  font-weight: normal;
-  color: var(--app-text-secondary);
-}
-
-.stat.danger .stat-value {
-  color: var(--app-danger);
-}
-
-.stat.stage {
-  flex: 1.3;
-}
-
-.stage-badge {
-  align-self: flex-start;
-  margin-top: 3px;
-  background: linear-gradient(180deg, #f8ebc9, #f0dca9);
-  border: 1px solid #e5c98a;
-  color: #7d5814;
-  border-radius: 999px;
-  padding: 3px 16px;
-  font-family: var(--font-serif);
-  font-size: 15px;
-  font-weight: 700;
-}
-
-/* 平面图 */
-.workspace {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  gap: 14px;
-}
-
-.map-panel {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  position: relative;
-  overflow: hidden;
-}
-
-.toolbar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
+  gap: 12px;
+  padding: 10px 18px 10px 12px;
   border-bottom: 1px solid var(--line);
-  background: var(--surface-2);
-  flex-wrap: wrap;
+  background: rgba(255, 253, 248, 0.7);
+  flex-shrink: 0;
+  min-width: 0;
 }
 
-.toolbar .el-button + .el-button {
+.bar .el-button + .el-button {
   margin-left: 0;
 }
 
-.mode {
-  margin-right: 6px;
+.icon-btn {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 10px;
+  background: none;
+  color: var(--ink-2);
+  font-size: 17px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.icon-btn:hover {
+  background: var(--surface-2);
+  color: var(--forest);
+}
+
+.title {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.title h2 {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 20px;
+  line-height: 1.2;
+  font-weight: 700;
+  color: var(--forest);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.title .meta {
+  font-size: 12px;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+.trial-select {
+  width: 250px;
+  flex-shrink: 0;
+}
+
+.chips {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.chip-stat {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  font-size: 12.5px;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.chip-stat em {
+  font-style: normal;
+  color: var(--ink-3);
+}
+
+.chip-stat b {
+  font-size: 14px;
+  color: var(--ink);
+}
+
+.chip-stat small {
+  color: var(--ink-3);
+}
+
+.chip-stat.stage {
+  background: linear-gradient(180deg, #f6e2ad, #edcf86);
+  border-color: #dcb862;
+  color: #5d4410;
+  font-weight: 700;
+  font-family: var(--font-serif);
+}
+
+.chip-stat.danger {
+  background: #f8e6df;
+  border-color: #ecc9bc;
+  color: #8f3f28;
+  align-items: center;
+}
+
+.chip-stat.danger b {
+  color: #8f3f28;
 }
 
 .spacer {
   flex: 1;
 }
 
-.zoom-text {
-  min-width: 58px;
+.no-trial {
+  margin: 10px 18px 0;
+  width: auto;
 }
 
-.canvas-box {
+/* ---------- 工作区：地图 + 右侧面板 ---------- */
+
+.workspace {
+  position: relative;
   flex: 1;
   min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 330px;
+}
+
+.workspace.inspector-closed {
+  grid-template-columns: minmax(0, 1fr) 0;
+}
+
+.stage {
   position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   /* 地块外面露出土色 */
   background: #e9e1cd url('@/assets/art/soil.jpg') repeat;
   background-size: 256px;
   box-shadow: inset 0 2px 10px rgba(80, 60, 20, 0.12);
 }
 
-.view-switch {
+.ov {
   position: absolute;
-  z-index: 2;
-  top: 10px;
-  left: 12px;
+  z-index: 3;
   display: flex;
-  gap: 6px;
-  align-items: center;
+  gap: 8px;
 }
 
+.ov-tl {
+  top: 12px;
+  left: 12px;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.tl-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.ov-tr {
+  top: 12px;
+  right: 12px;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.ov-br {
+  right: 12px;
+  bottom: 78px;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+/* 分段按钮：模式、视角、着色 */
 .seg {
   display: inline-flex;
   padding: 3px;
   gap: 2px;
-  border-radius: 10px;
-  background: rgba(255, 253, 248, 0.94);
+  border-radius: 11px;
+  background: rgba(255, 253, 248, 0.95);
   border: 1px solid rgba(90, 70, 30, 0.18);
-  box-shadow: 0 4px 14px -8px rgba(60, 40, 10, 0.35);
+  box-shadow: 0 6px 18px -10px rgba(60, 40, 10, 0.45);
 }
 
 .seg button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   border: none;
   background: none;
-  padding: 5px 12px;
-  border-radius: 7px;
+  padding: 6px 12px;
+  border-radius: 8px;
   font: inherit;
   font-size: 13px;
   font-weight: 600;
   color: var(--ink-2);
   cursor: pointer;
+  white-space: nowrap;
+}
+
+.seg.modes button {
+  padding: 7px 14px;
+  font-size: 13.5px;
 }
 
 .seg.small button {
@@ -1750,13 +2223,15 @@ const metricGroups = computed(() => {
   font-weight: 500;
 }
 
-.seg button:hover:not(:disabled) {
+.seg button:hover:not(:disabled):not(.on) {
   background: var(--surface-2);
+  color: var(--forest);
 }
 
 .seg button.on {
   background: var(--forest);
   color: #fbf3df;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.12) inset;
 }
 
 .seg button:disabled {
@@ -1765,42 +2240,151 @@ const metricGroups = computed(() => {
   opacity: 0.6;
 }
 
-.hint-3d {
-  position: absolute;
-  left: 50%;
-  top: 54px;
-  transform: translateX(-50%);
-  animation: hint-fade 7s ease 1 forwards;
-  z-index: 1;
-  padding: 4px 12px;
-  border-radius: 999px;
-  background: rgba(255, 253, 248, 0.85);
-  color: var(--ink-3);
-  font-size: 12px;
-  pointer-events: none;
-  white-space: nowrap;
+.metric-select {
+  width: 220px;
 }
 
-/* 画面工具：右下角一排小按钮 */
-.map-tools {
+.crumbs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 6px 5px 12px;
+  border-radius: 10px;
+  background: rgba(255, 253, 248, 0.96);
+  border: 1px solid rgba(90, 70, 30, 0.2);
+  box-shadow: 0 6px 18px -10px rgba(60, 40, 10, 0.45);
+  font-size: 13.5px;
+}
+
+.crumb {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: var(--green);
+  cursor: pointer;
+}
+
+.crumb:hover {
+  text-decoration: underline;
+}
+
+.crumb-sep {
+  color: var(--ink-3);
+}
+
+.crumb-meta {
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+.crumb-x {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 7px;
+  background: none;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+
+.crumb-x:hover {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
+/* 找小区 */
+.search {
+  position: relative;
+  width: 250px;
+  display: flex;
+  flex-direction: column;
+}
+
+.search-pop {
   position: absolute;
-  z-index: 2;
-  /* 放在底部操作条（约 64px 高）的上面，选中小区时不挡住"取消选择" */
-  bottom: 74px;
-  right: 12px;
+  top: 100%;
+  left: 0;
+  width: 320px;
+}
+
+.search-input :deep(.el-input__wrapper) {
+  border-radius: 11px;
+  box-shadow: 0 0 0 1px rgba(90, 70, 30, 0.18), 0 6px 18px -10px rgba(60, 40, 10, 0.45);
+  background: rgba(255, 253, 248, 0.96);
+}
+
+.search-pop {
+  margin-top: 6px;
+  padding: 5px;
+  border-radius: 12px;
+  background: #fffdf8;
+  border: 1px solid var(--line);
+  box-shadow: 0 14px 34px -12px rgba(60, 40, 10, 0.45);
+  display: flex;
+  flex-direction: column;
+}
+
+.hit {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.hit b {
+  font-size: 13.5px;
+  color: var(--ink);
+}
+
+.hit span {
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+.hit.on {
+  background: var(--green-wash);
+}
+
+.hit.empty {
+  font-size: 12.5px;
+  color: var(--ink-3);
+  cursor: default;
+}
+
+.hit.all {
+  margin-top: 2px;
+  border-top: 1px dashed var(--line);
+  border-radius: 0 0 8px 8px;
+  font-size: 12.5px;
+  color: var(--green);
+  align-items: center;
+}
+
+/* 右下工具 */
+.tools {
   display: flex;
   align-items: center;
   gap: 2px;
   padding: 4px;
   border-radius: 12px;
-  background: rgba(255, 253, 248, 0.92);
+  background: rgba(255, 253, 248, 0.95);
   border: 1px solid var(--line);
-  box-shadow: var(--shadow);
+  box-shadow: 0 6px 18px -10px rgba(60, 40, 10, 0.45);
 }
 
 .tool {
-  min-width: 30px;
-  height: 30px;
+  min-width: 32px;
+  height: 32px;
   padding: 0 4px;
   display: grid;
   place-items: center;
@@ -1827,15 +2411,10 @@ const metricGroups = computed(() => {
   color: #fff;
 }
 
-.tool.zoom,
-.tool.angle {
-  font-size: 11px;
+.tool.zoom {
+  font-size: 11.5px;
   font-weight: 600;
-  min-width: 40px;
-}
-
-.tool:disabled {
-  cursor: default;
+  min-width: 44px;
 }
 
 .tool-sep {
@@ -1845,7 +2424,10 @@ const metricGroups = computed(() => {
   margin: 0 2px;
 }
 
-/* 四边的方位字 */
+.map-compass {
+  position: static;
+}
+
 .edge {
   position: absolute;
   z-index: 2;
@@ -1861,7 +2443,7 @@ const metricGroups = computed(() => {
 }
 
 .edge.top {
-  top: 8px;
+  top: 56px;
   left: 50%;
   transform: translateX(-50%);
 }
@@ -1873,88 +2455,37 @@ const metricGroups = computed(() => {
 }
 
 .edge.left {
-  left: 6px;
+  left: 8px;
   top: 50%;
   transform: translateY(-50%);
 }
 
 .edge.right {
-  right: 6px;
+  right: 8px;
   top: 50%;
   transform: translateY(-50%);
 }
 
-.map-compass {
+.hint-3d {
   position: absolute;
-  z-index: 2;
-  top: 12px;
-  right: 14px;
-}
-
-.pointer-at {
-  position: absolute;
-  z-index: 2;
-  /* 左下角，地块尺寸上面：不和底部操作条、右下角画面工具重叠 */
-  left: 12px;
-  bottom: 36px;
-  font-size: 11px;
-  color: var(--ink-2);
+  left: 50%;
+  top: 58px;
+  transform: translateX(-50%);
+  z-index: 1;
+  padding: 4px 12px;
+  border-radius: 999px;
   background: rgba(255, 253, 248, 0.85);
-  border-radius: 6px;
-  padding: 2px 8px;
+  color: var(--ink-3);
+  font-size: 12px;
   pointer-events: none;
+  white-space: nowrap;
+  animation: hint-fade 7s ease 1 forwards;
 }
 
-.pointer-at span {
-  color: var(--ink-3);
-  margin-left: 2px;
-}
-
-.crumbs {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 14px;
-  border-bottom: 1px solid var(--line);
-  background: var(--wheat-wash);
-  font-size: var(--fs-sm);
-}
-
-.crumb {
-  border: none;
-  background: none;
-  padding: 0;
-  color: var(--green);
-  cursor: pointer;
-  font-size: inherit;
-}
-
-.crumb:hover {
-  text-decoration: underline;
-}
-
-.crumb.current {
-  color: var(--forest);
-  font-weight: 700;
-  font-family: var(--font-serif);
-  font-size: var(--fs-md);
-}
-
-.crumb-sep {
-  color: var(--ink-3);
-}
-
-.crumb-meta {
-  color: var(--ink-3);
-  margin-left: 6px;
-}
-
-.crumb-back {
-  margin-left: auto;
-}
-
+/* 底部浮动操作条 */
 .action-bar {
   position: absolute;
+  z-index: 3;
   left: 50%;
   bottom: 16px;
   transform: translateX(-50%);
@@ -1965,13 +2496,22 @@ const metricGroups = computed(() => {
   border: 1px solid rgba(226, 182, 90, 0.35);
   color: #fbf3df;
   border-radius: 14px;
-  padding: 8px 10px 8px 18px;
+  padding: 8px 8px 8px 18px;
   box-shadow: 0 14px 34px -10px rgba(16, 46, 32, 0.55);
   white-space: nowrap;
 }
 
 .action-bar .el-button + .el-button {
   margin-left: 0;
+}
+
+.action-bar kbd {
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: rgba(59, 42, 12, 0.15);
+  font-size: 10.5px;
+  font-family: inherit;
 }
 
 /* 深色操作条上的按钮：主操作用麦穗金，其它是半透明的；不能点的更淡 */
@@ -2017,16 +2557,18 @@ const metricGroups = computed(() => {
 
 .idle-hint {
   position: absolute;
+  z-index: 2;
   left: 50%;
   bottom: 18px;
   transform: translateX(-50%);
   color: var(--ink-2);
-  font-size: 13px;
+  font-size: 12.5px;
   background: rgba(255, 253, 248, 0.92);
-  padding: 7px 16px;
+  padding: 6px 16px;
   border-radius: 999px;
   border: 1px solid var(--line-strong);
   box-shadow: var(--shadow);
+  white-space: nowrap;
 }
 
 .edit-bar .edit-state {
@@ -2054,10 +2596,6 @@ const metricGroups = computed(() => {
   color: #3b2a0c;
 }
 
-.side.side-edit {
-  width: 300px;
-}
-
 .rise-enter-active,
 .rise-leave-active {
   transition: opacity 0.15s, transform 0.15s;
@@ -2069,41 +2607,207 @@ const metricGroups = computed(() => {
   transform: translate(-50%, 8px);
 }
 
-.pop-title {
-  font-weight: 600;
-  margin-bottom: 4px;
+/* ---------- 右侧面板 ---------- */
+
+.inspector-toggle {
+  position: absolute;
+  z-index: 4;
+  top: 50%;
+  right: 330px;
+  transform: translate(50%, -50%);
+  width: 20px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border-radius: 10px;
+  border: 1px solid var(--line-strong);
+  background: #fffdf8;
+  color: var(--ink-3);
+  box-shadow: 0 4px 12px -6px rgba(60, 40, 10, 0.4);
+  cursor: pointer;
 }
 
-.size-form {
+.inspector-closed .inspector-toggle {
+  right: 0;
+  transform: translate(0, -50%);
+  border-radius: 10px 0 0 10px;
+}
+
+.inspector-toggle:hover {
+  color: var(--forest);
+}
+
+.inspector {
+  min-width: 0;
+  overflow: auto;
+  padding: 14px 14px 18px;
+  border-left: 1px solid var(--line);
+  background: rgba(250, 246, 237, 0.85);
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 12px;
 }
 
-.size-row {
+.inspector :deep(.edit-panel) {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.plot-card .plot-head {
   display: flex;
   align-items: center;
   gap: 12px;
 }
 
-.size-row .el-slider {
-  flex: 1;
+.plot-code {
+  min-width: 52px;
+  height: 52px;
+  padding: 0 8px;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  background: var(--green-soft, #e3efe1);
+  border: 1px solid #c9dccf;
+  color: var(--forest);
+  font-size: 22px;
+  font-weight: 700;
 }
 
-.help p {
-  margin: 0 0 6px;
-  font-size: 13px;
-  line-height: 1.6;
-}
-
-/* 右侧 */
-.side {
-  width: 250px;
-  flex-shrink: 0;
-  overflow: auto;
+.plot-head-text {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 2px;
+  min-width: 0;
+}
+
+.plot-head-text b {
+  font-size: 16px;
+  color: var(--forest);
+}
+
+.small {
+  font-size: 12px;
+}
+
+.kv {
+  display: grid;
+  grid-template-columns: 40px 1fr;
+  gap: 6px 10px;
+  margin: 14px 0 12px;
+  font-size: 13px;
+}
+
+.kv span {
+  color: var(--ink-3);
+}
+
+.kv b {
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dot-status {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+}
+
+.danger-text {
+  color: var(--clay);
+}
+
+.plot-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.plot-actions .el-button {
+  flex: 1;
+  margin: 0;
+}
+
+.latest {
+  display: flex;
+  flex-direction: column;
+}
+
+.latest-row {
+  display: grid;
+  grid-template-columns: 1fr auto 42px;
+  gap: 8px;
+  align-items: baseline;
+  padding: 6px 0;
+  border-bottom: 1px dashed var(--line);
+  font-size: 13px;
+}
+
+.latest-row .name {
+  color: var(--ink-2);
+}
+
+.latest-row b {
+  color: var(--ink);
+}
+
+.latest-row .faint {
+  font-size: 11.5px;
+  text-align: right;
+}
+
+.facet-group {
+  margin-top: 10px;
+}
+
+.facet-title {
+  font-size: 12px;
+  color: var(--ink-3);
+  margin-bottom: 4px;
+}
+
+.facet {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 8px;
+  margin: 0 -8px;
+  width: calc(100% + 16px);
+  border: none;
+  border-radius: 7px;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.facet:hover {
+  background: var(--green-wash);
+}
+
+.facet i {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  flex-shrink: 0;
+}
+
+.facet span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.facet b {
+  color: var(--ink-2);
 }
 
 .legend-row {
@@ -2114,8 +2818,21 @@ const metricGroups = computed(() => {
   font-size: 13px;
 }
 
-.metric-select {
-  width: 190px;
+button.legend-row {
+  width: calc(100% + 16px);
+  margin: 0 -8px;
+  padding: 4px 8px;
+  border: none;
+  border-radius: 7px;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+button.legend-row:hover {
+  background: var(--green-wash);
 }
 
 .metric-name {
@@ -2145,12 +2862,8 @@ const metricGroups = computed(() => {
 .swatch {
   width: 18px;
   height: 12px;
-  border-radius: 3px;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-}
-
-.swatch {
   border-radius: 4px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
 }
 
 .dot {
@@ -2188,7 +2901,7 @@ const metricGroups = computed(() => {
 }
 
 .rep-btn {
-  margin: 8px 0 6px;
+  margin: 8px 0 2px;
   width: 100%;
 }
 
@@ -2199,9 +2912,6 @@ const metricGroups = computed(() => {
   padding: 6px 8px;
   margin: 0 -8px;
   border-radius: 6px;
-}
-
-.link-row {
   cursor: pointer;
 }
 
@@ -2215,42 +2925,96 @@ const metricGroups = computed(() => {
   font-size: 13px;
 }
 
-.link-tip {
-  margin-top: 6px;
+.tips ul {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12.5px;
+  line-height: 1.9;
+  color: var(--ink-2);
+}
+
+kbd {
+  display: inline-block;
+  padding: 0 6px;
+  border-radius: 5px;
+  border: 1px solid var(--line-strong);
+  border-bottom-width: 2px;
+  background: #fffdf8;
+  font-family: inherit;
+  font-size: 11.5px;
+  line-height: 18px;
+  color: var(--ink-2);
 }
 
 /* 右键菜单 */
 .context-menu {
   position: fixed;
   z-index: 3000;
-  min-width: 180px;
-  background: #fff;
-  border: 1px solid var(--app-border);
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
-  padding: 4px 0;
+  min-width: 190px;
+  background: #fffdf8;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 14px 34px -12px rgba(60, 40, 10, 0.45);
+  padding: 4px;
   font-size: 13px;
 }
 
 .menu-title {
-  padding: 6px 14px;
+  padding: 6px 10px;
   font-weight: 600;
-  border-bottom: 1px solid var(--app-border);
+  border-bottom: 1px solid var(--line);
   margin-bottom: 4px;
+  color: var(--forest);
 }
 
 .menu-item {
-  padding: 7px 14px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 10px;
+  border-radius: 7px;
   cursor: pointer;
 }
 
 .menu-item:hover {
-  background: var(--app-accent-soft);
+  background: var(--green-wash);
+}
+
+.menu-item kbd {
+  font-size: 10.5px;
+  line-height: 16px;
 }
 
 .menu-sep {
   height: 1px;
-  background: var(--app-border);
+  background: var(--line);
   margin: 4px 0;
+}
+
+.shortcuts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 9px 16px;
+  align-items: center;
+  font-size: 13.5px;
+}
+
+.shortcuts kbd {
+  justify-self: start;
+}
+
+@media (max-width: 1280px) {
+  .chips .chip-stat:not(.stage):not(.danger) {
+    display: none;
+  }
+
+  .workspace {
+    grid-template-columns: minmax(0, 1fr) 290px;
+  }
+
+  .inspector-toggle {
+    right: 290px;
+  }
 }
 </style>

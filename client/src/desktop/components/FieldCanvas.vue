@@ -1626,7 +1626,7 @@ watch(() => props.layout, () => {
 .scale {
   position: absolute;
   left: 14px;
-  bottom: 12px;
+  bottom: 74px;
   z-index: 2;
   display: flex;
   align-items: center;

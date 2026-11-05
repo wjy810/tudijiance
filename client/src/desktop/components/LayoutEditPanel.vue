@@ -113,10 +113,6 @@ function setNorth(deg: number | undefined) {
   if (d !== north.value) emit('apply', { ...props.layout, northDeg: d })
 }
 
-/** 现在屏幕上方是北：图纸上方顺时针转 −rotation 度是北 */
-function screenUpIsNorth() {
-  setNorth(-(props.rotation ?? 0))
-}
 
 // ---------- 一行（列）区块 ----------
 
@@ -620,8 +616,7 @@ function setCellKind(kind: BlockKind) {
           />
           <span>°</span>
         </div>
-        <el-button size="small" @click="screenUpIsNorth">以现在屏幕上方为北</el-button>
-        <div class="hint">先在自由视角里把画面转到和实地一样（屏幕上方对着北），再点这个。</div>
+        <div class="hint">按实地填：站在地块里，图纸的上方对着哪个方向。设好后可以切换“正北朝上”，3D 里东南西北也按这个画。</div>
       </section>
 
       <section class="panel panel-pad">
@@ -645,11 +640,11 @@ function setCellKind(kind: BlockKind) {
       <section class="panel panel-pad tips">
         <div class="panel-title">怎么改</div>
         <ul>
-          <li>点区块选中，Ctrl/Shift 加选，拖动框选几个，再“合并”。</li>
-          <li>点上面、左边标尺上的尺寸，改一整列宽、一整行高，或插入、删除。</li>
-          <li>区块类型可以改成道路、保护区、空地。</li>
-          <li>双击区块进去改里面的小区。</li>
-          <li>Ctrl + Z 撤销，Ctrl + Y 重做。改完点“保存布局”。</li>
+          <li>点区块选中，Ctrl/Shift 加选，拖动框选几个，再“合并”（可以重新分行列）。</li>
+          <li>拖区块之间的线改宽高，拖最外边地块跟着变大；点标尺改一整列、插入、删除。</li>
+          <li>选中一个区块拖到同样大小的区块上，两个交换位置。</li>
+          <li>双击区块进去：框选格子设成道路、保护区、空地，或拖到别的位置。</li>
+          <li>右键区块、格子有常用操作。Ctrl Z 撤销，Ctrl Y 重做，Ctrl S 保存。</li>
         </ul>
       </section>
     </template>
