@@ -612,6 +612,53 @@ class ApiIntegrationTest {
     }
 
     @Test
+    void cellKindsInsideABlockFollowThePlots() throws Exception {
+        JsonNode field = call(teacher, post("/api/fields"), Map.of("name", "格子类型田", "rowCount", 2, "colCount", 3,
+                "plotLengthM", 6.65, "plotWidthM", 2.0), status().isOk());
+        long fieldId = field.get("field").get("id").asLong();
+        @SuppressWarnings("unchecked")
+        Map<String, Object> layout = json.convertValue(field.get("layout"), Map.class);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> inner = (Map<String, Object>) ((Map<String, Object>) ((List<Object>) layout.get("blocks")).get(0)).get("inner");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> ids = (Map<String, Object>) inner.get("plots");
+        long road = ((Number) ids.get("0,1")).longValue();
+        long guard = ((Number) ids.get("1,2")).longValue();
+
+        // 第 1 行第 2 格设成道路，第 2 行第 3 格设成保护区，第 1 行第 1 格设成空地；新加的格子也能直接设类型
+        inner.put("kinds", Map.of("0,1", "ROAD", "1,2", "GUARD", "0,0", "BLANK"));
+        JsonNode saved = call(teacher, put("/api/fields/" + fieldId + "/layout"), layout, status().isOk());
+        assertThat(find(saved.get("plots"), x -> x.get("id").asLong() == road).get("kind").asString()).isEqualTo("PATH");
+        assertThat(find(saved.get("plots"), x -> x.get("id").asLong() == guard).get("kind").asString()).isEqualTo("GUARD");
+        JsonNode kinds = saved.get("layout").get("blocks").get(0).get("inner").get("kinds");
+        assertThat(kinds.get("0,0").asString()).isEqualTo("BLANK");
+        assertThat(kinds.size()).isEqualTo(3);
+
+        // 在"布置试验"里把道路改回试验小区：布局里的格子跟着变
+        call(teacher, patch("/api/fields/" + fieldId + "/plots"), Map.of("plotIds", List.of(road), "kind", "PLOT"),
+                status().isOk());
+        JsonNode again = call(teacher, get("/api/fields/" + fieldId), null, status().isOk());
+        JsonNode k2 = again.get("layout").get("blocks").get(0).get("inner").get("kinds");
+        assertThat(k2.has("0,1")).isFalse();
+        assertThat(k2.get("1,2").asString()).isEqualTo("GUARD");
+
+        // 分配了品种的小区不能改成道路
+        long trialId = call(teacher, post("/api/trials"), Map.of("fieldId", fieldId, "seasonYear", 2026,
+                "name", "格子类型试验", "trialType", "COMPARISON"), status().isOk()).get("id").asLong();
+        call(teacher, put("/api/trials/" + trialId + "/plantings"), Map.of("plotIds", List.of(road),
+                "attribute", "VARIETY", "value", varietyId("格子品种", null)), status().isOk());
+        @SuppressWarnings("unchecked")
+        Map<String, Object> l2 = json.convertValue(again.get("layout"), Map.class);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> in2 = (Map<String, Object>) ((Map<String, Object>) ((List<Object>) l2.get("blocks")).get(0)).get("inner");
+        in2.put("kinds", Map.of("0,1", "ROAD"));
+        call(teacher, put("/api/fields/" + fieldId + "/layout"), l2, status().isConflict());
+        // 类型写错不行
+        in2.put("kinds", Map.of("0,1", "LAKE"));
+        call(teacher, put("/api/fields/" + fieldId + "/layout"), l2, status().isBadRequest());
+    }
+
+    @Test
     void legacyFieldsGetAOneBlockLayout() throws Exception {
         JsonNode field = call(teacher, post("/api/fields"), Map.of("name", "老网格", "rowCount", 2, "colCount", 3,
                 "plotLengthM", 6.65, "plotWidthM", 2.0), status().isOk());

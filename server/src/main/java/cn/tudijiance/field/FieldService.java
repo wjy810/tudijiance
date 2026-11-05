@@ -37,7 +37,7 @@ import tools.jackson.databind.json.JsonMapper;
 @Service
 public class FieldService {
 
-    private static final Set<String> KINDS = Set.of(Plot.KIND_PLOT, Plot.KIND_GUARD, Plot.KIND_PATH);
+    private static final Set<String> KINDS = Set.of(Plot.KIND_PLOT, Plot.KIND_GUARD, Plot.KIND_PATH, Plot.KIND_BLANK);
 
     private final FieldMapper fieldMapper;
     private final PlotMapper plotMapper;
@@ -75,7 +75,49 @@ public class FieldService {
         Field field = get(id);
         List<Plot> plots = plots(id);
         FieldLayout saved = savedLayout(field);
-        return new FieldDetail(field, plots, saved != null ? saved : LayoutGeometry.legacy(field, plots), saved != null);
+        FieldLayout shown = withKinds(saved != null ? saved : LayoutGeometry.legacy(field, plots), plots);
+        return new FieldDetail(field, plots, shown, saved != null);
+    }
+
+    /**
+     * 格子类型以小区类型为准：在"布置试验"里改了小区类型（保护区、道路……）后，布局里的格子跟着显示，
+     * 编辑地块时拿到的草稿也是对的
+     */
+    static FieldLayout withKinds(FieldLayout l, List<Plot> plots) {
+        Map<Long, String> kindById = new HashMap<>();
+        plots.forEach(p -> kindById.put(p.getId(), p.getKind()));
+        List<Block> blocks = l.blocks().stream().map(b -> {
+            Inner in = b.inner();
+            if (in == null) {
+                return b;
+            }
+            Map<String, String> kinds = new LinkedHashMap<>();
+            if (in.kinds() != null) {
+                in.kinds().forEach((k, v) -> {
+                    if (!FieldLayout.PLANT.equals(v)) {
+                        kinds.put(k, v);
+                    }
+                });
+            }
+            if (in.plots() != null) {
+                in.plots().forEach((k, id) -> {
+                    String kind = kindById.get(id);
+                    if (kind == null) {
+                        return;
+                    }
+                    String cell = Plot.cellKindOf(kind);
+                    if (FieldLayout.PLANT.equals(cell)) {
+                        kinds.remove(k);
+                    } else {
+                        kinds.put(k, cell);
+                    }
+                });
+            }
+            return new Block(b.id(), b.r(), b.c(), b.name(), b.kind(), b.fit(),
+                    new Inner(in.rows(), in.cols(), in.merges(), in.plots(), kinds.isEmpty() ? null : kinds));
+        }).toList();
+        return new FieldLayout(l.version(), l.unit(), l.rows(), l.cols(), l.merges(), blocks, l.nextBlockNo(),
+                l.defaultInner(), l.northDeg());
     }
 
     /** 保存过的区块布局；还是按行列建的老网格时为 null */
@@ -207,7 +249,7 @@ public class FieldService {
             throw ApiException.badRequest("这块地的小区大小由区块布局决定，请在平面图的“编辑地块”里改");
         }
         if (req.kind() != null && !KINDS.contains(req.kind())) {
-            throw ApiException.badRequest("小区类型只能是 PLOT、GUARD 或 PATH");
+            throw ApiException.badRequest("小区类型只能是 PLOT、GUARD、PATH 或 BLANK");
         }
         requireInField(fieldId, req.plotIds());
         if (req.kind() != null && !Plot.KIND_PLOT.equals(req.kind())) {
@@ -277,6 +319,7 @@ public class FieldService {
         }
         List<Plot> removed = existing.stream().filter(p -> !kept.contains(p.getId())).toList();
         removePlots(removed);
+        checkKindChanges(flat, byId);
 
         // 先把留下的小区挪到临时位置（负数），再写新位置，免得互换位置时撞上唯一约束
         for (Long id : kept) {
@@ -299,6 +342,7 @@ public class FieldService {
                 plotMapper.update(null, Wrappers.<Plot>lambdaUpdate()
                         .set(Plot::getRowNo, leaf.rowNo()).set(Plot::getColNo, leaf.colNo())
                         .set(Plot::getLengthM, length).set(Plot::getWidthM, width)
+                        .set(Plot::getKind, leaf.plotKind())
                         .eq(Plot::getId, leaf.plotId()));
                 continue;
             }
@@ -312,7 +356,7 @@ public class FieldService {
             plot.setRowNo(leaf.rowNo());
             plot.setColNo(leaf.colNo());
             plot.setCode(code);
-            plot.setKind(Plot.KIND_PLOT);
+            plot.setKind(leaf.plotKind());
             plot.setLengthM(length);
             plot.setWidthM(width);
             created.add(plot);
@@ -332,9 +376,17 @@ public class FieldService {
                 return new Block(b.id(), b.r(), b.c(), b.name(), b.kind(), b.fit(), null);
             }
             Inner in = b.inner();
+            Map<String, String> kinds = new LinkedHashMap<>();
+            if (in.kinds() != null) {
+                in.kinds().forEach((k, v) -> {
+                    if (!FieldLayout.PLANT.equals(v)) {
+                        kinds.put(k, v);
+                    }
+                });
+            }
             return new Block(b.id(), b.r(), b.c(), b.name(), b.kind(), b.fit(),
                     new Inner(in.rows(), in.cols(), in.merges() == null ? List.of() : in.merges(),
-                            idsByBlock.getOrDefault(b.id(), Map.of())));
+                            idsByBlock.getOrDefault(b.id(), Map.of()), kinds.isEmpty() ? null : kinds));
         }).toList();
         FieldLayout saved = new FieldLayout(1, layout.unit(), layout.rows(), layout.cols(),
                 layout.merges() == null ? List.of() : layout.merges(), blocks, layout.nextBlockNo(),
@@ -346,6 +398,28 @@ public class FieldService {
         field.setUpdatedAt(LocalDateTime.now(clock));
         fieldMapper.updateById(field);
         return detail(fieldId);
+    }
+
+    /** 已经分配了品种的小区不能改成道路、保护区、空地 */
+    private void checkKindChanges(Flat flat, Map<Long, Plot> byId) {
+        List<Long> toNonPlot = flat.leaves().stream()
+                .filter(leaf -> leaf.plotId() != null && !Plot.KIND_PLOT.equals(leaf.plotKind())
+                        && Plot.KIND_PLOT.equals(byId.get(leaf.plotId()).getKind()))
+                .map(Leaf::plotId).toList();
+        if (toNonPlot.isEmpty()) {
+            return;
+        }
+        List<Long> busy = plantingMapper.selectList(Wrappers.<Planting>lambdaQuery()
+                        .in(Planting::getPlotId, toNonPlot).isNotNull(Planting::getVarietyId))
+                .stream().map(Planting::getPlotId).distinct().toList();
+        if (!busy.isEmpty()) {
+            String codes = busy.stream().limit(6).map(id -> {
+                Plot p = byId.get(id);
+                return p.getCode() == null ? p.getRowNo() + "-" + p.getColNo() : p.getCode();
+            }).collect(Collectors.joining("、"));
+            throw ApiException.conflict("小区 " + codes + (busy.size() > 6 ? " 等 " + busy.size() + " 个" : "")
+                    + " 已经分配了品种，不能改成道路、保护区或空地。请先在“布置试验”里清掉品种");
+        }
     }
 
     /** 删除布局里去掉的小区；有品种、重复、数据或对照关系的不能删 */

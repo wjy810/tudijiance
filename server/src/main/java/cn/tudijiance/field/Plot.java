@@ -17,6 +17,34 @@ public class Plot {
     public static final String KIND_PLOT = "PLOT";
     public static final String KIND_GUARD = "GUARD";
     public static final String KIND_PATH = "PATH";
+    /** 空地：区块里不种的格子 */
+    public static final String KIND_BLANK = "BLANK";
+
+    /** 布局里格子的类型 → 小区类型：种植小区是试验小区，道路是走道 */
+    public static String kindOfCell(String cellKind) {
+        if (cellKind == null || FieldLayout.PLANT.equals(cellKind)) {
+            return KIND_PLOT;
+        }
+        return switch (cellKind) {
+            case FieldLayout.ROAD -> KIND_PATH;
+            case FieldLayout.GUARD -> KIND_GUARD;
+            case FieldLayout.BLANK -> KIND_BLANK;
+            default -> KIND_PLOT;
+        };
+    }
+
+    /** 小区类型 → 布局里格子的类型 */
+    public static String cellKindOf(String plotKind) {
+        if (plotKind == null) {
+            return FieldLayout.PLANT;
+        }
+        return switch (plotKind) {
+            case KIND_PATH -> FieldLayout.ROAD;
+            case KIND_GUARD -> FieldLayout.GUARD;
+            case KIND_BLANK -> FieldLayout.BLANK;
+            default -> FieldLayout.PLANT;
+        };
+    }
 
     @TableId(type = IdType.AUTO)
     private Long id;

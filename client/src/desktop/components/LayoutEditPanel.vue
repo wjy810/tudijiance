@@ -8,7 +8,7 @@ import {
 } from '@element-plus/icons-vue'
 
 import {
-  BLOCK_KIND, UNIT_PRESETS, alignBlockFit, anchors, blockRect, blockSlot, blockSpan, evenInnerTracks, fieldSize, fmt,
+  BLOCK_KIND, CELL_KIND, UNIT_PRESETS, cellKind, setCellKinds, alignBlockFit, anchors, blockRect, blockSlot, blockSpan, evenInnerTracks, fieldSize, fmt,
   innerSizes, insertTrack, keyOf, mergeBlocks, mergeInner, mergeAt, parseKey, removeTrack, removedPlots, renameBlock,
   resizeBlockGrid, resizeInner, round, setBlockFit, setBlockKind, setInnerTrackSize, setTrackSize, setUnit, splitBlock,
   splitInner, type Align, type BlockKind, type FieldLayout, type LayoutBlock, type Unit,
@@ -336,6 +336,19 @@ function splitCell() {
 }
 
 const KINDS: BlockKind[] = ['PLANT', 'ROAD', 'GUARD', 'BLANK']
+
+/** 选中格子的类型（都一样时） */
+const cellKindOfSelection = computed(() => {
+  const b = focusBlock.value
+  if (!b?.inner || props.selectedCells.length === 0) return ''
+  const kinds = new Set(props.selectedCells.map((k) => cellKind(b.inner, k)))
+  return kinds.size === 1 ? [...kinds][0]! : ''
+})
+
+function setCellKind(kind: BlockKind) {
+  const b = focusBlock.value
+  if (b) emit('apply', setCellKinds(props.layout, b.id, props.selectedCells, kind))
+}
 </script>
 
 <template>
@@ -385,8 +398,20 @@ const KINDS: BlockKind[] = ['PLANT', 'ROAD', 'GUARD', 'BLANK']
           选中的小区<span class="sub">{{ selectedCells.length }} 个</span>
         </div>
         <div v-if="selectedCells.length === 0" class="hint">
-          点小区选中；拖动框选几个；点上面、左边的行号列号选整行整列、改行高列宽。
+          点小区选中；拖动框选几个；点上面、左边的行号列号选整行整列。选中后可以拖到别的位置，拖小区之间的线改行高列宽。
         </div>
+        <template v-else>
+          <div class="lbl-top">类型</div>
+          <div class="kinds">
+            <button
+              v-for="k in KINDS" :key="k" class="kind" :class="[k.toLowerCase(), { on: cellKindOfSelection === k }]"
+              @click="setCellKind(k)"
+            >
+              <i />{{ CELL_KIND[k] }}
+            </button>
+          </div>
+          <div class="hint">道路、保护区、空地不种试验品种，也不录数据；保存布局后小区类型跟着变。</div>
+        </template>
         <div class="btn-row">
           <el-button v-if="cellMerge" type="primary" size="small" :icon="CopyDocument" @click="mergeCells">
             合并成一个小区

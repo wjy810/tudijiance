@@ -40,6 +40,11 @@ public final class LayoutGeometry {
         public String key() {
             return cell.r() + "," + cell.c();
         }
+
+        /** 这一格的小区类型（PLOT、PATH、GUARD、BLANK） */
+        public String plotKind() {
+            return Plot.kindOfCell(block.inner().kindAt(key()));
+        }
     }
 
     public record Flat(List<Leaf> leaves, int rowCount, int colCount) {
@@ -107,6 +112,15 @@ public final class LayoutGeometry {
                     for (String k : in.plots().keySet()) {
                         if (!cellKeys.contains(k)) {
                             throw ApiException.badRequest("区块" + label(b) + "里的小区位置不对：" + k);
+                        }
+                    }
+                }
+                if (in.kinds() != null) {
+                    Set<String> cellKeys = new HashSet<>();
+                    cells.forEach(cs -> cellKeys.add(cs.r() + "," + cs.c()));
+                    for (Map.Entry<String, String> e : in.kinds().entrySet()) {
+                        if (!cellKeys.contains(e.getKey()) || !KINDS.contains(e.getValue())) {
+                            throw ApiException.badRequest("区块" + label(b) + "里小区的类型不对：" + e.getKey());
                         }
                     }
                 }
@@ -289,7 +303,7 @@ public final class LayoutGeometry {
         }
         double h = round(innerRows.stream().mapToDouble(Double::doubleValue).sum());
         double w = round(innerCols.stream().mapToDouble(Double::doubleValue).sum());
-        Block b = new Block("B1", 0, 0, "区块1", FieldLayout.PLANT, null, new Inner(innerRows, innerCols, List.of(), ids));
+        Block b = new Block("B1", 0, 0, "区块1", FieldLayout.PLANT, null, new Inner(innerRows, innerCols, List.of(), ids, null));
         return new FieldLayout(1, new Unit("米", "m", 1.0), List.of(h), List.of(w), List.of(), List.of(b), 2,
                 new InnerSize(rows, cols), 0.0);
     }

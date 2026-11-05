@@ -25,7 +25,7 @@ class LayoutGeometryTest {
     private static final Unit METER = new Unit("米", "m", 1.0);
 
     private static Inner inner(int rows, int cols) {
-        return new Inner(nCopies(rows, 1.0), nCopies(cols, 1.0), List.of(), Map.of());
+        return new Inner(nCopies(rows, 1.0), nCopies(cols, 1.0), List.of(), Map.of(), null);
     }
 
     private static List<Double> nCopies(int n, double v) {
@@ -74,7 +74,7 @@ class LayoutGeometryTest {
         List<Block> blocks = new ArrayList<>(base.blocks());
         // B1 缩成 4 m 宽（两边是道路），里面第一行的 3 格合并成一个小区
         blocks.set(0, new Block("B1", 0, 0, "重复Ⅰ", FieldLayout.PLANT, new Fit(1, 0, 4, 13.3),
-                new Inner(List.of(1.0, 1.0), List.of(1.0, 1.0, 2.0), List.of(new Span(0, 0, 1, 3)), Map.of("0,0", 7L))));
+                new Inner(List.of(1.0, 1.0), List.of(1.0, 1.0, 2.0), List.of(new Span(0, 0, 1, 3)), Map.of("0,0", 7L), null)));
         FieldLayout l = new FieldLayout(1, METER, base.rows(), base.cols(), base.merges(), blocks, 5, null, 0.0);
         LayoutGeometry.validate(l);
         List<Leaf> b1 = LayoutGeometry.flatten(l).leaves().stream().filter(x -> x.block().id().equals("B1")).toList();

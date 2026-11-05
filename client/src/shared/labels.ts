@@ -42,7 +42,8 @@ export const TRIAL_TYPE: Record<TrialType, string> = {
 export const PLOT_KIND: Record<PlotKind, string> = {
   PLOT: '试验小区',
   GUARD: '保护区',
-  PATH: '走道',
+  PATH: '道路',
+  BLANK: '空地',
 }
 
 export const TRAIT_CATEGORY: Record<TraitCategory, string> = {
@@ -119,5 +120,6 @@ export const PLOT_STATUS: Record<PlotStatusCode, { label: string; color: string 
   ABNORMAL: { label: '有异常', color: '#f0c6b6' },
   HARVESTED: { label: '已收获', color: '#efd497' },
   GUARD: { label: '保护区', color: '#ddd5c1' },
-  PATH: { label: '走道', color: '#f7f2e7' },
+  PATH: { label: '道路', color: '#f7f2e7' },
+  BLANK: { label: '空地', color: '#eee6d4' },
 }

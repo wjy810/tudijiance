@@ -753,7 +753,7 @@ interface Divider {
 function dividerAt(sp: { x: number; y: number }): Divider | null {
   if (!props.editable || props.tool !== 'select') return null
   const p = toContent(sp)
-  const tol = 6 / view.scale
+  const tol = 5 / view.scale
   const fb = focusBlock()
   const minSize = Math.max(0.01, 4 / view.scale)
   if (fb) {

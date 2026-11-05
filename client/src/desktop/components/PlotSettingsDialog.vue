@@ -73,7 +73,7 @@ async function save() {
         <el-radio-group v-model="form.kind">
           <el-radio-button v-for="(label, key) in PLOT_KIND" :key="key" :value="key as PlotKind">{{ label }}</el-radio-button>
         </el-radio-group>
-        <div class="hint full">保护区和走道不种试验品种，也不录入数据。</div>
+        <div class="hint full">保护区、道路、空地不种试验品种，也不录入数据。</div>
       </el-form-item>
       <el-form-item v-if="layoutSaved" label="长 × 宽">
         <span class="muted">

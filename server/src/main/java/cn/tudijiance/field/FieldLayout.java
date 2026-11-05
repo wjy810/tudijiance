@@ -57,9 +57,18 @@ public record FieldLayout(
     public record Block(String id, int r, int c, String name, String kind, Fit fit, Inner inner) {
     }
 
-    /** 区块里的小区网格；plots：格子（"行,列"）→ 小区 id，新加的格子没有 */
+    /**
+     * 区块里的小区网格；plots：格子（"行,列"）→ 小区 id，新加的格子没有；
+     * kinds：格子（"行,列"）→ 类型（ROAD 道路、GUARD 保护区、BLANK 空地），没写的是种植小区
+     */
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public record Inner(List<Double> rows, List<Double> cols, List<Span> merges, Map<String, Long> plots) {
+    public record Inner(List<Double> rows, List<Double> cols, List<Span> merges, Map<String, Long> plots,
+                        Map<String, String> kinds) {
+
+        public String kindAt(String key) {
+            String k = kinds == null ? null : kinds.get(key);
+            return k == null ? PLANT : k;
+        }
     }
 
     /** 新加的区块默认分几行几列小区 */

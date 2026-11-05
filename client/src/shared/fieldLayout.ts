@@ -534,6 +534,7 @@ export function mergeBlocks(layout: FieldLayout, a: { r: number; c: number }, b:
     const cols: number[] = []
     const merges: Span[] = []
     const plots: Record<string, number> = {}
+    const kinds: Record<string, CellKind> = {}
     let r0 = 0
     for (let i = 0; i < rect.rs; i++) {
       const h = l.rows[rect.r + i]!
@@ -547,6 +548,10 @@ export function mergeBlocks(layout: FieldLayout, a: { r: number; c: number }, b:
           const [r, c] = parseKey(k)
           plots[keyOf(r + r0, c + c0)] = id
         }
+        for (const [k, v] of Object.entries(inn.kinds ?? {})) {
+          const [r, c] = parseKey(k)
+          kinds[keyOf(r + r0, c + c0)] = v
+        }
         c0 += inn.cols.length
       }
       r0 += grid[i]![0]!.inner!.rows.length
@@ -554,6 +559,7 @@ export function mergeBlocks(layout: FieldLayout, a: { r: number; c: number }, b:
     anchor.inner = {
       rows: rows.map((v) => round(v, 4)), cols: cols.map((v) => round(v, 4)), merges, plots,
     }
+    putKinds(anchor.inner, kinds)
   } else {
     for (const x of inRect) {
       if (x !== anchor) dropped.push(...Object.values(x.inner?.plots ?? {}))
@@ -635,13 +641,20 @@ function cutInner(l: FieldLayout, b: LayoutBlock, span: Span): Inner[][] | null 
         const [r, c] = parseKey(k)
         if (r >= r0 && r < r1 && c >= c0 && c < c1) plots[keyOf(r - r0, c - c0)] = id
       }
-      out[i]!.push({
+      const kinds: Record<string, CellKind> = {}
+      for (const [k, v] of Object.entries(abs.kinds ?? {})) {
+        const [r, c] = parseKey(k)
+        if (r >= r0 && r < r1 && c >= c0 && c < c1) kinds[keyOf(r - r0, c - c0)] = v
+      }
+      const piece: Inner = {
         rows: abs.rows.slice(r0, r1).map((v) => round(v, 4)),
         cols: abs.cols.slice(c0, c1).map((v) => round(v, 4)),
         merges: abs.merges.filter((m) => m.r >= r0 && m.r < r1 && m.c >= c0 && m.c < c1)
           .map((m) => ({ ...m, r: m.r - r0, c: m.c - c0 })),
         plots,
-      })
+      }
+      putKinds(piece, kinds)
+      out[i]!.push(piece)
     }
   }
   return out
@@ -740,12 +753,14 @@ export function resizeInner(layout: FieldLayout, id: string, rows: number, cols:
     grow(inner.rows, nr)
     grow(inner.cols, nc)
     inner.merges = inner.merges.filter((m) => m.r + m.rs <= nr && m.c + m.cs <= nc)
-    for (const k of Object.keys(inner.plots)) {
+    const gone = (k: string) => {
       const [r, c] = parseKey(k)
-      if (r >= nr || c >= nc || (mergeAt(inner.merges, r, c) && !inner.merges.some((m) => m.r === r && m.c === c))) {
-        delete inner.plots[k]
-      }
+      return r >= nr || c >= nc || (!!mergeAt(inner.merges, r, c) && !inner.merges.some((m) => m.r === r && m.c === c))
     }
+    for (const k of Object.keys(inner.plots)) if (gone(k)) delete inner.plots[k]
+    const kinds = { ...(inner.kinds ?? {}) }
+    for (const k of Object.keys(kinds)) if (gone(k)) delete kinds[k]
+    putKinds(inner, kinds)
   })
 }
 
@@ -899,17 +914,45 @@ export function mergeInner(
       if (x.v !== keep) dropped.push(x.v)
     }
     if (keep != null) inner.plots[anchorKey] = keep
+    // 合并后的格子用左上角格子的类型
+    const kinds = { ...(inner.kinds ?? {}) }
+    const anchorKind = kinds[anchorKey]
+    for (const k of Object.keys(kinds)) {
+      const [r, c] = parseKey(k)
+      if (inside(rect, r, c)) delete kinds[k]
+    }
+    if (anchorKind) kinds[anchorKey] = anchorKind
+    putKinds(inner, kinds)
     inner.merges = inner.merges.filter((m) => !containsSpan(rect, m))
     inner.merges.push(rect)
   })
   return { layout: next, dropped }
 }
 
-/** 拆开区块里合并的小区：左上角留原来的小区，其它格子是新小区 */
+/** 拆开区块里合并的小区：左上角留原来的小区，其它格子是新小区（类型和原来一样） */
 export function splitInner(layout: FieldLayout, id: string, r: number, c: number): FieldLayout {
   return mapInner(layout, id, (inner) => {
     const m = mergeAt(inner.merges, r, c)
-    if (m) inner.merges = inner.merges.filter((x) => x !== m)
+    if (!m) return
+    inner.merges = inner.merges.filter((x) => x !== m)
+    const kind = inner.kinds?.[keyOf(m.r, m.c)]
+    if (kind) {
+      const kinds = { ...(inner.kinds ?? {}) }
+      for (let i = m.r; i < m.r + m.rs; i++) for (let j = m.c; j < m.c + m.cs; j++) kinds[keyOf(i, j)] = kind
+      putKinds(inner, kinds)
+    }
+  })
+}
+
+/** 给区块里选中的格子设类型：种植小区、道路、保护区、空地（小区还在，保存后小区类型跟着变） */
+export function setCellKinds(layout: FieldLayout, id: string, keys: string[], kind: CellKind): FieldLayout {
+  const blk = layout.blocks.find((x) => x.id === id)
+  if (!blk?.inner || keys.length === 0) return layout
+  if (keys.every((k) => cellKind(blk.inner, k) === kind)) return layout
+  return mapInner(layout, id, (inner) => {
+    const kinds = { ...(inner.kinds ?? {}) }
+    for (const k of keys) kinds[k] = kind
+    putKinds(inner, kinds)
   })
 }
 

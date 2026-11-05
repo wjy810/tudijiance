@@ -4,7 +4,7 @@ import {
   UNIT_PRESETS, alignBlockFit, anchors, blockRect, canMoveCells, createLayout, expandRect, fieldSize, innerCells, innerSizes,
   insertTrack, mergeBlocks, mergeInner, moveBlockFit, moveCells, plotCount, removeTrack, removedPlots, resizeBlockGrid, resizeInner,
   plotPlace, plotPlaces, setBlockFit, setBlockKind, setInnerTrackPair, setInnerTrackSize, setTrackPair, setTrackSize, setUnit,
-  splitBlock, splitInner, swapBlocks, type FieldLayout,
+  setCellKinds, splitBlock, splitInner, swapBlocks, type FieldLayout,
 } from '@/shared/fieldLayout'
 
 const METER = UNIT_PRESETS[0]!
@@ -241,5 +241,36 @@ describe('dragging', () => {
     // 大小不一样的不能换
     const merged = mergeBlocks(saved(), { r: 0, c: 1 }, { r: 0, c: 2 }).layout
     expect(swapBlocks(merged, 'B1', 'B2')).toBe(merged)
+  })
+})
+
+describe('cell kinds', () => {
+  it('sets kinds on selected cells and clears them back to planting', () => {
+    let l = setCellKinds(saved(), 'B1', ['0,0', '0,1'], 'ROAD')
+    expect(block(l, 'B1').inner!.kinds).toEqual({ '0,0': 'ROAD', '0,1': 'ROAD' })
+    // 小区还在
+    expect(removedPlots(saved(), l)).toEqual([])
+    l = setCellKinds(l, 'B1', ['0,0', '0,1'], 'PLANT')
+    expect(block(l, 'B1').inner!.kinds).toBeUndefined()
+  })
+
+  it('keeps the top-left kind when merging and spreads it when splitting', () => {
+    const l = setCellKinds(saved(), 'B1', ['0,0'], 'GUARD')
+    const merged = mergeInner(l, 'B1', { r: 0, c: 0 }, { r: 0, c: 2 }).layout
+    expect(block(merged, 'B1').inner!.kinds).toEqual({ '0,0': 'GUARD' })
+    const split = splitInner(merged, 'B1', 0, 0)
+    expect(block(split, 'B1').inner!.kinds).toEqual({ '0,0': 'GUARD', '0,1': 'GUARD', '0,2': 'GUARD' })
+  })
+
+  it('forgets kinds of cells that are gone and carries them into merged blocks', () => {
+    const l = setCellKinds(saved(), 'B1', ['1,2', '0,0'], 'BLANK')
+    expect(block(resizeInner(l, 'B1', 1, 2), 'B1').inner!.kinds).toEqual({ '0,0': 'BLANK' })
+    const m = setCellKinds(saved(), 'B2', ['0,0'], 'ROAD')
+    const joined = mergeBlocks(m, { r: 0, c: 0 }, { r: 0, c: 1 })
+    expect(joined.joined).toBe(true)
+    expect(block(joined.layout, 'B1').inner!.kinds).toEqual({ '0,3': 'ROAD' })
+    const back = splitBlock(joined.layout, 'B1')
+    const b2 = back.blocks.find((b) => b.r === 0 && b.c === 1)!
+    expect(b2.inner!.kinds).toEqual({ '0,0': 'ROAD' })
   })
 })

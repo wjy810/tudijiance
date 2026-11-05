@@ -44,7 +44,8 @@ export type FieldRequest = Omit<Field, 'id' | 'createdAt' | 'updatedAt'> & {
   plotWidthM?: number | null
 }
 
-export type PlotKind = 'PLOT' | 'GUARD' | 'PATH'
+/** PLOT 试验小区、GUARD 保护区、PATH 道路（走道）、BLANK 空地 */
+export type PlotKind = 'PLOT' | 'GUARD' | 'PATH' | 'BLANK'
 
 export interface Plot {
   id: number
@@ -405,7 +406,7 @@ export interface ObservationQuery {
 
 // ---------- 平面图状态和小区详情 ----------
 
-export type PlotStatusCode = 'NONE' | 'GROWING' | 'ABNORMAL' | 'HARVESTED' | 'GUARD' | 'PATH'
+export type PlotStatusCode = 'NONE' | 'GROWING' | 'ABNORMAL' | 'HARVESTED' | 'GUARD' | 'PATH' | 'BLANK'
 
 export interface PlotStatus {
   plotId: number

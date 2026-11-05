@@ -33,6 +33,7 @@ const STATUS_DARK: Record<PlotStatusCode, string> = {
   HARVESTED: '#b8892f',
   GUARD: '#2f3a2c',
   PATH: '#1b2620',
+  BLANK: '#1f2a23',
 }
 
 async function load() {
