@@ -13,6 +13,7 @@ import {
   resizeBlockGrid, resizeInner, round, setBlockFit, setBlockKind, setInnerTrackSize, setTrackSize, setUnit, splitBlock,
   splitInner, type Align, type BlockKind, type FieldLayout, type LayoutBlock, type Unit,
 } from '@/shared/fieldLayout'
+import MergeBlocksDialog from './MergeBlocksDialog.vue'
 
 const props = defineProps<{
   layout: FieldLayout
@@ -166,15 +167,18 @@ const mergeable = computed(() => {
   return { a, b, result: mergeBlocks(props.layout, a, b) }
 })
 
-async function merge() {
-  const m = mergeable.value
-  if (!m) return
-  if (await confirmDrop(m.result.layout, '合并这几个区块')) {
-    emit('apply', m.result.layout)
-    const anchor = m.result.layout.blocks.find((b) => b.r === m.a.r && b.c === m.a.c)
-    emit('update:selectedBlocks', anchor ? [anchor.id] : [])
-  }
+const mergeOpen = ref(false)
+
+function merge() {
+  if (mergeable.value) mergeOpen.value = true
 }
+
+function onMerged(next: FieldLayout, anchorId: string) {
+  emit('apply', next)
+  emit('update:selectedBlocks', [anchorId])
+}
+
+defineExpose({ merge })
 
 const isMerged = computed(() => {
   const b = one.value
@@ -353,6 +357,7 @@ function setCellKind(kind: BlockKind) {
 
 <template>
   <div class="edit-panel">
+    <MergeBlocksDialog v-model="mergeOpen" :layout="layout" :block-ids="selectedBlocks" :plot-code="plotCode" @apply="onMerged" />
     <!-- 区块里 -->
     <template v-if="focusBlock">
       <section class="panel panel-pad">
@@ -483,11 +488,7 @@ function setCellKind(kind: BlockKind) {
           <el-button v-if="isMerged" size="small" :icon="Scissor" @click="split">拆开</el-button>
           <el-button v-if="one?.kind === 'PLANT'" size="small" :icon="Grid" @click="emit('enter', one.id)">进入区块改小区</el-button>
         </div>
-        <div v-if="mergeable" class="hint" :class="{ warn: !mergeable.result.joined }">
-          {{ mergeable.result.joined
-            ? '合并后小区都保留，拼成一个大区块。'
-            : `小区行列对不上，合并后只留左上角区块的小区，其它 ${mergeable.result.dropped.length} 个已有小区去掉。` }}
-        </div>
+        <div v-if="mergeable" class="hint">合并时可以选：保留原来的小区拼起来，或者重新分几行几列。</div>
       </section>
 
       <section v-if="one && oneTracks" class="panel panel-pad">

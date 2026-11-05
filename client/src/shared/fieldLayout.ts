@@ -944,6 +944,68 @@ export function splitInner(layout: FieldLayout, id: string, r: number, c: number
   })
 }
 
+/** 一个小区的中心点（在整块地里的坐标）和格子类型，重新分小区时按位置找新格子 */
+export interface PlotSpot {
+  plotId: number
+  kind: CellKind | null
+  x: number
+  y: number
+}
+
+/** 这些区块里每个小区的中心点 */
+export function plotSpots(l: FieldLayout, blockIds: string[]): PlotSpot[] {
+  const out: PlotSpot[] = []
+  for (const b of l.blocks) {
+    if (!blockIds.includes(b.id) || !b.inner) continue
+    for (const c of innerCells(l, b)) {
+      if (c.plotId == null) continue
+      out.push({ plotId: c.plotId, kind: b.inner.kinds?.[c.key] ?? null, x: c.rect.x + c.rect.w / 2, y: c.rect.y + c.rect.h / 2 })
+    }
+  }
+  return out
+}
+
+/**
+ * 区块里重新分成 rows 行 cols 列（各行各列一样大）。原来的小区按位置留下：小区中心落在哪个新格子里，
+ * 就成为那个格子的小区（编号、品种、数据都跟着）；一个新格子落进几个小区时留左上角的，其余去掉。
+ * spots 是原来的小区在哪（合并区块时传合并前各个区块的小区），不传时用这个区块现在的小区
+ */
+export function regridInner(
+  layout: FieldLayout, id: string, rows: number, cols: number, spots?: PlotSpot[],
+): { layout: FieldLayout; dropped: number[] } {
+  const blk = layout.blocks.find((x) => x.id === id)
+  if (!blk?.inner && !spots) return { layout, dropped: [] }
+  if (!blk) return { layout, dropped: [] }
+  const nr = clamp(Math.round(rows), 1, MAX_INNER_TRACKS)
+  const nc = clamp(Math.round(cols), 1, MAX_INNER_TRACKS)
+  const box = blockRect(layout, blk)
+  const src = [...(spots ?? plotSpots(layout, [id]))].sort((a, b) => a.y - b.y || a.x - b.x)
+  const plots: Record<string, number> = {}
+  const kinds: Record<string, CellKind> = {}
+  const dropped: number[] = []
+  for (const s of src) {
+    const cx = (s.x - box.x) / box.w
+    const cy = (s.y - box.y) / box.h
+    if (cx < 0 || cy < 0 || cx >= 1 || cy >= 1) {
+      dropped.push(s.plotId)
+      continue
+    }
+    const key = keyOf(Math.min(nr - 1, Math.floor(cy * nr)), Math.min(nc - 1, Math.floor(cx * nc)))
+    if (plots[key] == null) {
+      plots[key] = s.plotId
+      if (s.kind) kinds[key] = s.kind
+    } else {
+      dropped.push(s.plotId)
+    }
+  }
+  const next = mapBlocks(layout, [id], (b) => {
+    const inner: Inner = { rows: Array(nr).fill(1), cols: Array(nc).fill(1), merges: [], plots }
+    putKinds(inner, kinds)
+    b.inner = inner
+  })
+  return { layout: next, dropped }
+}
+
 /** 给区块里选中的格子设类型：种植小区、道路、保护区、空地（小区还在，保存后小区类型跟着变） */
 export function setCellKinds(layout: FieldLayout, id: string, keys: string[], kind: CellKind): FieldLayout {
   const blk = layout.blocks.find((x) => x.id === id)

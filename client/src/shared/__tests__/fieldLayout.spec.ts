@@ -4,7 +4,7 @@ import {
   UNIT_PRESETS, alignBlockFit, anchors, blockRect, canMoveCells, createLayout, expandRect, fieldSize, innerCells, innerSizes,
   insertTrack, mergeBlocks, mergeInner, moveBlockFit, moveCells, plotCount, removeTrack, removedPlots, resizeBlockGrid, resizeInner,
   plotPlace, plotPlaces, setBlockFit, setBlockKind, setInnerTrackPair, setInnerTrackSize, setTrackPair, setTrackSize, setUnit,
-  setCellKinds, splitBlock, splitInner, swapBlocks, type FieldLayout,
+  plotSpots, regridInner, setCellKinds, splitBlock, splitInner, swapBlocks, type FieldLayout,
 } from '@/shared/fieldLayout'
 
 const METER = UNIT_PRESETS[0]!
@@ -272,5 +272,42 @@ describe('cell kinds', () => {
     const back = splitBlock(joined.layout, 'B1')
     const b2 = back.blocks.find((b) => b.r === 0 && b.c === 1)!
     expect(b2.inner!.kinds).toEqual({ '0,0': 'ROAD' })
+  })
+})
+
+describe('regrid', () => {
+  it('re-divides a block and keeps plots where they physically were', () => {
+    // B1：2 行 3 列，小区 1..6。重新分成 2 行 6 列：原来的 6 个小区都留下，各占一个新格子，多出 6 个新格子
+    const r = regridInner(saved(), 'B1', 2, 6)
+    const inner = block(r.layout, 'B1').inner!
+    expect(inner.rows).toHaveLength(2)
+    expect(inner.cols).toHaveLength(6)
+    expect(r.dropped).toEqual([])
+    expect(inner.plots).toEqual({ '0,1': 1, '0,3': 2, '0,5': 3, '1,1': 4, '1,3': 5, '1,5': 6 })
+  })
+
+  it('drops plots that fall into the same new cell', () => {
+    const r = regridInner(saved(), 'B1', 1, 1)
+    expect(block(r.layout, 'B1').inner!.plots).toEqual({ '0,0': 1 })
+    expect(r.dropped.sort()).toEqual([2, 3, 4, 5, 6])
+  })
+
+  it('places plots of every merged block by position, even when grids do not line up', () => {
+    // 两个区块中间隔着道路，拼不起来；按合并前的位置重新分 2 行 7 列
+    const l = saved(1)
+    const ids = ['B1', 'B2']
+    const spots = plotSpots(l, ids)
+    const m = mergeBlocks(l, { r: 0, c: 0 }, { r: 0, c: 2 })
+    expect(m.joined).toBe(false)
+    const r = regridInner(m.layout, 'B1', 2, 13, spots)
+    expect(r.dropped).toEqual([])
+    expect(Object.keys(block(r.layout, 'B1').inner!.plots)).toHaveLength(12)
+  })
+
+  it('regrids a merged block after joining', () => {
+    const m = mergeBlocks(saved(), { r: 0, c: 0 }, { r: 1, c: 0 })
+    const r = regridInner(m.layout, 'B1', 4, 3)
+    expect(r.dropped).toEqual([])
+    expect(Object.keys(block(r.layout, 'B1').inner!.plots)).toHaveLength(12)
   })
 })
