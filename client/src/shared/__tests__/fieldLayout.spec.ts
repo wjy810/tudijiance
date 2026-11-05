@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
 
 import {
-  UNIT_PRESETS, alignBlockFit, anchors, blockRect, createLayout, expandRect, fieldSize, innerCells, innerSizes,
-  insertTrack, mergeBlocks, mergeInner, moveBlockFit, plotCount, removeTrack, removedPlots, resizeBlockGrid, resizeInner,
-  plotPlace, plotPlaces, setBlockFit, setBlockKind, setInnerTrackSize, setTrackSize, setUnit, splitBlock, splitInner,
-  type FieldLayout,
+  UNIT_PRESETS, alignBlockFit, anchors, blockRect, canMoveCells, createLayout, expandRect, fieldSize, innerCells, innerSizes,
+  insertTrack, mergeBlocks, mergeInner, moveBlockFit, moveCells, plotCount, removeTrack, removedPlots, resizeBlockGrid, resizeInner,
+  plotPlace, plotPlaces, setBlockFit, setBlockKind, setInnerTrackPair, setInnerTrackSize, setTrackPair, setTrackSize, setUnit,
+  splitBlock, splitInner, swapBlocks, type FieldLayout,
 } from '@/shared/fieldLayout'
 
 const METER = UNIT_PRESETS[0]!
@@ -192,5 +192,54 @@ describe('plotPlace', () => {
     expect(plotPlace(merged, 1)).toBe('区块1 · 第 1 行第 1–3 列')
     expect(plotPlace(saved(), 999)).toBeNull()
     expect(plotPlaces(saved()).get(36)).toBe('区块6 · 第 2 行第 3 列')
+  })
+})
+
+describe('dragging', () => {
+  it('moves the line between two block columns, or the outer edge', () => {
+    const l = setTrackPair(saved(), 'col', 0, 4, 8)
+    expect(l.cols).toEqual([4, 8, 6])
+    expect(fieldSize(l).w).toBe(18)
+    const wider = setTrackPair(saved(), 'col', 2, 9, null)
+    expect(fieldSize(wider).w).toBe(21)
+    // 不能拖成 0
+    expect(setTrackPair(saved(), 'col', 0, 12, 0)).toEqual(saved())
+  })
+
+  it('moves the line between two plot rows inside a block, keeping the others', () => {
+    const l = setInnerTrackPair(saved(), 'B1', 'col', 1, 3, 1)
+    expect(innerSizes(l, block(l, 'B1')).cols).toEqual([2, 3, 1])
+  })
+
+  it('moves selected plots and swaps the ones in the way', () => {
+    // B1：第 1 行 1 2 3，第 2 行 4 5 6。把 1、2 往下挪一行
+    const l = moveCells(saved(), 'B1', ['0,0', '0,1'], 1, 0)
+    const plots = block(l, 'B1').inner!.plots
+    expect(plots).toEqual({ '0,0': 4, '0,1': 5, '0,2': 3, '1,0': 1, '1,1': 2, '1,2': 6 })
+    expect(removedPlots(saved(), l)).toEqual([])
+    // 挪出区块、挪到合并的格子上都不行
+    expect(canMoveCells(saved(), 'B1', ['1,0'], 1, 0)).toBe(false)
+    const merged = mergeInner(saved(), 'B1', { r: 1, c: 1 }, { r: 1, c: 2 }).layout
+    expect(canMoveCells(merged, 'B1', ['0,1'], 1, 0)).toBe(false)
+    expect(moveCells(merged, 'B1', ['0,1'], 1, 0)).toBe(merged)
+  })
+
+  it('carries cell kinds along when moving', () => {
+    const l = saved()
+    block(l, 'B1').inner!.kinds = { '0,2': 'ROAD' }
+    const moved = moveCells(l, 'B1', ['0,2'], 1, 0)
+    expect(block(moved, 'B1').inner!.kinds).toEqual({ '1,2': 'ROAD' })
+    expect(innerCells(moved, block(moved, 'B1')).find((c) => c.key === '1,2')!.kind).toBe('ROAD')
+  })
+
+  it('swaps two blocks of the same size with their plots', () => {
+    const l = swapBlocks(saved(), 'B1', 'B2')
+    expect(block(l, 'B1').c).toBe(1)
+    expect(block(l, 'B2').c).toBe(0)
+    expect(block(l, 'B1').inner!.plots['0,0']).toBe(1)
+    expect(removedPlots(saved(), l)).toEqual([])
+    // 大小不一样的不能换
+    const merged = mergeBlocks(saved(), { r: 0, c: 1 }, { r: 0, c: 2 }).layout
+    expect(swapBlocks(merged, 'B1', 'B2')).toBe(merged)
   })
 })

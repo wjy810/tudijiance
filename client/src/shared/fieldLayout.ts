@@ -30,12 +30,17 @@ export interface Unit {
   meters: number
 }
 
+/** 区块里一格（小区）的类型：种植小区、道路（走道）、保护区、空地 */
+export type CellKind = 'PLANT' | 'ROAD' | 'GUARD' | 'BLANK'
+
 export interface Inner {
   rows: number[]
   cols: number[]
   merges: Span[]
   /** "行,列" → 小区 id；新加的格子没有，保存后服务器补上 */
   plots: Record<string, number>
+  /** "行,列" → 格子类型；没写的是种植小区 */
+  kinds?: Record<string, CellKind>
 }
 
 export interface LayoutBlock {
@@ -66,6 +71,18 @@ export const BLOCK_KIND: Record<BlockKind, string> = {
   ROAD: '道路',
   GUARD: '保护区',
   BLANK: '空地',
+}
+
+export const CELL_KIND: Record<CellKind, string> = {
+  PLANT: '种植小区',
+  ROAD: '道路',
+  GUARD: '保护区',
+  BLANK: '空地',
+}
+
+/** 格子类型，没写的是种植小区 */
+export function cellKind(inner: Inner | null | undefined, key: string): CellKind {
+  return inner?.kinds?.[key] ?? 'PLANT'
 }
 
 export const UNIT_PRESETS: Unit[] = [
@@ -185,6 +202,7 @@ export interface CellGeom {
   span: Span
   rect: Rect
   plotId: number | null
+  kind: CellKind
 }
 
 /** 区块里的小区（格子），rect 是在整块地里的位置 */
@@ -198,7 +216,7 @@ export function innerCells(l: FieldLayout, b: LayoutBlock): CellGeom[] {
     const r = trackRect(rows, cols, s)
     const key = keyOf(s.r, s.c)
     return {
-      key, span: s, plotId: plots[key] ?? null,
+      key, span: s, plotId: plots[key] ?? null, kind: cellKind(b.inner, key),
       rect: { x: box.x + r.x * sx, y: box.y + r.y * sy, w: r.w * sx, h: r.h * sy },
     }
   })
@@ -359,6 +377,22 @@ export function setTrackSize(layout: FieldLayout, axis: Axis, index: number, siz
   const tracks = axis === 'row' ? l.rows : l.cols
   if (index < 0 || index >= tracks.length || !(size > 0)) return layout
   tracks[index] = round(size, 4)
+  reconcileFits(l)
+  return l
+}
+
+/**
+ * 拖动区块之间的分界线：第 index 行（列）改成 a，下一行（列）改成 b，总大小不变。
+ * b 为 null 表示拖的是地块最外边，只改这一行（列），地块跟着变大变小
+ */
+export function setTrackPair(layout: FieldLayout, axis: Axis, index: number, a: number, b: number | null): FieldLayout {
+  const tracks = axis === 'row' ? layout.rows : layout.cols
+  if (index < 0 || index >= tracks.length || !(a > 0)) return layout
+  if (b != null && (index + 1 >= tracks.length || !(b > 0))) return layout
+  const l = clone(layout)
+  const t = axis === 'row' ? l.rows : l.cols
+  t[index] = round(a, 4)
+  if (b != null) t[index + 1] = round(b, 4)
   reconcileFits(l)
   return l
 }
@@ -734,6 +768,103 @@ export function setInnerTrackSize(layout: FieldLayout, id: string, axis: Axis, i
     if (axis === 'row') inner.rows = target
     else inner.cols = target
   })
+}
+
+/** 拖动区块里小区之间的分界线：第 index 行（列）小区改成 a，下一行（列）改成 b（实际大小），其它不变 */
+export function setInnerTrackPair(layout: FieldLayout, id: string, axis: Axis, index: number, a: number, b: number): FieldLayout {
+  const blk = layout.blocks.find((x) => x.id === id)
+  if (!blk?.inner || !(a > 0) || !(b > 0)) return layout
+  const actual = innerSizes(layout, blk)
+  const sizes = axis === 'row' ? actual.rows : actual.cols
+  if (index < 0 || index + 1 >= sizes.length) return layout
+  const next = [...sizes]
+  next[index] = a
+  next[index + 1] = b
+  return mapInner(layout, id, (inner) => {
+    const v = next.map((x) => round(x, 4))
+    if (axis === 'row') inner.rows = v
+    else inner.cols = v
+  })
+}
+
+const byRowCol = (a: string, b: string) => {
+  const [ar, ac] = parseKey(a)
+  const [br, bc] = parseKey(b)
+  return ar - br || ac - bc
+}
+
+/** 把格子类型写回去：没有特殊类型时去掉 kinds */
+function putKinds(inner: Inner, kinds: Record<string, CellKind>) {
+  for (const [k, v] of Object.entries(kinds)) if (v === 'PLANT') delete kinds[k]
+  if (Object.keys(kinds).length > 0) inner.kinds = kinds
+  else delete inner.kinds
+}
+
+/**
+ * 能不能把区块里选中的格子整体挪 dr 行 dc 列：只能挪没合并的格子，不能挪出区块，也不能挪到合并的格子上
+ */
+export function canMoveCells(layout: FieldLayout, id: string, keys: string[], dr: number, dc: number): boolean {
+  const blk = layout.blocks.find((x) => x.id === id)
+  if (!blk?.inner || keys.length === 0) return false
+  const { rows, cols, merges } = blk.inner
+  return keys.every((k) => {
+    const [r, c] = parseKey(k)
+    const tr = r + dr
+    const tc = c + dc
+    return !mergeAt(merges, r, c) && tr >= 0 && tc >= 0 && tr < rows.length && tc < cols.length && !mergeAt(merges, tr, tc)
+  })
+}
+
+/**
+ * 把区块里选中的格子整体挪 dr 行 dc 列：小区（编号、品种、数据都跟着小区）和格子类型一起挪，
+ * 挪过去的地方原来的小区换到空出来的格子里。挪不了时返回原布局
+ */
+export function moveCells(layout: FieldLayout, id: string, keys: string[], dr: number, dc: number): FieldLayout {
+  if ((dr === 0 && dc === 0) || !canMoveCells(layout, id, keys, dr, dc)) return layout
+  const src = [...new Set(keys)].sort(byRowCol)
+  const tgt = src.map((k) => {
+    const [r, c] = parseKey(k)
+    return keyOf(r + dr, c + dc)
+  })
+  const srcSet = new Set(src)
+  const tgtSet = new Set(tgt)
+  const vacated = src.filter((k) => !tgtSet.has(k)).sort(byRowCol)
+  const displaced = tgt.filter((k) => !srcSet.has(k)).sort(byRowCol)
+  return mapInner(layout, id, (inner) => {
+    const oldPlots = { ...inner.plots }
+    const oldKinds = { ...(inner.kinds ?? {}) }
+    const plots = { ...inner.plots }
+    const kinds = { ...(inner.kinds ?? {}) }
+    for (const k of [...src, ...tgt]) {
+      delete plots[k]
+      delete kinds[k]
+    }
+    const put = (to: string, from: string) => {
+      if (oldPlots[from] != null) plots[to] = oldPlots[from]!
+      if (oldKinds[from]) kinds[to] = oldKinds[from]!
+    }
+    src.forEach((k, i) => put(tgt[i]!, k))
+    vacated.forEach((k, i) => put(k, displaced[i]!))
+    inner.plots = plots
+    putKinds(inner, kinds)
+  })
+}
+
+/** 交换两个区块的位置（占的行列数一样的才能换）：名称、类型、里面的小区都跟着换 */
+export function swapBlocks(layout: FieldLayout, a: string, b: string): FieldLayout {
+  const A = layout.blocks.find((x) => x.id === a)
+  const B = layout.blocks.find((x) => x.id === b)
+  if (!A || !B || A === B) return layout
+  const sa = blockSpan(layout, A)
+  const sb = blockSpan(layout, B)
+  if (sa.rs !== sb.rs || sa.cs !== sb.cs) return layout
+  const l = clone(layout)
+  const x = l.blocks.find((v) => v.id === a)!
+  const y = l.blocks.find((v) => v.id === b)!
+  ;[x.r, y.r] = [y.r, x.r]
+  ;[x.c, y.c] = [y.c, x.c]
+  reconcileFits(l)
+  return l
 }
 
 /** 区块里各行（列）小区平分 */

@@ -7,8 +7,8 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  ArrowDown, ArrowLeft, Check, Close, EditPen, Notebook, PieChart, QuestionFilled, Rank, RefreshLeft, RefreshRight, Warning,
-  ZoomIn, ZoomOut,
+  ArrowDown, ArrowLeft, Check, Close, EditPen, Notebook, Odometer, PieChart, Pointer, QuestionFilled, Rank, RefreshLeft,
+  RefreshRight, Warning, ZoomIn, ZoomOut,
 } from '@element-plus/icons-vue'
 
 import {
@@ -22,14 +22,17 @@ import { rememberTrial } from '@/shared/composables/useTrialPicker'
 import { useAuthStore } from '@/stores/auth'
 import { useCatalogStore } from '@/stores/catalog'
 import { useModuleStore } from '@/stores/modules'
-import FieldCanvas, { type CanvasCell, type CanvasDevice, type CanvasLink } from '@/desktop/components/FieldCanvas.vue'
+import FieldCanvas, {
+  type CanvasCell, type CanvasDevice, type CanvasLink, type CanvasTool, type TrackResize,
+} from '@/desktop/components/FieldCanvas.vue'
 import {
-  anchors, checkLayout, fieldSize, fmt, innerCells, moveBlockFit, plotPlace, plotPlaces, type FieldLayout,
+  anchors, checkLayout, fieldSize, fmt, innerCells, keyOf, moveBlockFit, moveCells, parseKey, plotPlace, plotPlaces,
+  setInnerTrackPair, setTrackPair, swapBlocks, type FieldLayout,
 } from '@/shared/fieldLayout'
 import { useLayoutDraft } from '@/desktop/components/layoutDraft'
 import LayoutEditPanel from '@/desktop/components/LayoutEditPanel.vue'
 import MapCompass from '@/desktop/components/MapCompass.vue'
-import { eastNorth, eastNorthText, edgeLabels, normDeg, northUpRotation } from '@/shared/compass'
+import { edgeLabels, northUpRotation } from '@/shared/compass'
 import FieldFormDialog from '@/desktop/components/FieldFormDialog.vue'
 import TrialFormDialog from '@/desktop/components/TrialFormDialog.vue'
 import EntryDialog from '@/desktop/components/EntryDialog.vue'
@@ -245,6 +248,49 @@ function onMoveFit(id: string, x: number, y: number) {
   }
 }
 
+/** 拖分界线改行高列宽 */
+function onResizeTrack(r: TrackResize) {
+  const l = draft.draft.value
+  if (!l) {
+    return
+  }
+  if (r.scope === 'field') {
+    draft.apply(setTrackPair(l, r.axis, r.index, r.a, r.b))
+  } else if (focus.value && r.b != null) {
+    draft.apply(setInnerTrackPair(l, focus.value, r.axis, r.index, r.a, r.b))
+  }
+}
+
+/** 拖选中的格子：小区跟着挪，原来那里的小区换过来 */
+function onMoveCells(blockId: string, keys: string[], dr: number, dc: number) {
+  const l = draft.draft.value
+  if (!l) {
+    return
+  }
+  const next = moveCells(l, blockId, keys, dr, dc)
+  if (next === l) {
+    return
+  }
+  draft.apply(next)
+  selectedCells.value = keys.map((k) => {
+    const [r, c] = parseKey(k)
+    return keyOf(r + dr, c + dc)
+  })
+}
+
+/** 把区块拖到另一个区块上：交换位置 */
+function onSwapBlocks(a: string, b: string) {
+  const l = draft.draft.value
+  if (!l) {
+    return
+  }
+  const next = swapBlocks(l, a, b)
+  if (next !== l) {
+    draft.apply(next)
+    selectedBlocks.value = [a]
+  }
+}
+
 function plotCode(id: number): string {
   const p = plotById.value.get(id)
   return p ? p.code || `${p.rowNo}-${p.colNo}` : `#${id}`
@@ -358,24 +404,25 @@ watch(mode, (m) => {
 
 /** 画布缩放比例（相对"正好放下"的百分比） */
 const zoom = ref(100)
-const panning = ref(false)
-const rotation = ref(0)
+const tool = ref<CanvasTool>('select')
 const canvasRef = ref<InstanceType<typeof FieldCanvas> | null>(null)
 
 function zoomBy(factor: number) {
   canvasRef.value?.zoomBy(factor)
 }
 
+const NO_LINKS: CanvasLink[] = []
+const NO_DEVICES: CanvasDevice[] = []
+/** 画布上浮着的工具条占的地方：上面模式切换，下面操作条 */
+const CANVAS_INSETS = { top: 8, right: 8, bottom: 64, left: 8 }
+
 // ---------- 视角和方位 ----------
 
-/** 自由视角：可以拖动、缩放、旋转；固定视角：按图纸或正北朝上，总是正好放下 */
-type ViewKind = 'free' | 'fixed'
+/** 俯视图：按图纸朝上，或者按真北方向转到正北朝上 */
 type Facing = 'drawing' | 'north'
 
 interface ViewPrefs {
-  kind: ViewKind
   facing: Facing
-  rotation: number
 }
 
 const viewKey = () => `tudijiance.mapView.${fieldId.value}`
@@ -383,39 +430,21 @@ const viewKey = () => `tudijiance.mapView.${fieldId.value}`
 function loadView(): ViewPrefs {
   try {
     const v = JSON.parse(localStorage.getItem(viewKey()) || '{}') as Partial<ViewPrefs>
-    return { kind: v.kind ?? 'free', facing: v.facing ?? 'drawing', rotation: Number(v.rotation) || 0 }
+    return { facing: v.facing === 'north' ? 'north' : 'drawing' }
   } catch {
-    return { kind: 'free', facing: 'drawing', rotation: 0 }
+    return { facing: 'drawing' }
   }
 }
 
 const viewPrefs = ref<ViewPrefs>(loadView())
-rotation.value = viewPrefs.value.rotation
-const viewKind = computed({
-  get: () => viewPrefs.value.kind,
-  set: (k: ViewKind) => { viewPrefs.value = { ...viewPrefs.value, kind: k } },
-})
 const facing = computed({
   get: () => viewPrefs.value.facing,
   set: (f: Facing) => { viewPrefs.value = { ...viewPrefs.value, facing: f } },
 })
-const locked = computed(() => viewKind.value === 'fixed')
 const northDeg = computed(() => shownLayout.value?.northDeg ?? 0)
 
-/** 固定视角下画面转多少度 */
-const fixedRotation = computed(() => (facing.value === 'north' ? northUpRotation(northDeg.value) : 0))
-
-watch([locked, fixedRotation], () => {
-  if (locked.value) {
-    rotation.value = fixedRotation.value
-  }
-}, { immediate: true })
-
-watch(rotation, (r) => {
-  if (!locked.value) {
-    viewPrefs.value = { ...viewPrefs.value, rotation: r }
-  }
-})
+/** 画面转多少度：图纸朝上不转，正北朝上按真北方向转 */
+const rotation = computed(() => (facing.value === 'north' ? northUpRotation(northDeg.value) : 0))
 
 watch(viewPrefs, (v) => {
   try {
@@ -425,41 +454,14 @@ watch(viewPrefs, (v) => {
   }
 }, { deep: true })
 
-function rotateTo(deg: number) {
-  if (locked.value) {
-    return
-  }
-  canvasRef.value?.rotateTo(normDeg(deg))
-}
-
-function rotateBy(step: number) {
-  rotateTo(rotation.value + step)
-}
-
-function northUp() {
-  if (locked.value) {
-    facing.value = 'north'
-  } else {
-    rotateTo(northUpRotation(northDeg.value))
-  }
+function toggleNorth() {
+  facing.value = facing.value === 'north' ? 'drawing' : 'north'
 }
 
 const edges = computed(() => edgeLabels(northDeg.value, rotation.value))
 
-/** 鼠标所在位置离地块中心往东、往北多远 */
-const pointerAt = ref<{ x: number; y: number } | null>(null)
-const pointerText = computed(() => {
-  const l = shownLayout.value
-  const p = pointerAt.value
-  if (!l || !p) {
-    return ''
-  }
-  const s = fieldSize(l)
-  return eastNorthText(eastNorth(p, { x: s.w / 2, y: s.h / 2 }, l.northDeg ?? 0, l.unit.meters))
-})
-
 function fitView() {
-  canvasRef.value?.fit()
+  canvasRef.value?.fit(true)
 }
 
 // ---------- 进入区块 ----------
@@ -744,6 +746,8 @@ function onKey(e: KeyboardEvent) {
   if (e.key === 'Escape') {
     if (menu.value) {
       closeMenu()
+    } else if (tool.value !== 'select') {
+      tool.value = 'select'
     } else if (selectedBlocks.value.length || selectedCells.value.length || track.value) {
       selectedBlocks.value = []
       selectedCells.value = []
@@ -751,14 +755,16 @@ function onKey(e: KeyboardEvent) {
     } else if (focus.value) {
       leaveBlock()
     }
-  } else if (e.key === 'f' || e.key === 'F') {
+  } else if ((e.key === 'f' || e.key === 'F') && !e.ctrlKey && !e.metaKey) {
     fitView()
-  } else if ((e.key === 'q' || e.key === 'Q') && !e.ctrlKey && !e.metaKey) {
-    rotateBy(-15)
-  } else if ((e.key === 'e' || e.key === 'E') && !e.ctrlKey && !e.metaKey) {
-    rotateBy(15)
   } else if ((e.key === 'n' || e.key === 'N') && !e.ctrlKey && !e.metaKey) {
-    northUp()
+    toggleNorth()
+  } else if ((e.key === 'm' || e.key === 'M') && !e.ctrlKey && !e.metaKey) {
+    tool.value = tool.value === 'measure' ? 'select' : 'measure'
+  } else if ((e.key === 'h' || e.key === 'H') && !e.ctrlKey && !e.metaKey) {
+    tool.value = tool.value === 'pan' ? 'select' : 'pan'
+  } else if ((e.key === 'v' || e.key === 'V') && !e.ctrlKey && !e.metaKey) {
+    tool.value = 'select'
   }
 }
 
@@ -1200,8 +1206,8 @@ const metricGroups = computed(() => {
               <p><b>选择：</b>单击选一个；按住 Ctrl 或 Shift 单击多选；拖动鼠标框选；点区块的名称牌选中这个区块的所有小区。</p>
               <p><b>区块：</b>双击区块的名称牌进入区块，只看这个区块；进去后点上面、左边的行号列号选整行整列；Esc 返回整块地。</p>
               <p><b>操作：</b>选中后底部出现操作条；右键小区弹出菜单；双击小区看详情。</p>
-              <p><b>画面：</b>滚轮缩放；按住空格或滚轮拖动画面；F 适应窗口。</p>
-              <p><b>方位：</b>Shift + 滚轮、Q / E 或拖动指北针旋转画面；N 或点指北针让北朝上。固定视角下画面不动，适合投屏、打印。</p>
+              <p><b>画面：</b>滚轮缩放；按住空格或滚轮拖动画面；F 适应窗口；M 测距。</p>
+              <p><b>方位：</b>N 或点指北针在“图纸朝上”和“正北朝上”之间切换。</p>
             </div>
           </el-popover>
         </div>
@@ -1223,25 +1229,26 @@ const metricGroups = computed(() => {
             v-model:selected-plots="selected"
             v-model:selected-blocks="selectedBlocks"
             v-model:selected-cells="selectedCells"
-            v-model:rotation="rotation"
+            :rotation="rotation"
             :layout="shownLayout"
             :cells="cells"
             :focus="focus"
-            :links="mode === 'edit' ? [] : gridLinks"
-            :devices="mode === 'edit' ? [] : gridDevices"
-            :panning="panning"
+            :links="mode === 'edit' ? NO_LINKS : gridLinks"
+            :devices="mode === 'edit' ? NO_DEVICES : gridDevices"
+            :tool="tool"
             :pick="mode === 'edit' ? (focus ? 'cell' : 'block') : 'plot'"
             :rulers="mode === 'edit'"
-            :draggable="mode === 'edit'"
-            :inset-bottom="60"
-            :locked="locked"
+            :editable="mode === 'edit'"
+            :insets="CANVAS_INSETS"
             @zoom="(z: number) => (zoom = z)"
-            @pointer="(p: { x: number; y: number } | null) => (pointerAt = p)"
             @contextmenu="onContextMenu"
             @open="openDetail"
             @enter="enterBlock"
             @track="onTrack"
             @move-fit="onMoveFit"
+            @resize-track="onResizeTrack"
+            @move-cells="onMoveCells"
+            @swap-blocks="onSwapBlocks"
           />
           <template v-if="shownLayout">
             <span class="edge top">{{ edges.top }}</span>
@@ -1249,48 +1256,38 @@ const metricGroups = computed(() => {
             <span class="edge bottom">{{ edges.bottom }}</span>
             <span class="edge left">{{ edges.left }}</span>
             <div class="view-switch">
-              <el-radio-group v-model="viewKind" size="small">
-                <el-tooltip content="可以拖动、缩放、旋转画面" placement="bottom">
-                  <el-radio-button value="free">自由视角</el-radio-button>
+              <el-radio-group v-model="facing" size="small">
+                <el-tooltip content="按图纸画，图纸上方朝上" placement="bottom">
+                  <el-radio-button value="drawing">图纸朝上</el-radio-button>
                 </el-tooltip>
-                <el-tooltip content="按图纸或正北朝上，画面固定，正好放下整块地；适合投屏、打印" placement="bottom">
-                  <el-radio-button value="fixed">固定视角</el-radio-button>
+                <el-tooltip content="按真北方向转，正北朝上（N）" placement="bottom">
+                  <el-radio-button value="north">正北朝上</el-radio-button>
                 </el-tooltip>
               </el-radio-group>
-              <el-select v-if="locked" v-model="facing" size="small" class="facing">
-                <el-option value="drawing" label="图纸朝上" />
-                <el-option value="north" label="正北朝上" />
-              </el-select>
             </div>
-            <div class="map-tools" :class="{ locked }">
-              <button class="tool angle num" :title="locked ? '画面角度' : '点一下转回图纸朝上'" :disabled="locked" @click="rotateTo(0)">
-                {{ Math.round(rotation) }}°
+            <div class="map-tools">
+              <button class="tool" :class="{ on: tool === 'select' }" title="选择（V）" aria-label="选择" @click="tool = 'select'"><el-icon><Pointer /></el-icon></button>
+              <button
+                class="tool" :class="{ on: tool === 'pan' }" title="拖动画面（H，也可以按住空格或滚轮拖动）"
+                aria-label="拖动画面" @click="tool = tool === 'pan' ? 'select' : 'pan'"
+              >
+                <el-icon><Rank /></el-icon>
               </button>
-              <template v-if="!locked">
-                <button class="tool" title="向左转 15°（Q）" aria-label="向左转 15 度" @click="rotateBy(-15)"><el-icon><RefreshLeft /></el-icon></button>
-                <button class="tool" title="向右转 15°（E）" aria-label="向右转 15 度" @click="rotateBy(15)"><el-icon><RefreshRight /></el-icon></button>
-                <span class="tool-sep" />
-                <button class="tool" title="放大" aria-label="放大" @click="zoomBy(1.25)"><el-icon><ZoomIn /></el-icon></button>
-                <button class="tool zoom num" title="适应窗口（F）" @click="fitView">{{ zoom }}%</button>
-                <button class="tool" title="缩小" aria-label="缩小" @click="zoomBy(1 / 1.25)"><el-icon><ZoomOut /></el-icon></button>
-                <span class="tool-sep" />
-                <button
-                  class="tool" :class="{ on: panning }" title="打开后按住左键拖动画面（也可以按住空格或滚轮拖动）"
-                  aria-label="拖动画面" @click="panning = !panning"
-                >
-                  <el-icon><Rank /></el-icon>
-                </button>
-              </template>
+              <button class="tool" :class="{ on: tool === 'measure' }" title="测距（M）：点两下量距离" aria-label="测距" @click="tool = tool === 'measure' ? 'select' : 'measure'">
+                <el-icon><Odometer /></el-icon>
+              </button>
+              <span class="tool-sep" />
+              <button class="tool" title="缩小" aria-label="缩小" @click="zoomBy(1 / 1.25)"><el-icon><ZoomOut /></el-icon></button>
+              <button class="tool zoom num" title="适应窗口（F）" @click="fitView">{{ zoom }}%</button>
+              <button class="tool" title="放大" aria-label="放大" @click="zoomBy(1.25)"><el-icon><ZoomIn /></el-icon></button>
             </div>
             <MapCompass
               class="map-compass"
               :north-deg="northDeg"
               :rotation="rotation"
-              :rotatable="!locked"
-              @rotate="(d: number) => (rotation = d)"
-              @north-up="northUp"
+              :rotatable="false"
+              @north-up="toggleNorth"
             />
-            <div v-if="pointerText" class="pointer-at num">{{ pointerText }}<span>（从地块中心量）</span></div>
           </template>
         </div>
 
