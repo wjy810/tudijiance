@@ -3,7 +3,7 @@
 //   录入数据：日常用，选中小区后录入、标记异常、看详情；
 //   布置试验：老师每季开始时用，分配品种、设重复、设对照、编号、改小区类型和尺寸。
 // 选中小区后，底部浮出对应模式的操作条；右键小区弹出菜单，双击打开详情
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
@@ -31,6 +31,10 @@ import {
 } from '@/shared/fieldLayout'
 import { useLayoutDraft } from '@/desktop/components/layoutDraft'
 import LayoutEditPanel from '@/desktop/components/LayoutEditPanel.vue'
+import type FieldScene3DType from '@/desktop/components/FieldScene3D.vue'
+
+/** 3D 视角用到 three.js，点开时才加载 */
+const FieldScene3D = defineAsyncComponent(() => import('@/desktop/components/FieldScene3D.vue'))
 import MapCompass from '@/desktop/components/MapCompass.vue'
 import { edgeLabels, northUpRotation } from '@/shared/compass'
 import FieldFormDialog from '@/desktop/components/FieldFormDialog.vue'
@@ -408,7 +412,8 @@ const tool = ref<CanvasTool>('select')
 const canvasRef = ref<InstanceType<typeof FieldCanvas> | null>(null)
 
 function zoomBy(factor: number) {
-  canvasRef.value?.zoomBy(factor)
+  if (view3d.value) sceneRef.value?.zoomBy(factor)
+  else canvasRef.value?.zoomBy(factor)
 }
 
 const NO_LINKS: CanvasLink[] = []
@@ -421,8 +426,12 @@ const CANVAS_INSETS = { top: 8, right: 8, bottom: 64, left: 8 }
 /** 俯视图：按图纸朝上，或者按真北方向转到正北朝上 */
 type Facing = 'drawing' | 'north'
 
+/** 俯视图（平面图，能编辑）或 3D（自由转动看立体样子） */
+type ViewKind = '2d' | '3d'
+
 interface ViewPrefs {
   facing: Facing
+  kind: ViewKind
 }
 
 const viewKey = () => `tudijiance.mapView.${fieldId.value}`
@@ -430,9 +439,9 @@ const viewKey = () => `tudijiance.mapView.${fieldId.value}`
 function loadView(): ViewPrefs {
   try {
     const v = JSON.parse(localStorage.getItem(viewKey()) || '{}') as Partial<ViewPrefs>
-    return { facing: v.facing === 'north' ? 'north' : 'drawing' }
+    return { facing: v.facing === 'north' ? 'north' : 'drawing', kind: v.kind === '3d' ? '3d' : '2d' }
   } catch {
-    return { facing: 'drawing' }
+    return { facing: 'drawing', kind: '2d' }
   }
 }
 
@@ -458,10 +467,24 @@ function toggleNorth() {
   facing.value = facing.value === 'north' ? 'drawing' : 'north'
 }
 
+/** 编辑地块只能在俯视图里 */
+const view3d = computed({
+  get: () => viewPrefs.value.kind === '3d' && mode.value !== 'edit',
+  set: (v: boolean) => { viewPrefs.value = { ...viewPrefs.value, kind: v ? '3d' : '2d' } },
+})
+const sceneRef = ref<InstanceType<typeof FieldScene3DType> | null>(null)
+const autoRotate = ref(false)
+
+watch(view3d, () => {
+  autoRotate.value = false
+  tool.value = 'select'
+})
+
 const edges = computed(() => edgeLabels(northDeg.value, rotation.value))
 
 function fitView() {
-  canvasRef.value?.fit(true)
+  if (view3d.value) sceneRef.value?.home()
+  else canvasRef.value?.fit(true)
 }
 
 // ---------- 进入区块 ----------
@@ -614,6 +637,25 @@ const cells = computed(() => {
   return out
 })
 
+/** 3D 里每个小区立起来多高（米）：按指标着色时按指标的值，否则按长势 */
+const STATUS_HEIGHT: Partial<Record<PlotStatusCode, number>> = { NONE: 0.06, GROWING: 0.55, ABNORMAL: 0.35, HARVESTED: 0.12 }
+
+const heights = computed(() => {
+  const out = new Map<number, number>()
+  const r = metricRange.value
+  for (const p of plots.value) {
+    if (p.kind !== 'PLOT') {
+      out.set(p.id, 0.04)
+    } else if (display.value.view === 'trait') {
+      const v = traitValues.value.get(p.id)
+      out.set(p.id, v && r ? 0.12 + 1.3 * (r.max === r.min ? 1 : (v.value - r.min) / (r.max - r.min)) : 0.04)
+    } else {
+      out.set(p.id, trial.value ? STATUS_HEIGHT[plotStatus(p)] ?? 0.3 : 0.3)
+    }
+  }
+  return out
+})
+
 // 在右侧"对照关系"里点了哪一组；再点一次取消
 const pinnedLink = ref<number | null>(null)
 
@@ -759,6 +801,8 @@ function onKey(e: KeyboardEvent) {
     fitView()
   } else if ((e.key === 'n' || e.key === 'N') && !e.ctrlKey && !e.metaKey) {
     toggleNorth()
+  } else if ((e.key === 't' || e.key === 'T') && !e.ctrlKey && !e.metaKey && mode.value !== 'edit') {
+    view3d.value = !view3d.value
   } else if ((e.key === 'm' || e.key === 'M') && !e.ctrlKey && !e.metaKey) {
     tool.value = tool.value === 'measure' ? 'select' : 'measure'
   } else if ((e.key === 'h' || e.key === 'H') && !e.ctrlKey && !e.metaKey) {
@@ -1065,7 +1109,8 @@ function selectAllPlots() {
 
 function exportMap() {
   const name = [field.value?.name, focusBlock.value?.name, trial.value?.seasonYear, '种植图'].filter(Boolean).join('-')
-  canvasRef.value?.exportJpeg(`${name}.jpg`)
+  if (view3d.value) sceneRef.value?.exportJpeg(`${name}-3D.jpg`)
+  else canvasRef.value?.exportJpeg(`${name}.jpg`)
 }
 
 const ind = computed(() => status.value?.indicators ?? null)
@@ -1223,8 +1268,22 @@ const metricGroups = computed(() => {
         </div>
 
         <div class="canvas-box">
+          <FieldScene3D
+            v-if="shownLayout && view3d"
+            ref="sceneRef"
+            v-model:selected-plots="selected"
+            :layout="shownLayout"
+            :cells="cells"
+            :heights="heights"
+            :focus="focus"
+            :links="gridLinks"
+            :devices="gridDevices"
+            :auto-rotate="autoRotate"
+            @open="openDetail"
+            @contextmenu="onContextMenu"
+          />
           <FieldCanvas
-            v-if="shownLayout"
+            v-else-if="shownLayout"
             ref="canvasRef"
             v-model:selected-plots="selected"
             v-model:selected-blocks="selectedBlocks"
@@ -1251,43 +1310,60 @@ const metricGroups = computed(() => {
             @swap-blocks="onSwapBlocks"
           />
           <template v-if="shownLayout">
-            <span class="edge top">{{ edges.top }}</span>
-            <span class="edge right">{{ edges.right }}</span>
-            <span class="edge bottom">{{ edges.bottom }}</span>
-            <span class="edge left">{{ edges.left }}</span>
+            <template v-if="!view3d">
+              <span class="edge top">{{ edges.top }}</span>
+              <span class="edge right">{{ edges.right }}</span>
+              <span class="edge bottom">{{ edges.bottom }}</span>
+              <span class="edge left">{{ edges.left }}</span>
+            </template>
             <div class="view-switch">
-              <el-radio-group v-model="facing" size="small">
-                <el-tooltip content="按图纸画，图纸上方朝上" placement="bottom">
-                  <el-radio-button value="drawing">图纸朝上</el-radio-button>
+              <div class="seg" role="tablist" aria-label="视角">
+                <button role="tab" :class="{ on: !view3d }" title="平面俯视图，能选、能编辑（T 切换）" @click="view3d = false">俯视图</button>
+                <el-tooltip :disabled="mode !== 'edit'" content="编辑地块要在俯视图里" placement="bottom">
+                  <button role="tab" :class="{ on: view3d }" :disabled="mode === 'edit'" title="自由转动看立体样子（T 切换）" @click="view3d = true">3D</button>
                 </el-tooltip>
-                <el-tooltip content="按真北方向转，正北朝上（N）" placement="bottom">
-                  <el-radio-button value="north">正北朝上</el-radio-button>
-                </el-tooltip>
-              </el-radio-group>
+              </div>
+              <div v-if="!view3d" class="seg small">
+                <button :class="{ on: facing === 'drawing' }" title="按图纸画，图纸上方朝上" @click="facing = 'drawing'">图纸朝上</button>
+                <button :class="{ on: facing === 'north' }" title="按真北方向转，正北朝上（N）" @click="facing = 'north'">正北朝上</button>
+              </div>
+              <div v-else class="seg small">
+                <button title="正上方往下看" @click="sceneRef?.preset('top')">俯看</button>
+                <button title="从图纸下方斜着看" @click="sceneRef?.preset('oblique')">斜看</button>
+                <button title="站在南边往北看" @click="sceneRef?.preset('south')">南</button>
+                <button title="站在东边往西看" @click="sceneRef?.preset('east')">东</button>
+                <button title="站在北边往南看" @click="sceneRef?.preset('north')">北</button>
+                <button title="站在西边往东看" @click="sceneRef?.preset('west')">西</button>
+                <button :class="{ on: autoRotate }" title="慢慢转着看（投屏展示）" @click="autoRotate = !autoRotate">转</button>
+              </div>
             </div>
             <div class="map-tools">
-              <button class="tool" :class="{ on: tool === 'select' }" title="选择（V）" aria-label="选择" @click="tool = 'select'"><el-icon><Pointer /></el-icon></button>
-              <button
-                class="tool" :class="{ on: tool === 'pan' }" title="拖动画面（H，也可以按住空格或滚轮拖动）"
-                aria-label="拖动画面" @click="tool = tool === 'pan' ? 'select' : 'pan'"
-              >
-                <el-icon><Rank /></el-icon>
-              </button>
-              <button class="tool" :class="{ on: tool === 'measure' }" title="测距（M）：点两下量距离" aria-label="测距" @click="tool = tool === 'measure' ? 'select' : 'measure'">
-                <el-icon><Odometer /></el-icon>
-              </button>
-              <span class="tool-sep" />
+              <template v-if="!view3d">
+                <button class="tool" :class="{ on: tool === 'select' }" title="选择（V）" aria-label="选择" @click="tool = 'select'"><el-icon><Pointer /></el-icon></button>
+                <button
+                  class="tool" :class="{ on: tool === 'pan' }" title="拖动画面（H，也可以按住空格或滚轮拖动）"
+                  aria-label="拖动画面" @click="tool = tool === 'pan' ? 'select' : 'pan'"
+                >
+                  <el-icon><Rank /></el-icon>
+                </button>
+                <button class="tool" :class="{ on: tool === 'measure' }" title="测距（M）：点两下量距离" aria-label="测距" @click="tool = tool === 'measure' ? 'select' : 'measure'">
+                  <el-icon><Odometer /></el-icon>
+                </button>
+                <span class="tool-sep" />
+              </template>
               <button class="tool" title="缩小" aria-label="缩小" @click="zoomBy(1 / 1.25)"><el-icon><ZoomOut /></el-icon></button>
-              <button class="tool zoom num" title="适应窗口（F）" @click="fitView">{{ zoom }}%</button>
+              <button class="tool zoom num" :title="view3d ? '回到默认视角（F）' : '适应窗口（F）'" @click="fitView">{{ view3d ? '复位' : `${zoom}%` }}</button>
               <button class="tool" title="放大" aria-label="放大" @click="zoomBy(1.25)"><el-icon><ZoomIn /></el-icon></button>
             </div>
             <MapCompass
+              v-if="!view3d"
               class="map-compass"
               :north-deg="northDeg"
               :rotation="rotation"
               :rotatable="false"
               @north-up="toggleNorth"
             />
+            <div v-if="view3d" class="hint-3d">左键拖动转 · 右键拖动平移 · 滚轮缩放 · 单击选 · Shift 拖动框选</div>
           </template>
         </div>
 
@@ -1470,6 +1546,11 @@ const metricGroups = computed(() => {
 </template>
 
 <style scoped>
+@keyframes hint-fade {
+  0%, 75% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
 .map-page {
   display: flex;
   flex-direction: column;
@@ -1641,8 +1722,63 @@ const metricGroups = computed(() => {
   align-items: center;
 }
 
-.facing {
-  width: 108px;
+.seg {
+  display: inline-flex;
+  padding: 3px;
+  gap: 2px;
+  border-radius: 10px;
+  background: rgba(255, 253, 248, 0.94);
+  border: 1px solid rgba(90, 70, 30, 0.18);
+  box-shadow: 0 4px 14px -8px rgba(60, 40, 10, 0.35);
+}
+
+.seg button {
+  border: none;
+  background: none;
+  padding: 5px 12px;
+  border-radius: 7px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.seg.small button {
+  padding: 4px 9px;
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.seg button:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+
+.seg button.on {
+  background: var(--forest);
+  color: #fbf3df;
+}
+
+.seg button:disabled {
+  color: var(--ink-3);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.hint-3d {
+  position: absolute;
+  left: 50%;
+  top: 54px;
+  transform: translateX(-50%);
+  animation: hint-fade 7s ease 1 forwards;
+  z-index: 1;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: rgba(255, 253, 248, 0.85);
+  color: var(--ink-3);
+  font-size: 12px;
+  pointer-events: none;
+  white-space: nowrap;
 }
 
 /* 画面工具：右下角一排小按钮 */
