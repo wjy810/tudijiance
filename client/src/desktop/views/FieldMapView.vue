@@ -1214,6 +1214,11 @@ async function loadCandidates() {
   }
 }
 
+// 在别处新建了品系（新建原始材料、杂交、选株）：种植的下拉框跟着更新
+watch(() => breeding.graph, () => {
+  if (isBreeding.value) void loadCandidates()
+})
+
 /** 小区块在哪个区块 */
 function blockOfPlot(plotId: number): string | null {
   for (const b of fieldLayout.value?.blocks ?? []) {

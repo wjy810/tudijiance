@@ -113,7 +113,8 @@ public class StatsService {
     /** 一块实验田历年的变化：每年一个试验，按品种汇总。还没有这个项目数据的年份（例如刚播种的当年）不列出。 */
     public MultiYear multiYear(Long fieldId, Long traitId) {
         TraitDef trait = numericTrait(traitId);
-        List<Trial> trials = trialService.list(fieldId).stream()
+        // 季里的地块：同名的各季地块连起来看
+        List<Trial> trials = trialService.list(fieldId, true).stream()
                 .sorted(Comparator.comparing(Trial::getSeasonYear).thenComparing(Trial::getId)).toList();
         List<Integer> years = new ArrayList<>();
         Map<Long, Series> series = new LinkedHashMap<>();
@@ -145,18 +146,30 @@ public class StatsService {
      * 大屏：一块实验田最新一年的状态、亩产对比、历年趋势和最新录入。
      * 亩产对比用最近一个有产量数据的试验（当年还没收获时显示上一年的），yieldYear 是它的年份。
      */
+    private Field latestField(List<Field> fields) {
+        Map<Long, Integer> yearOf = new HashMap<>();
+        trialService.list(null).forEach(t -> yearOf.merge(t.getFieldId(), t.getSeasonYear(), Math::max));
+        return fields.stream().max(Comparator.comparing((Field f) -> yearOf.getOrDefault(f.getId(), 0))
+                .thenComparing(Field::getId)).orElseThrow();
+    }
+
     public Screen screen(Long fieldId) {
         List<Field> fields = fieldService.list();
         if (fields.isEmpty()) {
             return new Screen(null, null, null, 0, 0, null, List.of(), List.of(), null, List.of(), List.of(),
                     LocalDateTime.now(clock), null);
         }
-        Field field = fieldId == null ? fields.getFirst()
+        // 没指定时看最新一季的地块
+        Field field = fieldId == null ? latestField(fields)
                 : fields.stream().filter(f -> f.getId().equals(fieldId)).findFirst()
                 .orElseThrow(() -> ApiException.notFound("实验田"));
-        List<Trial> trials = trialService.list(field.getId()).stream()
+        List<Trial> trials = trialService.list(field.getId(), true).stream()
                 .sorted(Comparator.comparing(Trial::getSeasonYear).thenComparing(Trial::getId).reversed()).toList();
         Trial trial = trials.isEmpty() ? null : trials.getFirst();
+        if (trial != null && !trial.getFieldId().equals(field.getId())) {
+            // 同名地块里最新一季的那块
+            field = fieldService.get(trial.getFieldId());
+        }
         List<ScreenPlot> plots = new ArrayList<>();
         if (trial == null) {
             fieldService.plots(field.getId()).forEach(p -> plots.add(

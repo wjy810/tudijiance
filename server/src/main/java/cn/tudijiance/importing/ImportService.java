@@ -69,11 +69,13 @@ public class ImportService {
     private final TraitCatalog catalog;
     private final TraitService traitService;
     private final VarietyMapper varietyMapper;
+    private final cn.tudijiance.variety.VarietyService varietyService;
     private final Clock clock;
 
     public ImportService(ObservationService observationService, TrialContextLoader contextLoader,
                          TrialService trialService, TraitCatalog catalog, TraitService traitService,
-                         VarietyMapper varietyMapper, Clock clock) {
+                         VarietyMapper varietyMapper, cn.tudijiance.variety.VarietyService varietyService, Clock clock) {
+        this.varietyService = varietyService;
         this.observationService = observationService;
         this.contextLoader = contextLoader;
         this.trialService = trialService;
@@ -308,6 +310,7 @@ public class ImportService {
             v.setName(name);
             v.setRemark("导入历史表格时新增");
             v.setCreatedAt(LocalDateTime.now(clock));
+            varietyService.asFounder(v);
             varietyMapper.insert(v);
             varieties.put(name, v);
         }

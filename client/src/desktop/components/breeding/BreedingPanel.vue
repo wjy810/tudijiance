@@ -28,7 +28,7 @@ const emit = defineEmits<{ plant: [lineId: number]; open: [lineId: number]; loca
 const store = useBreedingStore()
 const search = ref('')
 const picked = ref<number | null>(null)
-const open = ref<string[]>(['prev', 'children', 'season'])
+const open = ref<string[]>(['prev', 'children', 'new', 'season'])
 const founderOpen = ref(false)
 
 watch(() => props.focusLineIds, () => {

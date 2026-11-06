@@ -62,6 +62,7 @@ public class LineService {
     private static final Set<String> KINDS = Set.of(Variety.FOUNDER, Variety.CROSS, Variety.SELECTION);
     private static final Set<String> ECOTYPES = Set.of("SPRING", "WEAK_SPRING", "SEMI_WINTER", "WINTER");
     private static final Set<String> QUALITY_TYPES = Set.of("STRONG", "MEDIUM_STRONG", "MEDIUM", "WEAK");
+    private static final Set<String> CONTROL_TYPES = Set.of("YIELD", "QUALITY", "RESISTANCE");
     /** "最近种过的"往前看几季 */
     private static final int RECENT_SEASONS = 4;
 
@@ -326,7 +327,10 @@ public class LineService {
         }
         check(req.ecotype(), ECOTYPES, "冬春性");
         check(req.qualityType(), QUALITY_TYPES, "品质类型");
+        check(req.controlType(), CONTROL_TYPES, "对照类型");
         varietyMapper.update(null, Wrappers.<Variety>lambdaUpdate()
+                .set(Variety::getCode, trimOrNull(req.varietyCode()))
+                .set(Variety::getControlType, trimOrNull(req.controlType()))
                 .set(Variety::getName, name)
                 .set(Variety::getFormerNames, former)
                 .set(Variety::getBreeder, trimOrNull(req.breeder()))
@@ -387,6 +391,13 @@ public class LineService {
             }
         }));
         Set<Long> thisSeason = idx.linesIn(season.getId());
+        // 新建的、还没种过的（原始材料、杂交组合、选株后代）：新建以后在下拉框里马上能找到
+        Set<Long> unplanted = new LinkedHashSet<>();
+        idx.lines().values().stream()
+                .filter(v -> idx.plantingsOf(v.getId()).isEmpty() && !DROPPED.equals(statusOf(v))
+                        && !children.contains(v.getId()))
+                .sorted(Comparator.comparing(Variety::getId).reversed())
+                .forEach(v -> unplanted.add(v.getId()));
         Set<Long> recent = new LinkedHashSet<>();
         if (!prev.isEmpty()) {
             idx.before(season).stream().limit(RECENT_SEASONS).forEach(s -> idx.linesIn(s.getId()).forEach(id -> {
@@ -403,6 +414,9 @@ public class LineService {
             groups.add(new CandidateGroup("prev", prevNames + " 种过的", sorted(prevLines, rows)));
             groups.add(new CandidateGroup("children", "它们的子代", sorted(children, rows)));
         }
+        // 最新建的在前
+        groups.add(new CandidateGroup("new", "还没种过的（新建的）", unplanted.stream()
+                .map(idx.lines()::get).map(rows::row).toList()));
         groups.add(new CandidateGroup("season", "这一季已经种了的", sorted(thisSeason, rows)));
         if (!prev.isEmpty()) {
             groups.add(new CandidateGroup("recent", "最近种过的", sorted(recent, rows)));
@@ -553,7 +567,7 @@ public class LineService {
                     v.getFormerNames(), v.getOriginSeasonId(), home,
                     planted.entrySet().stream().map(e -> new PlantedIn(e.getKey(), e.getValue())).toList(),
                     idx.childrenOf(v.getId()).size(), v.getEcotype(), v.getQualityType(), v.getBreeder(),
-                    v.getRemark(), v.getTagNo(), v.getSeqNo());
+                    v.getRemark(), v.getTagNo(), v.getSeqNo(), v.getCode(), v.getControlType());
         }
 
         private String parentText(Variety v) {

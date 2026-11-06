@@ -31,7 +31,7 @@ import cn.tudijiance.variety.VarietyMapper;
 @Service
 public class TrialService {
 
-    private static final Set<String> TRIAL_TYPES = Set.of("REGIONAL", "PRODUCTION", "COMPARISON", "OBSERVATION");
+    private static final Set<String> TRIAL_TYPES = Set.of("REGIONAL", "PRODUCTION", "COMPARISON", "OBSERVATION", Trial.BREEDING);
     private static final Set<String> ZONES = Set.of("Q1", "Q2", "Q3", "Q4", "Q5", "Q6", "Q7", "Q8", "Q9", "Q10", "Q11");
     private static final String DEFAULT_LINK_LABEL = "对照品种";
 
@@ -56,9 +56,18 @@ public class TrialService {
     }
 
     public List<Trial> list(Long fieldId) {
+        return list(fieldId, false);
+    }
+
+    /** across：把同名地块各季的试验都列出来（看历年变化、自助分析选年份用） */
+    public List<Trial> list(Long fieldId, boolean across) {
         var query = Wrappers.<Trial>lambdaQuery().orderByDesc(Trial::getSeasonYear).orderByAsc(Trial::getId);
         if (fieldId != null) {
-            query.eq(Trial::getFieldId, fieldId);
+            if (across) {
+                query.in(Trial::getFieldId, fieldService.sameLandIds(fieldId));
+            } else {
+                query.eq(Trial::getFieldId, fieldId);
+            }
         }
         return trialMapper.selectList(query);
     }
@@ -82,11 +91,18 @@ public class TrialService {
 
     public Trial update(Long id, TrialRequest req) {
         Trial trial = get(id);
-        requireComparison(trial);
         if (!trial.getFieldId().equals(req.fieldId())) {
             throw ApiException.badRequest("试验建好后不能更换实验田");
         }
+        // 季里的地块：试验名称、年份跟着季和地块，只改类型、麦区、重复次数、备注
+        boolean land = fieldService.get(trial.getFieldId()).getSeasonId() != null;
+        String name = trial.getName();
+        Integer year = trial.getSeasonYear();
         apply(trial, req);
+        if (land) {
+            trial.setName(name);
+            trial.setSeasonYear(year);
+        }
         trialMapper.updateById(trial);
         return get(id);
     }
@@ -95,6 +111,13 @@ public class TrialService {
     public void delete(Long id) {
         requireComparison(get(id));
         trialMapper.deleteById(id);
+    }
+
+    /** 季里的地块只有一个试验，跟着地块删 */
+    private void requireComparison(Trial trial) {
+        if (Trial.BREEDING.equals(trial.getTrialType()) || fieldService.get(trial.getFieldId()).getSeasonId() != null) {
+            throw ApiException.badRequest("这是季里地块的试验，跟着地块管理：删地块请到“季和地块”");
+        }
     }
 
     /** 育种地块自带的试验，跟着地块建、删 */
@@ -113,11 +136,7 @@ public class TrialService {
         trialMapper.deleteById(trialId);
     }
 
-    private static void requireComparison(Trial trial) {
-        if (Trial.BREEDING.equals(trial.getTrialType())) {
-            throw ApiException.badRequest("这是育种地块自带的试验，跟着地块管理");
-        }
-    }
+
 
     public Layout layout(Long trialId) {
         Trial trial = get(trialId);
@@ -136,8 +155,9 @@ public class TrialService {
     @Transactional
     public Layout assign(Long trialId, AssignRequest req) {
         Trial trial = get(trialId);
-        if (Trial.BREEDING.equals(trial.getTrialType()) && req.attribute() == Attribute.VARIETY) {
-            throw ApiException.badRequest("育种的地块请在平面图上用“种植”");
+        if (req.attribute() == Attribute.VARIETY
+                && (Trial.BREEDING.equals(trial.getTrialType()) || fieldService.get(trial.getFieldId()).getSeasonId() != null)) {
+            throw ApiException.badRequest("季里的地块请在平面图上用“种植”");
         }
         List<Plot> plots = fieldService.requireInField(trial.getFieldId(), req.plotIds());
         if (req.attribute() == Attribute.VARIETY && req.value() != null) {

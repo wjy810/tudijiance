@@ -861,7 +861,7 @@ export interface LineGraph {
 }
 
 export interface CandidateGroup {
-  key: 'prev' | 'children' | 'season' | 'recent'
+  key: 'prev' | 'children' | 'new' | 'season' | 'recent'
   title: string
   lines: LineRow[]
 }

@@ -62,9 +62,11 @@ public class AnalysisService {
     private final TrialContextLoader contextLoader;
     private final ComputedTraits computedTraits;
     private final TraitCatalog catalog;
+    private final cn.tudijiance.field.FieldService fieldService;
 
     public AnalysisService(TrialMapper trialMapper, FieldMapper fieldMapper, TrialContextLoader contextLoader,
-                           ComputedTraits computedTraits, TraitCatalog catalog) {
+                           ComputedTraits computedTraits, TraitCatalog catalog, cn.tudijiance.field.FieldService fieldService) {
+        this.fieldService = fieldService;
         this.trialMapper = trialMapper;
         this.fieldMapper = fieldMapper;
         this.contextLoader = contextLoader;
@@ -137,7 +139,8 @@ public class AnalysisService {
             query.in(Trial::getId, q.trialIds());
         } else {
             if (q.fieldId() != null) {
-                query.eq(Trial::getFieldId, q.fieldId());
+                // 季里的地块：同名的各季地块（各季的"东地"）一起算
+                query.in(Trial::getFieldId, fieldService.sameLandIds(q.fieldId()));
             }
             if (q.years() != null && !q.years().isEmpty()) {
                 query.in(Trial::getSeasonYear, q.years());

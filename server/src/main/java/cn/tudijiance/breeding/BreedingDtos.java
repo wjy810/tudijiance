@@ -88,12 +88,15 @@ public final class BreedingDtos {
             Long plotId) {
     }
 
+    /** varietyCode：统一编号（标准允许实名或密码编号），controlType：对照类型，空表示不是对照 */
     public record LineUpdateRequest(
             @NotBlank @Size(max = 100) String name,
             @Size(max = 200) String breeder,
             String ecotype,
             String qualityType,
-            @Size(max = 500) String remark) {
+            @Size(max = 500) String remark,
+            @Size(max = 50) String varietyCode,
+            String controlType) {
     }
 
     public record StatusRequest(@NotEmpty List<Long> lineIds, @NotBlank String status) {
@@ -124,7 +127,8 @@ public final class BreedingDtos {
             Long id, String name, String code, String kind, String status, String pedigree,
             Long motherId, Long fatherId, Long parentId, String parentText,
             String formerNames, Long originSeasonId, Long homeSeasonId, List<PlantedIn> planted, int childCount,
-            String ecotype, String qualityType, String breeder, String remark, String tagNo, Integer seqNo) {
+            String ecotype, String qualityType, String breeder, String remark, String tagNo, Integer seqNo,
+            String varietyCode, String controlType) {
     }
 
     public record GraphView(List<Season> seasons, List<LineRow> lines) {

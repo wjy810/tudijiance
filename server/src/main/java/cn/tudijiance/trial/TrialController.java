@@ -39,8 +39,9 @@ public class TrialController {
 
     @GetMapping
     @PreAuthorize(Roles.CAN_RECORD)
-    public List<Trial> list(@RequestParam(required = false) Long fieldId) {
-        return trialService.list(fieldId);
+    public List<Trial> list(@RequestParam(required = false) Long fieldId,
+                            @RequestParam(required = false, defaultValue = "false") boolean across) {
+        return trialService.list(fieldId, across);
     }
 
     @PostMapping

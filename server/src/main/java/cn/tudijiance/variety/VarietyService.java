@@ -53,8 +53,21 @@ public class VarietyService {
         apply(variety, req);
         requireUniqueName(variety.getName(), null);
         variety.setCreatedAt(LocalDateTime.now(clock));
+        asFounder(variety);
         varietyMapper.insert(variety);
         return variety;
+    }
+
+    /** 新加的品种就是原始材料（品系），编号用名称；名称已被别的编号占了时加序号 */
+    public void asFounder(Variety v) {
+        v.setLineKind(Variety.FOUNDER);
+        v.setLineStatus("ACTIVE");
+        String code = v.getName();
+        int n = 2;
+        while (varietyMapper.selectCount(Wrappers.<Variety>lambdaQuery().eq(Variety::getLineCode, code)) > 0) {
+            code = v.getName() + "-" + n++;
+        }
+        v.setLineCode(code);
     }
 
     public Variety update(Long id, VarietyRequest req) {

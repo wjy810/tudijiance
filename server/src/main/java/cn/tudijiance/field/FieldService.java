@@ -64,18 +64,32 @@ public class FieldService {
     }
 
     /**
-     * scope：为空或 comparison 只列原来品种比较用的实验田；breeding 只列育种的地块（属于某一季）；all 全部
+     * scope：为空或 all 全部；breeding 只列属于某一季的地块；comparison 只列没分季的老实验田（直接用接口建的）
      */
     public List<Field> list(String scope) {
         var query = Wrappers.<Field>lambdaQuery().orderByAsc(Field::getId);
-        if (scope == null || scope.isBlank() || "comparison".equals(scope)) {
+        if ("comparison".equals(scope)) {
             query.isNull(Field::getSeasonId);
         } else if ("breeding".equals(scope)) {
             query.isNotNull(Field::getSeasonId);
-        } else if (!"all".equals(scope)) {
-            throw ApiException.badRequest("scope 只能是 comparison、breeding 或 all");
+        } else if (scope != null && !scope.isBlank() && !"all".equals(scope)) {
+            throw ApiException.badRequest("scope 只能是 all、breeding 或 comparison");
         }
         return fieldMapper.selectList(query);
+    }
+
+    /**
+     * "同一块地"的各季：地块按名称连起来（每季照着上一季建的同名地块，比如各季的"东地"），
+     * 看历年变化、自助分析按地块筛选时用；没分季的老实验田就是它自己
+     */
+    public List<Long> sameLandIds(Long fieldId) {
+        Field field = get(fieldId);
+        if (field.getSeasonId() == null) {
+            return List.of(fieldId);
+        }
+        return fieldMapper.selectList(Wrappers.<Field>lambdaQuery()
+                        .isNotNull(Field::getSeasonId).eq(Field::getName, field.getName()))
+                .stream().map(Field::getId).toList();
     }
 
     /** 找不到时返回 null */

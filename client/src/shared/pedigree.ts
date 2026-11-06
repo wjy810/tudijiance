@@ -1,5 +1,6 @@
-// 系谱图的排布：按季分列（季按开始日期从左到右），每个品系只出现一次，放在它被选出或杂交出来的那一季
-// （原始材料放在第一次种的那一季，还没种过的放在最右边"还没种"一列）。
+// 系谱图的排布：按季分列（季按开始日期从左到右），每个品系只出现一次，放在它被选出或杂交出来的那一季。
+// 原始材料放在第一次种的那一季；它的子代在更早的季里时（没种就拿来杂交了）放到子代那一季，保证父母总在子代左边；
+// 还没种、也没有子代的原始材料放在最左边"还没种"一列。
 // 同一季里又有父子关系的（例如这一季种的周麦16、这一季从它选出的周麦16-1），在这一季里再分小列，父母在左。
 import type { LineRow, Season } from '@/shared/api'
 
@@ -162,12 +163,28 @@ export function layoutGraph(lines: LineRow[], seasons: Season[], o: GraphOptions
     && (!o.seasonIds || o.seasonIds.size === 0 || (l.homeSeasonId != null && o.seasonIds.has(l.homeSeasonId))))
   const byId = new Map(visible.map((l) => [l.id, l]))
 
-  // 2. 分列：季按开始日期，最后一列是还没种过的
+  // 2. 分列：季按开始日期；原始材料不能在子代右边
   const orderedSeasons = [...seasons].sort((a, b) => a.startDate.localeCompare(b.startDate) || a.id - b.id)
-  const used = new Set(visible.map((l) => l.homeSeasonId))
-  const colSeasons: (Season | null)[] = orderedSeasons.filter((s) => used.has(s.id))
-  if (used.has(null)) colSeasons.push(null)
-  const colOf = new Map<number | null, number>(colSeasons.map((s, i) => [s?.id ?? null, i]))
+  const seasonIndex = new Map(orderedSeasons.map((s, i) => [s.id, i]))
+  const kids = childrenMap(visible)
+  /** 品系放在哪一季（季的序号），-1 表示"还没种" */
+  const slotOf = new Map<number, number>()
+  for (const l of visible) {
+    if (l.kind !== 'FOUNDER') slotOf.set(l.id, l.homeSeasonId != null ? seasonIndex.get(l.homeSeasonId) ?? -1 : -1)
+  }
+  for (const l of visible) {
+    if (l.kind !== 'FOUNDER') continue
+    let slot = l.homeSeasonId != null ? seasonIndex.get(l.homeSeasonId) ?? Infinity : Infinity
+    for (const c of kids.get(l.id) ?? []) {
+      const cs = slotOf.get(c)
+      if (cs != null && cs >= 0) slot = Math.min(slot, cs)
+    }
+    slotOf.set(l.id, Number.isFinite(slot) ? slot : -1)
+  }
+  const usedSlots = [...new Set(slotOf.values())].sort((a, b) => a - b)
+  const colSeasons: (Season | null)[] = usedSlots.map((i) => (i < 0 ? null : orderedSeasons[i]!))
+  const colIndex = new Map(usedSlots.map((slot, i) => [slot, i]))
+  const colOfLine = (l: LineRow) => colIndex.get(slotOf.get(l.id)!)!
 
   // 3. 同一季里的父子关系：父母在左边的小列
   const depth = new Map<number, number>()
@@ -179,7 +196,7 @@ export function layoutGraph(lines: LineRow[], seasons: Season[], o: GraphOptions
     let d = 0
     for (const pid of parentIds(l)) {
       const p = byId.get(pid)
-      if (p && p.homeSeasonId === l.homeSeasonId) d = Math.max(d, depthOf(p, seen) + 1)
+      if (p && colOfLine(p) === colOfLine(l)) d = Math.max(d, depthOf(p, seen) + 1)
     }
     depth.set(l.id, d)
     return d
@@ -189,7 +206,7 @@ export function layoutGraph(lines: LineRow[], seasons: Season[], o: GraphOptions
   // 4. 列的位置
   const maxDepth = colSeasons.map(() => 0)
   visible.forEach((l) => {
-    const c = colOf.get(l.homeSeasonId)!
+    const c = colOfLine(l)
     maxDepth[c] = Math.max(maxDepth[c]!, depth.get(l.id)!)
   })
   const columns: GraphColumn[] = []
@@ -205,7 +222,7 @@ export function layoutGraph(lines: LineRow[], seasons: Season[], o: GraphOptions
   const yOf = new Map<number, number>()
   const groups = new Map<string, LineRow[]>()
   visible.forEach((l) => {
-    const key = `${colOf.get(l.homeSeasonId)}:${depth.get(l.id)}`
+    const key = `${colOfLine(l)}:${depth.get(l.id)}`
     const list = groups.get(key) ?? []
     list.push(l)
     groups.set(key, list)

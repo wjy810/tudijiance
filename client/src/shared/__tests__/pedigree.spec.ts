@@ -51,20 +51,34 @@ describe('pedigree', () => {
 
   it('按季分列，同一季里父母在左边的小列', () => {
     const g = layoutGraph(ALL, [S2, S1])
-    expect(g.columns.map((c) => c.title)).toEqual(['2024-2025 年度大田', '2025-2026 年度大田', '还没种'])
+    expect(g.columns.map((c) => c.title)).toEqual(['还没种', '2024-2025 年度大田', '2025-2026 年度大田'])
     const at = (id: number) => g.nodes.find((n) => n.line.id === id)!
-    expect(at(1).col).toBe(0)
+    expect(at(1).col).toBe(1)
     expect(at(1).depth).toBe(0)
     expect(at(3).depth).toBe(1)
     expect(at(4).depth).toBe(1)
     expect(at(4).x).toBeGreaterThan(at(1).x)
-    expect(at(5).col).toBe(1)
-    expect(at(6).col).toBe(2)
+    expect(at(5).col).toBe(2)
+    expect(at(6).col).toBe(0)
     // 杂交组合两条线：母本、父本
     expect(g.edges.filter((e) => e.to === 4).map((e) => e.role).sort()).toEqual(['father', 'mother'])
     // 同一小列里不重叠
     const ys = g.nodes.filter((n) => n.col === 0 && n.depth === 0).map((n) => n.y)
     expect(new Set(ys).size).toBe(ys.length)
+  })
+
+  it('没种就拿来杂交的原始材料放在子代那一季、子代左边', () => {
+    // 新建了原始材料 X、Y（没种），在第二季杂交出 26-001
+    const X = line(11, 'X', { homeSeasonId: null })
+    const Y = line(12, 'Y', { homeSeasonId: null })
+    const XY = line(13, '26-001', { kind: 'CROSS', motherId: 11, fatherId: 12, originSeasonId: 2, homeSeasonId: 2 })
+    const g = layoutGraph([X, Y, XY], [S1, S2])
+    expect(g.columns.map((c) => c.title)).toEqual(['2025-2026 年度大田'])
+    const at = (id: number) => g.nodes.find((n) => n.line.id === id)!
+    expect(at(11).x).toBeLessThan(at(13).x)
+    expect(at(12).x).toBeLessThan(at(13).x)
+    // 连线都从左往右
+    for (const e of g.edges) expect(at(e.from).x).toBeLessThan(at(e.to).x)
   })
 
   it('折叠、只看某几季、只画家系、淘汰的默认不画', () => {

@@ -85,11 +85,17 @@ class BreedingIntegrationTest {
         List<Long> b2 = plotsOfBlock(east, "B2");
         long trial1 = landOf(season1, eastId).get("trialId").asLong();
 
-        // 育种的地块不出现在原来品种比较的实验田列表里
-        JsonNode comparison = call(teacher, get("/api/fields"), null, status().isOk());
-        assertThat(ids(comparison)).doesNotContain(eastId);
-        assertThat(ids(call(teacher, get("/api/fields?scope=breeding"), null, status().isOk()))).contains(eastId);
+        // 实验田列表里就是各季的地块；没分季的老实验田另外筛
+        assertThat(ids(call(teacher, get("/api/fields"), null, status().isOk()))).contains(eastId);
+        assertThat(ids(call(teacher, get("/api/fields?scope=comparison"), null, status().isOk()))).doesNotContain(eastId);
         call(teacher, delete("/api/fields/" + eastId), null, status().isBadRequest());
+        // 地块的试验跟着地块：不能删，能改类型、麦区，名称和年份不变
+        call(teacher, delete("/api/trials/" + trial1), null, status().isBadRequest());
+        JsonNode edited = call(teacher, put("/api/trials/" + trial1), Map.of("fieldId", eastId, "seasonYear", 2030,
+                "name", "随便改", "trialType", "REGIONAL", "wheatZone", "Q5", "replicateCount", 3), status().isOk());
+        assertThat(edited.get("trialType").asString()).isEqualTo("REGIONAL");
+        assertThat(edited.get("seasonYear").asInt()).isEqualTo(2025);
+        assertThat(edited.get("name").asString()).contains("东地");
 
         // 2. 原始材料：一次建三个；名称里不能有"/"；学生不能建
         String zm = "周麦16" + sfx;
@@ -171,6 +177,11 @@ class BreedingIntegrationTest {
         assertThat(plotsOfBlock(green, "B1")).doesNotContainAnyElementsOf(b1);
 
         JsonNode cand = call(teacher, get("/api/breeding/fields/" + greenId + "/candidates"), null, status().isOk());
+        // 新建的、还没种过的品系也在下拉框里
+        JsonNode fresh = call(teacher, post("/api/lines/founders"), Map.of("items", List.of(Map.of("name", "新材料" + sfx))),
+                status().isOk());
+        JsonNode cand2 = call(teacher, get("/api/breeding/fields/" + greenId + "/candidates"), null, status().isOk());
+        assertThat(ids(group(cand2, "new").get("lines"))).contains(fresh.get(0).get("id").asLong());
         assertThat(cand.get("fresh").asBoolean()).isFalse();
         assertThat(ids(group(cand, "prev").get("lines"))).contains(a, b, c);
         assertThat(ids(group(cand, "children").get("lines"))).contains(a1, a2, ab);
