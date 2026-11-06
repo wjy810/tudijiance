@@ -19,7 +19,7 @@ import guardTileUrl from '@/assets/art/guard-tile.webp'
 import roadTileUrl from '@/assets/art/road-tile.webp'
 import { eastNorth, eastNorthText } from '@/shared/compass'
 import {
-  CELL_KIND, addRoadProblem, anchors, blockRect, blockSlot, blockSpan, canMoveCells, fieldSize, fmt, innerCells, innerSizes,
+  CELL_KIND, addRoadProblem, anchors, isRoadTrack, blockRect, blockSlot, blockSpan, canMoveCells, fieldSize, fmt, innerCells, innerSizes,
   keyOf, parseKey, roadOfBlock, round, sum, trackRect, type Axis, type CellKind, type FieldLayout, type LayoutBlock, type Rect,
   type Span,
 } from '@/shared/fieldLayout'
@@ -604,7 +604,7 @@ function drawRulers() {
   const fb = focusBlock()
   const u = props.layout.unit
   const gap = px(RULER) * 0.8
-  const add = (axis: Axis, index: number, rect: Rect, label: string) => {
+  const add = (axis: Axis, index: number, rect: Rect, label: string, road = false) => {
     ticks.push({ axis, index, rect })
     rulerGroup.add(new Konva.Rect({
       ...shape, ...box(rect), fill: 'rgba(255, 253, 248, 0.94)', stroke: 'rgba(90, 70, 30, 0.25)', strokeWidth: 1,
@@ -612,7 +612,8 @@ function drawRulers() {
     }))
     const b = upright(rect)
     const room = b.w * view.scale
-    const text = room >= label.length * 7 + 8 ? label : room >= 18 ? String(index + 1) : ''
+    // 放不下尺寸时写第几行（列）；道路放不下就不写，免得窄道路上一个个数字看着乱
+    const text = room >= label.length * 7 + 8 ? label : room >= 18 && !road ? String(index + 1) : ''
     rulerGroup.add(new Konva.Text({
       ...shape, x: b.x, y: b.y, width: b.w, height: b.h, offsetX: b.w / 2, offsetY: b.h / 2, rotation: b.rotation,
       text, align: 'center', verticalAlign: 'middle', fontSize: px(11), fill: '#6b6450', fontFamily: FONT, wrap: 'none',
@@ -637,12 +638,12 @@ function drawRulers() {
   if (!props.rulers) return
   let x = 0
   props.layout.cols.forEach((w, i) => {
-    add('col', i, { x, y: -gap - px(4), w, h: gap }, fmt(w, u))
+    add('col', i, { x, y: -gap - px(4), w, h: gap }, fmt(w, u), isRoadTrack(props.layout, 'col', i))
     x += w
   })
   let y = 0
   props.layout.rows.forEach((h, i) => {
-    add('row', i, { x: -gap - px(4), y, w: gap, h }, fmt(h, u))
+    add('row', i, { x: -gap - px(4), y, w: gap, h }, fmt(h, u), isRoadTrack(props.layout, 'row', i))
     y += h
   })
 }
@@ -1110,10 +1111,10 @@ function sameSpan(a: string, b: string): boolean {
 
 /**
  * 拖区块之间的线：平时只改线左边（上边）的这一列（行），后面的区块跟着挪，地块跟着变大变小；
- * 按住 Alt 是两边一起变、地块总大小不变。区块里的小区之间总是两边一起变
+ * 按住 Shift（或 Alt）是两边一起变、地块总大小不变。区块里的小区之间总是两边一起变
  */
-function keepTotal(d: Divider, e: { altKey: boolean }): boolean {
-  return d.scope === 'inner' || (e.altKey && d.b != null)
+function keepTotal(d: Divider, e: { altKey: boolean; shiftKey: boolean }): boolean {
+  return d.scope === 'inner' || ((e.altKey || e.shiftKey) && d.b != null)
 }
 
 /** 拖动时按屏幕上大约多少像素取整：1、2、5 × 10 的几次方 */
@@ -1256,7 +1257,7 @@ function drawResizeGhost(d: Extract<Drag, { kind: 'resize' }>) {
   const n = d.d.index + 1
   const total = d.d.axis === 'col' ? fieldSize(props.layout).w : fieldSize(props.layout).h
   const text = d.d.b == null || !d.keep
-    ? `第 ${n} ${name}：${fmt(a, u)}\n地块${d.d.axis === 'col' ? '宽' : '长'} ${fmt(total + delta, u)}${d.d.scope === 'field' && d.d.b != null ? '（按住 Alt 两边一起变）' : ''}`
+    ? `第 ${n} ${name}：${fmt(a, u)}\n地块${d.d.axis === 'col' ? '宽' : '长'} ${fmt(total + delta, u)}${d.d.scope === 'field' && d.d.b != null ? '（按住 Shift 两边一起变）' : ''}`
     : `第 ${n} ${name}：${fmt(a, u)}　第 ${n + 1} ${name}：${fmt(d.d.b - delta, u)}`
   const s = toScreen(d.d.axis === 'col' ? { x: v, y: d.d.from } : { x: d.d.from, y: v })
   showTip(text, s.x + 12, s.y + 12)
@@ -1473,7 +1474,7 @@ function hoverAt(sp: { x: number; y: number }) {
     const what = div.axis === 'col' ? '宽' : '高'
     showTip(
       div.scope === 'inner' ? `拖动改${what}` : div.outer ? `拖动改${what}，地块跟着变大变小`
-        : `拖动改左边这${div.axis === 'col' ? '列' : '行'}的${what}，后面的跟着挪，地块跟着变\n按住 Alt 拖：两边一起变，地块总${what}不变`,
+        : `拖动改左边这${div.axis === 'col' ? '列' : '行'}的${what}，后面的跟着挪，地块跟着变\n按住 Shift 拖：两边一起变，地块总${what}不变`,
       sp.x + 14, sp.y + 14,
     )
     return

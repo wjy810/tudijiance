@@ -360,11 +360,22 @@ export function createLayout(o: CreateOptions): FieldLayout {
   }
 }
 
+/** 新种植区块的名称：接着现有的"区块几"往下数（道路也占编号，不能直接用编号） */
+function nextPlantName(l: FieldLayout): string {
+  let max = 0
+  for (const b of l.blocks) {
+    const m = /^区块(\d+)$/.exec(b.name)
+    if (m) max = Math.max(max, Number(m[1]))
+  }
+  return `区块${max + 1}`
+}
+
 function newBlock(l: FieldLayout, r: number, c: number, kind: BlockKind = 'PLANT'): LayoutBlock {
-  const n = l.nextBlockNo++
+  let n = l.nextBlockNo++
+  while (l.blocks.some((b) => b.id === `B${n}`)) n = l.nextBlockNo++
   const d = l.defaultInner ?? { rows: 1, cols: 1 }
   return {
-    id: `B${n}`, r, c, name: kind === 'PLANT' ? `区块${n}` : BLOCK_KIND[kind], kind, fit: null,
+    id: `B${n}`, r, c, name: kind === 'PLANT' ? nextPlantName(l) : BLOCK_KIND[kind], kind, fit: null,
     inner: kind === 'PLANT' ? evenInner(d.rows, d.cols) : null,
   }
 }
@@ -720,14 +731,14 @@ export function setBlockKind(layout: FieldLayout, ids: string[], kind: BlockKind
     if (kind === 'PLANT') {
       const d = l.defaultInner ?? { rows: 1, cols: 1 }
       b.inner = evenInner(d.rows, d.cols)
-      if (b.name === BLOCK_KIND[b.kind]) b.name = `区块${b.id.replace(/\D/g, '')}`
+      if (b.name === BLOCK_KIND[b.kind]) b.name = nextPlantName(l)
     } else {
       b.inner = null
       if (b.kind === 'PLANT' || b.name === BLOCK_KIND[b.kind]) b.name = BLOCK_KIND[kind]
     }
     b.kind = kind
   })
-  let next = fitRoadTracks(layout, changed)
+  let next = fitRoadTracks(layout, changed, kind)
   for (const s of strips) next = roadToBlocks(next, s.axis, s.index)
   return next
 }
@@ -1260,9 +1271,10 @@ export function roadToBlocks(layout: FieldLayout, axis: Axis, index: number): Fi
 
 /**
  * 改了区块类型以后整理道路：一整行（列）新变成道路的，并成一条并收窄成道路宽；
- * 原来整条是道路、现在只剩和别的道路交叉的地方的，放宽成旁边区块的大小。这个方向上没有别的区块时不动
+ * 原来整条是道路、改成种植区块后只剩和别的道路交叉的地方的，放宽成旁边区块的大小
+ * （改成保护区、空地时不放宽，还是原来的宽）。这个方向上没有别的区块时不动
  */
-function fitRoadTracks(before: FieldLayout, after: FieldLayout): FieldLayout {
+function fitRoadTracks(before: FieldLayout, after: FieldLayout, kind: BlockKind): FieldLayout {
   let l = after
   const width = defaultRoadWidth(before)
   for (const axis of ['row', 'col'] as Axis[]) {
@@ -1275,7 +1287,7 @@ function fitRoadTracks(before: FieldLayout, after: FieldLayout): FieldLayout {
       if (!others) continue
       if (!was && now) {
         l = trackToRoad(l, axis, i, width)
-      } else if (was && !now && !hasOwnRoad(l, axis, i)) {
+      } else if (was && !now && kind === 'PLANT' && !hasOwnRoad(l, axis, i)) {
         const size = plantTrackSize(before, axis)
         l = setTrackSize(l, axis, i, size)
       }

@@ -318,6 +318,8 @@ async function save(keepOpen: boolean) {
     emit('saved')
     if (keepOpen) {
       if (props.plots.length === 1) loadLatest()
+      // 搜着录的：清掉搜索，接着整个列表的下一项
+      search.value = ''
       nextTrait()
     } else {
       visible.value = false

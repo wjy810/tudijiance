@@ -392,6 +392,14 @@ describe('roads', () => {
     expect(isRoadTrack(back, 'row', 1)).toBe(true)
   })
 
+  it('keeps the road width when a road becomes a guard strip', () => {
+    const l = saved(1)
+    const road = l.blocks.find((b) => b.kind === 'ROAD' && b.r === 1)!
+    const guard = setBlockKind(l, [road.id], 'GUARD')
+    expect(guard.rows).toEqual([13.3, 1, 13.3])
+    expect(block(guard, road.id).kind).toBe('GUARD')
+  })
+
   it('turns a whole horizontal road back into blocks', () => {
     const l = saved(1)
     const back = roadToBlocks(l, 'row', 1)
@@ -400,6 +408,8 @@ describe('roads', () => {
     expect(back.blocks.filter((b) => b.r === 1 && b.kind === 'PLANT')).toHaveLength(3)
     expect(back.blocks.filter((b) => b.r === 1 && b.kind === 'ROAD')).toHaveLength(2)
     expect(isRoadTrack(back, 'col', 1)).toBe(true)
+    // 新区块接着"区块几"往下数，不跳号（道路也占编号）
+    expect(back.blocks.filter((b) => b.r === 1 && b.kind === 'PLANT').map((b) => b.name)).toEqual(['区块7', '区块8', '区块9'])
   })
 
   it('turns a track into a road and drops its plots', () => {

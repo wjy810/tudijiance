@@ -375,6 +375,20 @@ const editMenuBlock = computed(() => {
   return id ? draft.draft.value?.blocks.find((b) => b.id === id) ?? null : null
 })
 
+/** 右键的区块四边能不能加道路：不能时是原因（比如旁边已经是道路） */
+const roadSideProblems = computed(() => {
+  const l = draft.draft.value
+  const b = editMenuBlock.value
+  if (!l || !b) return { top: null, bottom: null, left: null, right: null }
+  const sp = blockSpan(l, b)
+  return {
+    top: addRoadProblem(l, 'row', sp.r),
+    bottom: addRoadProblem(l, 'row', sp.r + sp.rs),
+    left: addRoadProblem(l, 'col', sp.c),
+    right: addRoadProblem(l, 'col', sp.c + sp.cs),
+  } as Record<'top' | 'bottom' | 'left' | 'right', string | null>
+})
+
 function roadToBlocksAt(r: { axis: Axis; index: number }) {
   const l = draft.draft.value
   if (l) draft.apply(roadToBlocks(l, r.axis, r.index))
@@ -1945,7 +1959,7 @@ const SHORTCUTS: { keys: string; text: string }[] = [
   { keys: 'N', text: '图纸朝上和正北朝上切换' },
   { keys: 'V / H / M', text: '选择 / 拖动画面 / 测距' },
   { keys: 'R', text: '编辑地块：道路工具（点区块之间的线加道路，点道路删掉）' },
-  { keys: 'Alt + 拖线', text: '编辑地块：两边一起变，地块总大小不变（平时地块跟着变）' },
+  { keys: 'Shift + 拖线', text: '编辑地块：两边一起变，地块总大小不变（平时地块跟着变；Alt 也行）' },
   { keys: '空格 + 拖动', text: '拖动画面（滚轮缩放）' },
   { keys: 'Ctrl / Shift + 点', text: '加选；拖动框选' },
   { keys: 'Ctrl Z / Ctrl Y / Ctrl S', text: '编辑地块：撤销 / 重做 / 保存' },
@@ -1975,9 +1989,12 @@ function applyBlockKind(kind: BlockKind) {
   draft.apply(next)
 }
 
-function runEdit(fn: () => void) {
+/** 先记下右键的是哪个区块（和它在哪条道路上），再关菜单、执行；关了菜单以后 editMenu 就是空的 */
+function runEdit(fn: (blockId: string, road: { axis: Axis; index: number } | null) => void) {
+  const blockId = editMenu.value?.blockId ?? ''
+  const road = editMenuRoad.value
   editMenu.value = null
-  fn()
+  fn(blockId, road)
 }
 </script>
 
@@ -2643,30 +2660,30 @@ function runEdit(fn: () => void) {
       </template>
       <template v-else-if="editMenu.blockId">
         <div class="menu-title">{{ selectedBlocks.length > 1 ? `选中的 ${selectedBlocks.length} 个区块` : draft.draft.value?.blocks.find((b) => b.id === editMenu!.blockId)?.name }}</div>
-        <div v-if="selectedBlocks.length === 1 && draft.draft.value?.blocks.find((b) => b.id === editMenu!.blockId)?.kind === 'PLANT'" class="menu-item" @click="runEdit(() => enterBlock(editMenu!.blockId!))">进入区块改小区</div>
+        <div v-if="selectedBlocks.length === 1 && draft.draft.value?.blocks.find((b) => b.id === editMenu!.blockId)?.kind === 'PLANT'" class="menu-item" @click="runEdit((id) => enterBlock(id))">进入区块改小区</div>
         <div v-if="selectedBlocks.length > 1" class="menu-item" @click="runEdit(() => editPanelRef?.merge())">合并成一个区块…</div>
         <div
           v-if="selectedBlocks.length === 1 && draft.draft.value && (() => { const b = draft.draft.value!.blocks.find((x) => x.id === editMenu!.blockId); if (!b) return false; const sp = blockSpan(draft.draft.value!, b); return sp.rs * sp.cs > 1 })()"
-          class="menu-item" @click="runEdit(() => draft.apply(splitBlock(draft.draft.value!, editMenu!.blockId!)))"
+          class="menu-item" @click="runEdit((id) => draft.apply(splitBlock(draft.draft.value!, id)))"
         >
           拆开
         </div>
         <template v-if="selectedBlocks.length <= 1 && editMenuRoad">
           <div class="menu-sep" />
-          <div class="menu-item" @click="runEdit(() => removeRoadAt(editMenuRoad!))">删掉这条道路<span class="menu-note">地块变小</span></div>
-          <div class="menu-item" @click="runEdit(() => roadToBlocksAt(editMenuRoad!))">这条道路改成区块</div>
+          <div class="menu-item" @click="runEdit((_, road) => road && removeRoadAt(road))">删掉这条道路<span class="menu-note">地块变小</span></div>
+          <div class="menu-item" @click="runEdit((_, road) => road && roadToBlocksAt(road))">这条道路改成区块</div>
         </template>
         <template v-else-if="selectedBlocks.length <= 1 && editMenuBlock && editMenuBlock.kind !== 'ROAD'">
           <div class="menu-sep" />
           <div class="menu-sub">加道路<span class="menu-note">别的区块不变小</span></div>
           <div class="menu-row">
-            <button type="button" @click="runEdit(() => roadBeside(editMenu!.blockId!, 'top'))">上面</button>
-            <button type="button" @click="runEdit(() => roadBeside(editMenu!.blockId!, 'bottom'))">下面</button>
-            <button type="button" @click="runEdit(() => roadBeside(editMenu!.blockId!, 'left'))">左边</button>
-            <button type="button" @click="runEdit(() => roadBeside(editMenu!.blockId!, 'right'))">右边</button>
+            <button type="button" :disabled="!!roadSideProblems.top" :title="roadSideProblems.top ?? ''" @click="runEdit((id) => roadBeside(id, 'top'))">上面</button>
+            <button type="button" :disabled="!!roadSideProblems.bottom" :title="roadSideProblems.bottom ?? ''" @click="runEdit((id) => roadBeside(id, 'bottom'))">下面</button>
+            <button type="button" :disabled="!!roadSideProblems.left" :title="roadSideProblems.left ?? ''" @click="runEdit((id) => roadBeside(id, 'left'))">左边</button>
+            <button type="button" :disabled="!!roadSideProblems.right" :title="roadSideProblems.right ?? ''" @click="runEdit((id) => roadBeside(id, 'right'))">右边</button>
           </div>
-          <div class="menu-item" @click="runEdit(() => trackOfBlockToRoad(editMenu!.blockId!, 'row'))">这一行改成道路</div>
-          <div class="menu-item" @click="runEdit(() => trackOfBlockToRoad(editMenu!.blockId!, 'col'))">这一列改成道路</div>
+          <div class="menu-item" @click="runEdit((id) => trackOfBlockToRoad(id, 'row'))">这一行改成道路</div>
+          <div class="menu-item" @click="runEdit((id) => trackOfBlockToRoad(id, 'col'))">这一列改成道路</div>
         </template>
         <div class="menu-sep" />
         <div v-for="k in (['PLANT', 'ROAD', 'GUARD', 'BLANK'] as BlockKind[])" :key="k" class="menu-item" @click="runEdit(() => applyBlockKind(k))">设成{{ BLOCK_KIND[k] }}</div>
@@ -3980,9 +3997,15 @@ kbd {
   cursor: pointer;
 }
 
-.menu-row button:hover {
+.menu-row button:hover:not(:disabled) {
   border-color: var(--green-2);
   background: var(--green-wash);
+}
+
+.menu-row button:disabled {
+  color: var(--ink-4);
+  background: var(--surface-2);
+  cursor: not-allowed;
 }
 
 /* 道路工具：一段带虚线的路 */
