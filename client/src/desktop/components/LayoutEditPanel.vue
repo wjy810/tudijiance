@@ -681,7 +681,7 @@ function setCellKind(kind: BlockKind) {
             :model-value="layout.defaultInner?.cols ?? 1" :min="1" :max="60" size="small" controls-position="right" class="n"
             @change="(v: number | undefined) => setDefaultInner(layout.defaultInner?.rows ?? 1, v)"
           />
-          <span>个小区块</span>
+          <span>小区块</span>
         </div>
       </section>
 
