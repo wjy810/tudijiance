@@ -20,4 +20,6 @@ public class Planting {
     /** 平面图右键"标记异常"，例如倒伏、病害、缺苗 */
     private Boolean abnormal;
     private String abnormalNote;
+    /** 世代：杂交后代这一季种的是 F 几；原始材料、品种比较为空 */
+    private Integer generation;
 }

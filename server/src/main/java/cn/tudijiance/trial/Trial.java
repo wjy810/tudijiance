@@ -14,12 +14,15 @@ import lombok.Data;
 @TableName("trial")
 public class Trial {
 
+    /** 育种地块自带的试验（每块地块一个，跟着地块建、删）；不在品种比较里出现 */
+    public static final String BREEDING = "BREEDING";
+
     @TableId(type = IdType.AUTO)
     private Long id;
     private Long fieldId;
     private Integer seasonYear;
     private String name;
-    /** REGIONAL 区域试验 / PRODUCTION 生产试验 / COMPARISON 品比试验 / OBSERVATION 观察圃 */
+    /** REGIONAL 区域试验 / PRODUCTION 生产试验 / COMPARISON 品比试验 / OBSERVATION 观察圃 / BREEDING 育种地块 */
     private String trialType;
     /** 麦区 Q1–Q11 */
     private String wheatZone;

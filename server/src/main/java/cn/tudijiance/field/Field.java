@@ -32,6 +32,8 @@ public class Field {
     /** 区块布局（JSON，见 FieldLayout）；为空表示还是按行列建的老网格。不直接返回给客户端，详情里给解析好的 */
     @JsonIgnore
     private String layout;
+    /** 育种的地块属于哪一季；为空的是原来品种比较用的实验田 */
+    private Long seasonId;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

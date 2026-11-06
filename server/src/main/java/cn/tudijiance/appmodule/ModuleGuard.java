@@ -33,6 +33,7 @@ public class ModuleGuard implements HandlerInterceptor {
             new Rule(Pattern.compile("^/api/observations(/export)?$"), "GET", "data"),
             new Rule(Pattern.compile("^/api/quality(/.*)?$"), null, "quality"),
             new Rule(Pattern.compile("^/api/corrections(/.*)?$"), null, "corrections"),
+            new Rule(Pattern.compile("^/api/(seasons|lines|breeding)(/.*)?$"), null, "breeding"),
     };
 
     private final ModuleService modules;

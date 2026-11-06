@@ -21,15 +21,15 @@ import cn.tudijiance.trait.TraitOption;
  * OPERATION  农事：value_text 是类型（从选项里选），value_num 是用量（可不填）
  * </pre>
  */
-final class TraitValues {
+public final class TraitValues {
 
     private TraitValues() {
     }
 
-    record Value(BigDecimal num, String text, LocalDate date) {
+    public record Value(BigDecimal num, String text, LocalDate date) {
     }
 
-    static Value validate(TraitDef trait, List<TraitOption> options, BigDecimal num, String text, LocalDate date) {
+    public static Value validate(TraitDef trait, List<TraitOption> options, BigDecimal num, String text, LocalDate date) {
         String t = text == null || text.isBlank() ? null : text.trim();
         String name = trait.getName();
         return switch (trait.getDataType()) {
@@ -79,7 +79,7 @@ final class TraitValues {
         };
     }
 
-    static String display(TraitDef trait, List<TraitOption> options, BigDecimal num, String text, LocalDate date) {
+    public static String display(TraitDef trait, List<TraitOption> options, BigDecimal num, String text, LocalDate date) {
         String unit = trait.getUnit() == null || "级".equals(trait.getUnit()) ? "" : " " + trait.getUnit();
         return switch (trait.getDataType()) {
             case "DATE" -> date == null ? "" : date.toString();

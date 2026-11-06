@@ -60,7 +60,32 @@ public class FieldService {
     }
 
     public List<Field> list() {
-        return fieldMapper.selectList(Wrappers.<Field>lambdaQuery().orderByAsc(Field::getId));
+        return list(null);
+    }
+
+    /**
+     * scope：为空或 comparison 只列原来品种比较用的实验田；breeding 只列育种的地块（属于某一季）；all 全部
+     */
+    public List<Field> list(String scope) {
+        var query = Wrappers.<Field>lambdaQuery().orderByAsc(Field::getId);
+        if (scope == null || scope.isBlank() || "comparison".equals(scope)) {
+            query.isNull(Field::getSeasonId);
+        } else if ("breeding".equals(scope)) {
+            query.isNotNull(Field::getSeasonId);
+        } else if (!"all".equals(scope)) {
+            throw ApiException.badRequest("scope 只能是 comparison、breeding 或 all");
+        }
+        return fieldMapper.selectList(query);
+    }
+
+    /** 找不到时返回 null */
+    public Plot plotById(Long id) {
+        return id == null ? null : plotMapper.selectById(id);
+    }
+
+    /** 找不到时返回 null */
+    public Field find(Long id) {
+        return id == null ? null : fieldMapper.selectById(id);
     }
 
     public Field get(Long id) {
@@ -124,6 +149,14 @@ public class FieldService {
     public FieldLayout savedLayout(Field field) {
         return field.getLayout() == null || field.getLayout().isBlank()
                 ? null : json.readValue(field.getLayout(), FieldLayout.class);
+    }
+
+    /** 几块地的小区（一次查询） */
+    public List<Plot> plotsOf(java.util.Collection<Long> fieldIds) {
+        if (fieldIds.isEmpty()) {
+            return List.of();
+        }
+        return plotMapper.selectList(Wrappers.<Plot>lambdaQuery().in(Plot::getFieldId, fieldIds));
     }
 
     public List<Plot> plots(Long fieldId) {
@@ -197,7 +230,16 @@ public class FieldService {
 
     @Transactional
     public void delete(Long id) {
-        get(id);
+        Field field = get(id);
+        if (field.getSeasonId() != null) {
+            throw ApiException.badRequest("这是育种的地块，请在“季和地块”里删除");
+        }
+        fieldMapper.deleteById(id);
+    }
+
+    /** 删除育种的地块（由 SeasonService 先删掉它的试验） */
+    @Transactional
+    public void deleteLand(Long id) {
         fieldMapper.deleteById(id);
     }
 

@@ -49,7 +49,8 @@ public final class TrialDtos {
     public record LinkPlotView(Long plotId, boolean control) {
     }
 
-    public record PlantingView(Long plotId, Long varietyId, Integer replicateNo) {
+    /** generation：世代（育种地块里杂交后代这一季是 F 几），品种比较为空 */
+    public record PlantingView(Long plotId, Long varietyId, Integer replicateNo, Integer generation) {
     }
 
     public record Layout(Trial trial, List<PlantingView> plantings, List<LinkView> links) {

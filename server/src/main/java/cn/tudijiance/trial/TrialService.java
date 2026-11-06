@@ -82,6 +82,7 @@ public class TrialService {
 
     public Trial update(Long id, TrialRequest req) {
         Trial trial = get(id);
+        requireComparison(trial);
         if (!trial.getFieldId().equals(req.fieldId())) {
             throw ApiException.badRequest("试验建好后不能更换实验田");
         }
@@ -92,8 +93,30 @@ public class TrialService {
 
     @Transactional
     public void delete(Long id) {
-        get(id);
+        requireComparison(get(id));
         trialMapper.deleteById(id);
+    }
+
+    /** 育种地块自带的试验，跟着地块建、删 */
+    public Trial createBreeding(Long fieldId, int seasonYear, String name) {
+        Trial trial = new Trial();
+        trial.setFieldId(fieldId);
+        trial.setSeasonYear(seasonYear);
+        trial.setName(name.length() > 100 ? name.substring(0, 100) : name);
+        trial.setTrialType(Trial.BREEDING);
+        trial.setCreatedAt(LocalDateTime.now(clock));
+        trialMapper.insert(trial);
+        return trial;
+    }
+
+    public void deleteBreeding(Long trialId) {
+        trialMapper.deleteById(trialId);
+    }
+
+    private static void requireComparison(Trial trial) {
+        if (Trial.BREEDING.equals(trial.getTrialType())) {
+            throw ApiException.badRequest("这是育种地块自带的试验，跟着地块管理");
+        }
     }
 
     public Layout layout(Long trialId) {
@@ -101,7 +124,7 @@ public class TrialService {
         List<PlantingView> plantings = plantingMapper.selectList(
                         Wrappers.<Planting>lambdaQuery().eq(Planting::getTrialId, trialId))
                 .stream()
-                .map(p -> new PlantingView(p.getPlotId(), p.getVarietyId(), p.getReplicateNo()))
+                .map(p -> new PlantingView(p.getPlotId(), p.getVarietyId(), p.getReplicateNo(), p.getGeneration()))
                 .toList();
         List<ControlLink> links = linkMapper.selectList(
                 Wrappers.<ControlLink>lambdaQuery().eq(ControlLink::getTrialId, trialId).orderByAsc(ControlLink::getId));
@@ -113,6 +136,9 @@ public class TrialService {
     @Transactional
     public Layout assign(Long trialId, AssignRequest req) {
         Trial trial = get(trialId);
+        if (Trial.BREEDING.equals(trial.getTrialType()) && req.attribute() == Attribute.VARIETY) {
+            throw ApiException.badRequest("育种的地块请在平面图上用“种植”");
+        }
         List<Plot> plots = fieldService.requireInField(trial.getFieldId(), req.plotIds());
         if (req.attribute() == Attribute.VARIETY && req.value() != null) {
             if (varietyMapper.selectById(req.value()) == null) {
@@ -151,6 +177,33 @@ public class TrialService {
         }
         plantingMapper.update(null, update);
         return layout(trialId);
+    }
+
+    /**
+     * 育种地块种植：给小区块种上品系（varietyId 为空表示清掉），检查由调用方（LineService）做。
+     * 还没有种植记录的小区块自动创建。
+     */
+    @Transactional
+    public void assignVariety(Long trialId, List<Long> plotIds, Long varietyId) {
+        Trial trial = get(trialId);
+        List<Plot> plots = fieldService.requireInField(trial.getFieldId(), plotIds);
+        if (varietyId != null && plots.stream().anyMatch(p -> !Plot.KIND_PLOT.equals(p.getKind()))) {
+            throw ApiException.badRequest("道路、保护区、空地不能种");
+        }
+        Set<Long> existing = plantingMapper.selectList(Wrappers.<Planting>lambdaQuery()
+                        .eq(Planting::getTrialId, trialId).in(Planting::getPlotId, plotIds))
+                .stream().map(Planting::getPlotId).collect(Collectors.toSet());
+        for (Long plotId : new HashSet<>(plotIds)) {
+            if (!existing.contains(plotId)) {
+                Planting planting = new Planting();
+                planting.setTrialId(trialId);
+                planting.setPlotId(plotId);
+                plantingMapper.insert(planting);
+            }
+        }
+        plantingMapper.update(null, Wrappers.<Planting>lambdaUpdate()
+                .eq(Planting::getTrialId, trialId).in(Planting::getPlotId, plotIds)
+                .set(Planting::getVarietyId, varietyId));
     }
 
     @Transactional

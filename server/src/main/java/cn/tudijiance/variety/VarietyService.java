@@ -59,8 +59,20 @@ public class VarietyService {
 
     public Variety update(Long id, VarietyRequest req) {
         Variety variety = get(id);
+        String oldName = variety.getName();
         apply(variety, req);
         requireUniqueName(variety.getName(), id);
+        // 也是育种的原始材料时：名称不能有"/""*"，旧名记成曾用名
+        if (variety.isLine() && !variety.getName().equals(oldName)) {
+            String problem = cn.tudijiance.breeding.Pedigree.nameProblem(variety.getName());
+            if (problem != null) {
+                throw ApiException.badRequest(problem);
+            }
+            varietyMapper.update(null, Wrappers.<Variety>lambdaUpdate()
+                    .set(Variety::getFormerNames, cn.tudijiance.breeding.LineService.appendFormer(
+                            variety.getFormerNames(), oldName, variety.getLineCode()))
+                    .eq(Variety::getId, id));
+        }
         // 用 update 而不是 updateById：清空的字段也要写回数据库
         varietyMapper.update(null, Wrappers.<Variety>lambdaUpdate()
                 .set(Variety::getName, variety.getName())
@@ -77,6 +89,11 @@ public class VarietyService {
     /** 已经种在小区里的品种不能删除，免得历年数据对不上品种 */
     public void delete(Long id) {
         Variety variety = get(id);
+        long children = varietyMapper.selectCount(Wrappers.<Variety>lambdaQuery()
+                .eq(Variety::getMotherId, id).or().eq(Variety::getFatherId, id).or().eq(Variety::getParentId, id));
+        if (children > 0) {
+            throw ApiException.conflict("\"" + variety.getName() + "\"在育种里有 " + children + " 个子代，不能删除");
+        }
         long used = plantingMapper.selectCount(Wrappers.<Planting>lambdaQuery().eq(Planting::getVarietyId, id));
         if (used > 0) {
             throw ApiException.conflict("\"" + variety.getName() + "\"已经种在 " + used + " 个小区里，不能删除");

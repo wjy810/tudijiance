@@ -17,6 +17,9 @@ class ModuleGuardTest {
         assertThat(ModuleGuard.moduleOf("POST", "/api/ingest/devices/S1/readings")).isEqualTo("devices");
         assertThat(ModuleGuard.moduleOf("GET", "/api/observations")).isEqualTo("data");
         assertThat(ModuleGuard.moduleOf("GET", "/api/observations/export")).isEqualTo("data");
+        assertThat(ModuleGuard.moduleOf("GET", "/api/seasons")).isEqualTo("breeding");
+        assertThat(ModuleGuard.moduleOf("POST", "/api/lines/crosses")).isEqualTo("breeding");
+        assertThat(ModuleGuard.moduleOf("PUT", "/api/breeding/fields/3/plantings")).isEqualTo("breeding");
     }
 
     @Test

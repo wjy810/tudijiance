@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import cn.tudijiance.field.FieldDtos.FieldDetail;
@@ -32,8 +33,8 @@ public class FieldController {
 
     @GetMapping
     @PreAuthorize(Roles.CAN_VIEW_SETUP)
-    public List<Field> list() {
-        return fieldService.list();
+    public List<Field> list(@RequestParam(required = false) String scope) {
+        return fieldService.list(scope);
     }
 
     @GetMapping("/{id}")
