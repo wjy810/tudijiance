@@ -412,7 +412,10 @@ async function savePassword() {
       </header>
 
       <main class="app-content">
-        <RouterView />
+        <!-- 平面图之间直接跳（例如从子代的地块跳到父母当季的地块）要重新加载 -->
+        <RouterView v-slot="{ Component, route: r }">
+          <component :is="Component" :key="r.path.startsWith('/fields/') ? r.path : undefined" />
+        </RouterView>
       </main>
     </div>
 

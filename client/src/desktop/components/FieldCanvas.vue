@@ -1471,7 +1471,18 @@ function screenOf(p: { x: number; y: number }) {
   return toScreen(p)
 }
 
-defineExpose({ fit, zoomBy, zoomToPlots, zoomToRect, exportJpeg, screenOf, contentRect, clearMeasure })
+/** 屏幕上这个点是哪个区块、哪个小区（拖品系到平面图上种植时用）；onTag 表示在区块名称牌上 */
+function hitAt(clientX: number, clientY: number): { plotId?: number; blockId?: string; onTag: boolean } | null {
+  if (!host.value) return null
+  const r = host.value.getBoundingClientRect()
+  const t = targetAt({ x: clientX - r.left, y: clientY - r.top })
+  if (t.kind === 'tag') return { blockId: t.blockId, onTag: true }
+  if (t.kind === 'cell') return { plotId: t.cell.plotId ?? undefined, blockId: t.cell.blockId, onTag: false }
+  if (t.kind === 'block') return { blockId: t.item.block.id, onTag: false }
+  return null
+}
+
+defineExpose({ fit, zoomBy, zoomToPlots, zoomToRect, exportJpeg, screenOf, contentRect, clearMeasure, hitAt })
 
 // 开发时给自动化测试用：布局坐标 → 画布上的位置
 if (import.meta.env.DEV) {
