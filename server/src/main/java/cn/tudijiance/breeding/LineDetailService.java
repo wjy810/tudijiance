@@ -238,7 +238,7 @@ public class LineDetailService {
 
     // ---------- 各季的数据 ----------
 
-    private record Point(Long plotId, String place, BigDecimal num, LocalDate date, String display) {
+    private record Point(Long plotId, Places.Spot spot, BigDecimal num, LocalDate date, String display) {
     }
 
     /** 每季每个项目：各位置最近一次的值，数值和日期取平均，其它列出不同的值 */
@@ -269,9 +269,9 @@ public class LineDetailService {
                 for (Planting pl : e.getValue()) {
                     Plot plot = ctx.plots().get(pl.getPlotId());
                     Map<String, Observation> byCode = latest.getOrDefault(pl.getId(), Map.of());
-                    String place = places.spot(plot.getFieldId(), plot.getId()).text();
+                    Places.Spot spot = places.spot(plot.getFieldId(), plot.getId());
                     for (TraitDef t : traits) {
-                        Point point = point(t, byCode, plot, place, options.getOrDefault(t.getId(), List.of()));
+                        Point point = point(t, byCode, plot, spot, options.getOrDefault(t.getId(), List.of()));
                         if (point != null) {
                             points.computeIfAbsent(t.getId(), k -> new ArrayList<>()).add(point);
                         }
@@ -292,7 +292,7 @@ public class LineDetailService {
         return result;
     }
 
-    private static Point point(TraitDef t, Map<String, Observation> byCode, Plot plot, String place,
+    private static Point point(TraitDef t, Map<String, Observation> byCode, Plot plot, Places.Spot place,
                                List<TraitOption> options) {
         if (Boolean.TRUE.equals(t.getIsComputed())) {
             BigDecimal v = ComputedTraits.compute(t, byCode, plot);
@@ -329,9 +329,17 @@ public class LineDetailService {
         } else {
             display = list.stream().map(Point::display).distinct().collect(Collectors.joining("、"));
         }
+        String type = Boolean.TRUE.equals(t.getIsComputed()) ? "NUMBER" : t.getDataType();
         return new TraitValueRow(t.getId(), t.getName(), t.getCategory(), t.getSortOrder(),
                 Boolean.TRUE.equals(t.getImportant()), average, display, list.size(),
-                list.stream().map(p -> new PlotValueRow(p.plotId(), p.place(), p.display())).toList());
+                list.stream().map(p -> new PlotValueRow(p.plotId(), p.spot().text(), p.display(), p.num(),
+                        group(p.spot()), p.spot().plotCode())).toList(),
+                type, t.getUnit());
+    }
+
+    /** 哪块地块的哪个区块 */
+    private static String group(Places.Spot s) {
+        return ((s.fieldName() == null ? "" : s.fieldName()) + " " + (s.blockName() == null ? "" : s.blockName())).trim();
     }
 
     private static BigDecimal round(TraitDef t, BigDecimal v) {

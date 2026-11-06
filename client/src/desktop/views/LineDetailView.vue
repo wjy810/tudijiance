@@ -7,8 +7,10 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Download, Edit, Location, Plus } from '@element-plus/icons-vue'
 
 import { lineApi, type LineDetail, type LineRow, type LineStatus, type PlantingRow } from '@/shared/api'
-import { CONTROL_TYPE, LINE_KIND, LINE_STATUS, ECOTYPE, QUALITY_TYPE, TRAIT_CATEGORY } from '@/shared/labels'
+import { CONTROL_TYPE, LINE_KIND, LINE_STATUS, ECOTYPE, QUALITY_TYPE } from '@/shared/labels'
 import { ancestors, childrenMap, descendants, lineLabel } from '@/shared/pedigree'
+import { buildCards } from '@/shared/lineCards'
+import TraitCard from '@/desktop/components/breeding/TraitCard.vue'
 import PedigreeCanvas from '@/desktop/components/breeding/PedigreeCanvas.vue'
 import LineEditDialog from '@/desktop/components/breeding/LineEditDialog.vue'
 import SelectDialog from '@/desktop/components/breeding/SelectDialog.vue'
@@ -33,8 +35,11 @@ async function load() {
   try {
     const [d] = await Promise.all([lineApi.detail(id.value), store.loadLines(), store.loadSeasons()])
     detail.value = d
-    compareIds.value = []
     compared.value = []
+    seasonPick.value = defaultSeason(d)
+    expanded.value = new Set()
+    // 默认和父母比
+    compareIds.value = d.parents.map((x) => x.id)
   } catch (e) {
     ElMessage.error((e as Error).message)
   } finally {
@@ -47,6 +52,13 @@ watch(id, load, { immediate: true })
 async function reload() {
   await store.reload()
   await load()
+}
+
+/** 默认看哪一季：最近一季里录得差不多的（项目数到最多那季的六成），刚种下的季先不看 */
+function defaultSeason(d: LineDetail): number | null {
+  const most = Math.max(0, ...d.seasonValues.map((x) => x.traits.length))
+  const ok = d.seasonValues.filter((x) => x.traits.length >= most * 0.6)
+  return ok[ok.length - 1]?.seasonId ?? d.seasonValues[d.seasonValues.length - 1]?.seasonId ?? null
 }
 
 // ---------- 小系谱图：祖先和后代 ----------
@@ -89,26 +101,52 @@ function placesText(rows: PlantingRow[]): string {
   return [...byBlock.entries()].map(([b, codes]) => `${b} ${codes.join('、')} 号`).join('；')
 }
 
-// ---------- 各季数据和对比 ----------
+// ---------- 各季数据：每个项目一张卡片，可以和父母、兄弟品系、对照品种比 ----------
 const compareIds = ref<number[]>([])
 const compared = ref<LineDetail[]>([])
 const importantOnly = ref(true)
+const seasonPick = ref<number | null>(null)
+const expanded = ref(new Set<number>())
 
-/** 能对比的：父母和兄弟品系（同一个父母的其它子代） */
+/** 兄弟品系：同一个父母的其它子代 */
+const siblings = computed(() => {
+  const d = detail.value
+  const out = new Map<number, LineRow>()
+  d?.parents.forEach((p) => {
+    store.lines.filter((l) => l.id !== d.line.id && [l.motherId, l.fatherId, l.parentId].includes(p.id))
+      .forEach((l) => out.set(l.id, l))
+  })
+  return [...out.values()]
+})
+
+/** 能对比的：父母、兄弟品系、子代、对照品种 */
 const compareChoices = computed<{ label: string; options: LineRow[] }[]>(() => {
   const d = detail.value
   if (!d) return []
-  const siblings = new Map<number, LineRow>()
-  d.parents.forEach((p) => {
-    store.lines.filter((l) => l.id !== d.line.id && [l.motherId, l.fatherId, l.parentId].includes(p.id))
-      .forEach((l) => siblings.set(l.id, l))
-  })
+  const taken = new Set([d.line.id])
+  const group = (label: string, list: LineRow[]) => {
+    const options = list.filter((l) => !taken.has(l.id))
+    options.forEach((l) => taken.add(l.id))
+    return { label, options }
+  }
   return [
-    { label: '父母', options: d.parents },
-    { label: '兄弟品系', options: [...siblings.values()] },
-    { label: '子代', options: d.children },
+    group('父母', d.parents),
+    group('对照品种', store.lines.filter((l) => !!l.controlType)),
+    group('兄弟品系', siblings.value),
+    group('子代', d.children),
   ].filter((g) => g.options.length > 0)
 })
+
+function roleOf(id: number): string {
+  const d = detail.value
+  if (!d) return ''
+  const i = d.parents.findIndex((p) => p.id === id)
+  if (i >= 0) return d.line.kind === 'CROSS' ? (i === 0 ? '母本' : '父本') : '选自'
+  if (store.lineById.get(id)?.controlType) return '对照'
+  if (siblings.value.some((l) => l.id === id)) return '兄弟'
+  if (d.children.some((l) => l.id === id)) return '子代'
+  return ''
+}
 
 watch(compareIds, async (ids) => {
   try {
@@ -118,59 +156,25 @@ watch(compareIds, async (ids) => {
   }
 })
 
-interface Column { key: string; title: string; sub: string; values: Map<number, { display: string; tip: string }> }
-
-const columns = computed<Column[]>(() => {
+const cards = computed(() => {
   const d = detail.value
   if (!d) return []
-  const cols: Column[] = []
-  if (d.plantValues.length) {
-    cols.push({
-      key: 'plant', title: '选出时的单株', sub: '',
-      values: new Map(d.plantValues.map((v) => [v.traitId, { display: v.display, tip: '选株时当场量的这一株' }])),
-    })
-  }
-  d.seasonValues.forEach((s) => cols.push({
-    key: `s${s.seasonId}`, title: s.seasonName, sub: s.generation ? `F${s.generation}` : '',
-    values: new Map(s.traits.map((t) => [t.traitId, {
-      display: t.display,
-      tip: t.plots.map((p) => `${p.place}：${p.display}`).join('\n'),
-    }])),
-  }))
-  // 对比的品系：取它最近一季的数据
-  compared.value.forEach((c) => {
-    const last = c.seasonValues[c.seasonValues.length - 1]
-    cols.push({
-      key: `c${c.line.id}`, title: lineLabel(c.line), sub: last ? `对比 · ${last.seasonName}` : '对比 · 还没有数据',
-      values: new Map((last?.traits ?? []).map((t) => [t.traitId, {
-        display: t.display, tip: t.plots.map((p) => `${p.place}：${p.display}`).join('\n'),
-      }])),
-    })
-  })
-  return cols
+  const all = buildCards(d, compared.value.map((c) => ({ detail: c, role: roleOf(c.line.id) })), seasonPick.value)
+  return importantOnly.value ? all.filter((c) => c.important) : all
 })
 
-/** 行：出现过的项目，重要的在前，按类别、顺序排 */
-const traitRows = computed(() => {
+const hiddenCount = computed(() => {
   const d = detail.value
-  if (!d) return []
-  const map = new Map<number, { traitId: number; name: string; category: string; sortOrder: number; important: boolean }>()
-  const add = (t: { traitId: number; traitName: string; category: string; sortOrder: number; important: boolean }) => {
-    if (!map.has(t.traitId)) {
-      map.set(t.traitId, { traitId: t.traitId, name: t.traitName, category: t.category, sortOrder: t.sortOrder, important: t.important })
-    }
-  }
-  d.seasonValues.forEach((s) => s.traits.forEach(add))
-  compared.value.forEach((c) => c.seasonValues.forEach((s) => s.traits.forEach(add)))
-  d.plantValues.forEach((v) => {
-    if (!map.has(v.traitId)) {
-      map.set(v.traitId, { traitId: v.traitId, name: v.traitName, category: '', sortOrder: 0, important: true })
-    }
-  })
-  return [...map.values()]
-    .filter((r) => !importantOnly.value || r.important)
-    .sort((a, b) => Number(b.important) - Number(a.important) || a.category.localeCompare(b.category) || a.sortOrder - b.sortOrder)
+  if (!d || !importantOnly.value) return 0
+  return buildCards(d, [], seasonPick.value).filter((c) => !c.important).length
 })
+
+function toggleCard(id: number) {
+  const next = new Set(expanded.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  expanded.value = next
+}
 
 // ---------- 操作 ----------
 const editDialog = ref(false)
@@ -339,14 +343,19 @@ function onCrossSaved(r: { line: LineRow }) {
         <div class="values-head">
           <h3>各季的数据</h3>
           <div class="values-tools">
+            <el-radio-group v-if="detail.seasonValues.length > 1" v-model="seasonPick" size="small">
+              <el-radio-button v-for="sv in detail.seasonValues" :key="sv.seasonId" :value="sv.seasonId">
+                {{ sv.seasonName }}<template v-if="sv.generation"> · F{{ sv.generation }}</template>
+              </el-radio-button>
+            </el-radio-group>
             <el-checkbox v-model="importantOnly">只看重要项目</el-checkbox>
             <el-select
               v-model="compareIds"
               multiple
               collapse-tags
               collapse-tags-tooltip
-              placeholder="和父母、兄弟品系对比"
-              style="width: 280px"
+              placeholder="和父母、对照、兄弟品系比"
+              style="width: 260px"
               :disabled="compareChoices.length === 0"
             >
               <el-option-group v-for="g in compareChoices" :key="g.label" :label="g.label">
@@ -355,28 +364,27 @@ function onCrossSaved(r: { line: LineRow }) {
             </el-select>
           </div>
         </div>
-        <div class="hint">每季每个项目取各位置最近一次录的值，数值和日期取平均；鼠标移到值上看每个位置的值。</div>
-        <el-table v-if="columns.length && traitRows.length" :data="traitRows" border size="small" class="values">
-          <el-table-column label="项目" min-width="140" fixed>
-            <template #default="{ row }">
-              <span :class="{ imp: row.important }">{{ row.name }}</span>
-              <span v-if="row.category" class="cat">{{ TRAIT_CATEGORY[row.category as keyof typeof TRAIT_CATEGORY] }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column v-for="c in columns" :key="c.key" min-width="130" :class-name="c.key.startsWith('c') ? 'cmp' : ''">
-            <template #header>
-              <div class="col-title">{{ c.title }}</div>
-              <div v-if="c.sub" class="col-sub">{{ c.sub }}</div>
-            </template>
-            <template #default="{ row }">
-              <el-tooltip v-if="c.values.get(row.traitId)" placement="top" :content="c.values.get(row.traitId)!.tip" :show-after="300">
-                <span class="cell">{{ c.values.get(row.traitId)!.display }}</span>
-              </el-tooltip>
-              <span v-else class="none">—</span>
-            </template>
-          </el-table-column>
-        </el-table>
-        <EmptyState v-else art="data" :size="90" title="还没有数据" desc="种下去以后，在平面图上选中它种的小区块录入，数据就归到这个品系名下。" />
+        <div class="hint legend">
+          每个项目一张卡片：大字是这一季各位置的平均（每个位置取最近一次录的值），
+          <span class="lg"><i class="lg-dot" />每个位置</span>
+          <span class="lg"><i class="lg-mean" />平均</span>
+          <span class="lg"><i class="lg-tri" />对比的品系</span>
+          <span v-if="detail.plantValues.length" class="lg"><i class="lg-dia" />选出时的单株</span>
+          ；下面一排是各季的值，点一季换着看。
+        </div>
+        <div v-if="cards.length" class="cards">
+          <TraitCard
+            v-for="c in cards" :key="c.traitId" :card="c" :season-id="seasonPick" :expanded="expanded.has(c.traitId)"
+            @pick-season="(sid: number) => (seasonPick = sid)" @toggle="toggleCard(c.traitId)"
+          />
+        </div>
+        <EmptyState
+          v-else-if="!hiddenCount" art="data" :size="90" title="还没有数据"
+          desc="种下去以后，在平面图上选中它种的小区块录入，数据就归到这个品系名下。"
+        />
+        <div v-if="hiddenCount" class="hint more-traits">
+          还有 {{ hiddenCount }} 个不是重要项目的，<el-button link type="primary" @click="importantOnly = false">都显示</el-button>
+        </div>
       </section>
     </template>
 
@@ -565,44 +573,61 @@ h3 {
   display: flex;
   gap: 12px;
   align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
-.values {
-  margin-top: 8px;
+.legend {
+  margin: 4px 0 12px;
+  line-height: 1.9;
 }
 
-.values :deep(.cmp) {
-  background: var(--sky-wash);
+.lg {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 6px;
 }
 
-.col-title {
-  font-weight: 600;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.lg i {
+  display: inline-block;
 }
 
-.col-sub {
-  font-size: 11px;
-  color: var(--ink-3);
-  font-weight: 400;
+.lg-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: rgba(46, 107, 79, 0.55);
 }
 
-.imp {
-  font-weight: 600;
+.lg-mean {
+  width: 3px;
+  height: 12px;
+  border-radius: 2px;
+  background: var(--forest);
 }
 
-.cat {
-  margin-left: 6px;
-  font-size: 11px;
-  color: var(--ink-4);
+.lg-tri {
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 8px solid var(--sky);
 }
 
-.none {
-  color: var(--ink-4);
+.lg-dia {
+  width: 7px;
+  height: 7px;
+  transform: rotate(45deg);
+  background: var(--wheat);
 }
 
-.cell {
-  cursor: default;
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+
+.more-traits {
+  margin-top: 10px;
 }
 </style>

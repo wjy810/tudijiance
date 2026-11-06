@@ -964,7 +964,11 @@ export interface TraitValueRow {
   average: number | null
   display: string
   count: number
-  plots: { plotId: number; place: string; display: string }[]
+  /** 每个位置的值：value 是数值（数值、分级、算出来的），group 是哪块地块的哪个区块 */
+  plots: { plotId: number; place: string; display: string; value: number | null; group: string; plotCode: string | null }[]
+  /** 项目类型（算出来的项目算 NUMBER）和单位，按类型画卡片 */
+  dataType: TraitDataType
+  unit: string | null
 }
 
 export interface SeasonValues {

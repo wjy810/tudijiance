@@ -158,11 +158,14 @@ public final class BreedingDtos {
                                  LocalDate valueDate, String display) {
     }
 
-    public record PlotValueRow(Long plotId, String place, String display) {
+    /** 一个位置的值：value 是数值（数值、分级、算出来的项目），group 是哪块地块的哪个区块，按区块分组显示用 */
+    public record PlotValueRow(Long plotId, String place, String display, BigDecimal value, String group, String plotCode) {
     }
 
+    /** dataType、unit：前端按类型画卡片（数值画范围和各位置的点，选项数每种有几个） */
     public record TraitValueRow(Long traitId, String traitName, String category, int sortOrder, boolean important,
-                                BigDecimal average, String display, int count, List<PlotValueRow> plots) {
+                                BigDecimal average, String display, int count, List<PlotValueRow> plots,
+                                String dataType, String unit) {
     }
 
     public record SeasonValues(Long seasonId, String seasonName, Integer generation, List<TraitValueRow> traits) {
