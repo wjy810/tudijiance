@@ -24,12 +24,13 @@ import { useCatalogStore } from '@/stores/catalog'
 import { useModuleStore } from '@/stores/modules'
 import { useBreedingStore } from '@/stores/breeding'
 import FieldCanvas, {
-  type CanvasCell, type CanvasDevice, type CanvasLink, type CanvasTool, type TrackResize,
+  type CanvasCell, type CanvasDevice, type CanvasLink, type CanvasTool, type RoadAction, type TrackResize,
 } from '@/desktop/components/FieldCanvas.vue'
 import {
-  BLOCK_KIND, CELL_KIND, anchors, blockSpan, checkLayout, fieldSize, fmt, innerCells, keyOf, mergeAt, moveBlockFit, moveCells,
-  parseKey, plotPlace, plotPlaces, removedPlots, setBlockKind, setCellKinds, setInnerTrackPair, setTrackPair, swapBlocks,
-  splitBlock, splitInner, type BlockKind, type CellKind, type FieldLayout,
+  BLOCK_KIND, CELL_KIND, addRoad, addRoadProblem, anchors, blockSpan, checkLayout, defaultRoadWidth, fieldSize, fmt, innerCells,
+  keyOf, mergeAt, moveBlockFit, moveCells, parseKey, plotPlace, plotPlaces, removeRoad, removedPlots, roadOfBlock, roadToBlocks,
+  round, setBlockKind, setCellKinds, setInnerTrackPair, setTrackPair, swapBlocks, splitBlock, splitInner, trackToRoad,
+  trackToRoadProblem, type Axis, type BlockKind, type CellKind, type FieldLayout,
 } from '@/shared/fieldLayout'
 import { useLayoutDraft } from '@/desktop/components/layoutDraft'
 import LayoutEditPanel from '@/desktop/components/LayoutEditPanel.vue'
@@ -238,6 +239,7 @@ watch(mode, (m, old) => {
     draft.begin()
   } else if (old === 'edit') {
     draft.end()
+    if (tool.value === 'road') tool.value = 'select'
   }
 })
 
@@ -250,9 +252,10 @@ watch([focus, selectedBlocks], () => {
   }
 })
 
-watch(focus, () => {
+watch(focus, (f) => {
   selectedCells.value = []
   track.value = null
+  if (f && tool.value === 'road') tool.value = 'select'
 })
 
 /** 点了标尺：编辑时选中那一行（列）的区块或小区，并显示它的大小 */
@@ -296,6 +299,90 @@ function onResizeTrack(r: TrackResize) {
   } else if (focus.value && r.b != null) {
     draft.apply(setInnerTrackPair(l, focus.value, r.axis, r.index, r.a, r.b))
   }
+}
+
+// ---------- 道路 ----------
+
+/** 道路工具加的道路多宽（单位同布局）；点开道路工具时按已有道路的宽 */
+const roadWidth = ref(1)
+
+/** 道路工具点了区块之间的线或道路 */
+function onRoad(r: RoadAction) {
+  const l = draft.draft.value
+  if (!l) return
+  if (r.action === 'add') {
+    const problem = addRoadProblem(l, r.axis, r.index)
+    if (problem) {
+      ElMessage.warning(problem)
+      return
+    }
+    draft.apply(addRoad(l, r.axis, r.index, roadWidth.value))
+  } else {
+    draft.apply(removeRoad(l, r.axis, r.index))
+  }
+  selectedBlocks.value = []
+  track.value = null
+}
+
+/** 在区块的上下左右加一条道路（右键菜单） */
+function roadBeside(blockId: string, side: 'top' | 'bottom' | 'left' | 'right') {
+  const l = draft.draft.value
+  const b = l?.blocks.find((x) => x.id === blockId)
+  if (!l || !b) return
+  const sp = blockSpan(l, b)
+  const axis: Axis = side === 'top' || side === 'bottom' ? 'row' : 'col'
+  const index = side === 'top' ? sp.r : side === 'bottom' ? sp.r + sp.rs : side === 'left' ? sp.c : sp.c + sp.cs
+  onRoad({ action: 'add', axis, index })
+}
+
+/** 区块所在的这一行（列）改成道路：里面的小区会去掉，先问 */
+async function trackOfBlockToRoad(blockId: string, axis: Axis) {
+  const l = draft.draft.value
+  const b = l?.blocks.find((x) => x.id === blockId)
+  if (!l || !b) return
+  const sp = blockSpan(l, b)
+  const index = axis === 'row' ? sp.r : sp.c
+  const problem = trackToRoadProblem(l, axis, index)
+  if (problem) {
+    ElMessage.warning(problem)
+    return
+  }
+  const next = trackToRoad(l, axis, index)
+  const gone = removedPlots(l, next)
+  if (gone.length > 0) {
+    try {
+      await ElMessageBox.confirm(
+        `第 ${index + 1} ${axis === 'row' ? '行' : '列'}改成道路，会去掉里面 ${gone.length} 个${U.value}。已经种了、录了数据的保存时不能去掉。`,
+        '改成道路', { type: 'warning', confirmButtonText: '改成道路', cancelButtonText: '取消' },
+      )
+    } catch {
+      return
+    }
+  }
+  draft.apply(next)
+  selectedBlocks.value = []
+}
+
+/** 右键的区块在不在一条整条道路上 */
+const editMenuRoad = computed(() => {
+  const l = draft.draft.value
+  const id = editMenu.value?.blockId
+  return l && id ? roadOfBlock(l, id) : null
+})
+
+const editMenuBlock = computed(() => {
+  const id = editMenu.value?.blockId
+  return id ? draft.draft.value?.blocks.find((b) => b.id === id) ?? null : null
+})
+
+function roadToBlocksAt(r: { axis: Axis; index: number }) {
+  const l = draft.draft.value
+  if (l) draft.apply(roadToBlocks(l, r.axis, r.index))
+  selectedBlocks.value = []
+}
+
+function removeRoadAt(r: { axis: Axis; index: number }) {
+  onRoad({ action: 'remove', ...r })
 }
 
 /** 拖选中的格子：小区跟着挪，原来那里的小区换过来 */
@@ -442,6 +529,10 @@ watch(mode, (m) => {
 /** 画布缩放比例（相对"正好放下"的百分比） */
 const zoom = ref(100)
 const tool = ref<CanvasTool>('select')
+
+watch(tool, (t) => {
+  if (t === 'road' && draft.draft.value) roadWidth.value = defaultRoadWidth(draft.draft.value)
+})
 const canvasRef = ref<InstanceType<typeof FieldCanvas> | null>(null)
 
 function zoomBy(factor: number) {
@@ -789,7 +880,8 @@ const menu = ref<{ x: number; y: number; plotId: number | null; blockId: string 
 
 function onContextMenu(target: { plotId?: number; blockId?: string; cell?: string }, x: number, y: number) {
   // 育种的地块菜单长一些
-  const at = { x: Math.min(x, window.innerWidth - 220), y: Math.max(8, Math.min(y, window.innerHeight - (isBreeding.value && mode.value !== 'edit' ? 480 : 340))) }
+  const tall = mode.value === 'edit' ? 470 : isBreeding.value ? 480 : 340
+  const at = { x: Math.min(x, window.innerWidth - 220), y: Math.max(8, Math.min(y, window.innerHeight - tall)) }
   if (mode.value === 'edit') {
     if (target.blockId || target.cell) editMenu.value = { ...at, blockId: target.blockId, cell: target.cell }
     return
@@ -898,6 +990,8 @@ function onKey(e: KeyboardEvent) {
     tool.value = tool.value === 'measure' ? 'select' : 'measure'
   } else if (k === 'h' && !view3d.value) {
     tool.value = tool.value === 'pan' ? 'select' : 'pan'
+  } else if (k === 'r' && mode.value === 'edit' && !focus.value) {
+    tool.value = tool.value === 'road' ? 'select' : 'road'
   } else if (k === 'v') {
     tool.value = 'select'
   } else if (e.key === ']') {
@@ -1745,6 +1839,8 @@ const SHORTCUTS: { keys: string; text: string }[] = [
   { keys: 'F', text: '适应窗口（3D 里回到默认视角）' },
   { keys: 'N', text: '图纸朝上和正北朝上切换' },
   { keys: 'V / H / M', text: '选择 / 拖动画面 / 测距' },
+  { keys: 'R', text: '编辑地块：道路工具（点区块之间的线加道路，点道路删掉）' },
+  { keys: 'Alt + 拖线', text: '编辑地块：两边一起变，地块总大小不变（平时地块跟着变）' },
   { keys: '空格 + 拖动', text: '拖动画面（滚轮缩放）' },
   { keys: 'Ctrl / Shift + 点', text: '加选；拖动框选' },
   { keys: 'Ctrl Z / Ctrl Y / Ctrl S', text: '编辑地块：撤销 / 重做 / 保存' },
@@ -1872,6 +1968,7 @@ function runEdit(fn: () => void) {
           :links="mode === 'edit' ? NO_LINKS : gridLinks"
           :devices="mode === 'edit' ? NO_DEVICES : gridDevices"
           :tool="tool"
+          :road-width="roadWidth"
           :pick="mode === 'edit' ? (focus ? 'cell' : 'block') : 'plot'"
           :rulers="mode === 'edit'"
           :editable="mode === 'edit'"
@@ -1883,6 +1980,7 @@ function runEdit(fn: () => void) {
           @track="onTrack"
           @move-fit="onMoveFit"
           @resize-track="onResizeTrack"
+          @road="onRoad"
           @move-cells="onMoveCells"
           @swap-blocks="onSwapBlocks"
         />
@@ -1948,6 +2046,16 @@ function runEdit(fn: () => void) {
               <span class="crumb-meta num">{{ focusBlock.inner?.rows.length }} × {{ focusBlock.inner?.cols.length }}</span>
               <button type="button" class="crumb-x" title="回到整块地（Esc）" aria-label="回到整块地" @click="leaveBlock"><el-icon><Close /></el-icon></button>
             </div>
+            <div v-if="mode === 'edit' && tool === 'road' && !focus && shownLayout" class="road-bar" @keydown.stop>
+              <i class="road-icon" />
+              <span>道路宽</span>
+              <el-input-number
+                v-model="roadWidth" :min="0.01" :max="1000" :precision="2" :step="0.5" size="small" controls-position="right"
+                class="road-w"
+              />
+              <span>{{ shownLayout.unit.symbol }}</span>
+              <span class="road-tip">点区块之间的线加道路，点道路删掉。别的区块不变小，地块跟着变大。Esc 退出</span>
+            </div>
           </div>
 
           <!-- 右上：视角、着色 -->
@@ -2010,6 +2118,11 @@ function runEdit(fn: () => void) {
                 <button class="tool" :class="{ on: tool === 'select' }" title="选择（V）" aria-label="选择" @click="tool = 'select'"><el-icon><Pointer /></el-icon></button>
                 <button class="tool" :class="{ on: tool === 'pan' }" title="拖动画面（H，也可以按住空格或滚轮拖动）" aria-label="拖动画面" @click="tool = tool === 'pan' ? 'select' : 'pan'"><el-icon><Rank /></el-icon></button>
                 <button class="tool" :class="{ on: tool === 'measure' }" title="测距（M）：点两下量距离" aria-label="测距" @click="tool = tool === 'measure' ? 'select' : 'measure'"><el-icon><Odometer /></el-icon></button>
+                <button
+                  v-if="mode === 'edit'" class="tool road-tool" :class="{ on: tool === 'road' }" :disabled="!!focus"
+                  title="道路（R）：点区块之间的线加道路，点道路删掉；别的区块不变小，地块跟着变大"
+                  aria-label="道路" @click="tool = tool === 'road' ? 'select' : 'road'"
+                ><i class="road-icon" /></button>
                 <span class="tool-sep" />
               </template>
               <button class="tool" title="缩小" aria-label="缩小" @click="zoomBy(1 / 1.25)"><el-icon><ZoomOut /></el-icon></button>
@@ -2391,6 +2504,23 @@ function runEdit(fn: () => void) {
         >
           拆开
         </div>
+        <template v-if="selectedBlocks.length <= 1 && editMenuRoad">
+          <div class="menu-sep" />
+          <div class="menu-item" @click="runEdit(() => removeRoadAt(editMenuRoad!))">删掉这条道路<span class="menu-note">地块变小</span></div>
+          <div class="menu-item" @click="runEdit(() => roadToBlocksAt(editMenuRoad!))">这条道路改成区块</div>
+        </template>
+        <template v-else-if="selectedBlocks.length <= 1 && editMenuBlock && editMenuBlock.kind !== 'ROAD'">
+          <div class="menu-sep" />
+          <div class="menu-sub">加道路<span class="menu-note">别的区块不变小</span></div>
+          <div class="menu-row">
+            <button type="button" @click="runEdit(() => roadBeside(editMenu!.blockId!, 'top'))">上面</button>
+            <button type="button" @click="runEdit(() => roadBeside(editMenu!.blockId!, 'bottom'))">下面</button>
+            <button type="button" @click="runEdit(() => roadBeside(editMenu!.blockId!, 'left'))">左边</button>
+            <button type="button" @click="runEdit(() => roadBeside(editMenu!.blockId!, 'right'))">右边</button>
+          </div>
+          <div class="menu-item" @click="runEdit(() => trackOfBlockToRoad(editMenu!.blockId!, 'row'))">这一行改成道路</div>
+          <div class="menu-item" @click="runEdit(() => trackOfBlockToRoad(editMenu!.blockId!, 'col'))">这一列改成道路</div>
+        </template>
         <div class="menu-sep" />
         <div v-for="k in (['PLANT', 'ROAD', 'GUARD', 'BLANK'] as BlockKind[])" :key="k" class="menu-item" @click="runEdit(() => applyBlockKind(k))">设成{{ BLOCK_KIND[k] }}</div>
       </template>
@@ -3537,6 +3667,79 @@ kbd {
   height: 1px;
   background: var(--line);
   margin: 4px 0;
+}
+
+.menu-note {
+  font-size: 11.5px;
+  color: var(--ink-3);
+}
+
+.menu-sub {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 10px 3px;
+  color: var(--ink-2);
+}
+
+.menu-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+  padding: 2px 6px 6px;
+}
+
+.menu-row button {
+  padding: 4px 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.menu-row button:hover {
+  border-color: var(--green-2);
+  background: var(--green-wash);
+}
+
+/* 道路工具：一段带虚线的路 */
+.road-icon {
+  display: inline-block;
+  width: 16px;
+  height: 10px;
+  border-radius: 2px;
+  background: #cdbf9f linear-gradient(90deg, transparent 15%, #fff 15%, #fff 40%, transparent 40%, transparent 60%, #fff 60%, #fff 85%, transparent 85%) center / 100% 1.5px no-repeat;
+  border: 1px solid #8a7a55;
+}
+
+.tool.on .road-icon {
+  border-color: #fff;
+}
+
+.road-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 10px;
+  background: rgba(255, 253, 248, 0.96);
+  border: 1px solid rgba(90, 70, 30, 0.2);
+  box-shadow: 0 6px 18px -10px rgba(60, 40, 10, 0.45);
+  font-size: 13px;
+  color: var(--ink-2);
+  max-width: 640px;
+}
+
+.road-w {
+  width: 96px;
+}
+
+.road-tip {
+  font-size: 12px;
+  color: var(--ink-3);
 }
 
 .shortcuts {

@@ -295,39 +295,56 @@ export interface CreateOptions {
   innerCols: number
   /** 区块之间的道路宽，0 表示不留 */
   roadW: number
+  /** 区块行之间的横向道路宽，不给时用 roadW；0 表示不留 */
+  rowRoadW?: number
+  /** 区块列之间的纵向道路宽，不给时用 roadW；0 表示不留 */
+  colRoadW?: number
 }
 
 function evenInner(rows: number, cols: number): Inner {
   return { rows: Array(rows).fill(1), cols: Array(cols).fill(1), merges: [], plots: {} }
 }
 
-/** 初始化：几行几列区块、每块多宽多高、里面几行几列小区，区块之间可以留道路 */
+/**
+ * 初始化：几行几列区块、每块多宽多高、里面几行几列小区，区块之间可以留横向、纵向道路。
+ * 地块大小就是区块加道路加起来，以后加区块、加道路地块跟着变大
+ */
 export function createLayout(o: CreateOptions): FieldLayout {
-  const road = o.roadW > 0
+  const rowRoad = o.rowRoadW ?? o.roadW
+  const colRoad = o.colRoadW ?? o.roadW
   const rows: number[] = []
   const cols: number[] = []
+  const roadRow: boolean[] = []
+  const roadCol: boolean[] = []
   for (let i = 0; i < o.blockRows; i++) {
-    if (road && i > 0) rows.push(o.roadW)
+    if (rowRoad > 0 && i > 0) {
+      rows.push(rowRoad)
+      roadRow.push(true)
+    }
     rows.push(o.blockH)
+    roadRow.push(false)
   }
   for (let j = 0; j < o.blockCols; j++) {
-    if (road && j > 0) cols.push(o.roadW)
+    if (colRoad > 0 && j > 0) {
+      cols.push(colRoad)
+      roadCol.push(true)
+    }
     cols.push(o.blockW)
+    roadCol.push(false)
   }
   const merges: Span[] = []
   const blocks: LayoutBlock[] = []
   let no = 1
   let roadNo = 1
   for (let r = 0; r < rows.length; r++) {
-    const roadRow = road && r % 2 === 1
-    if (roadRow) {
+    if (roadRow[r]) {
       // 横向道路整行合并成一条
       if (cols.length > 1) merges.push({ r, c: 0, rs: 1, cs: cols.length })
       blocks.push({ id: `R${roadNo++}`, r, c: 0, name: '道路', kind: 'ROAD', fit: null, inner: null })
       continue
     }
     for (let c = 0; c < cols.length; c++) {
-      if (road && c % 2 === 1) {
+      if (roadCol[c]) {
         blocks.push({ id: `R${roadNo++}`, r, c, name: '道路', kind: 'ROAD', fit: null, inner: null })
       } else {
         blocks.push({
@@ -673,9 +690,32 @@ export function renameBlock(layout: FieldLayout, id: string, name: string): Fiel
   return mapBlocks(layout, [id], (b) => { b.name = name.trim().slice(0, 30) || b.name })
 }
 
-/** 改区块类型。改成道路、保护区、空地时，里面的小区去掉；改回种植区块时按默认行列分小区 */
+/**
+ * 改区块类型。改成道路、保护区、空地时，里面的小区去掉；改回种植区块时按默认行列分小区。
+ * 一整行（列）都成了道路时，这一行（列）收窄成道路宽，并成一条；整条道路改回种植区块时，
+ * 按旁边区块的大小放宽，并按列（行）分成一个个区块（和纵向道路交叉的地方还是道路）
+ */
 export function setBlockKind(layout: FieldLayout, ids: string[], kind: BlockKind): FieldLayout {
-  return mapBlocks(layout, ids, (b, l) => {
+  // 一条整条道路的各段都选上了、改成种植区块：按整条道路处理
+  const strips: { axis: Axis; index: number }[] = []
+  const handled = new Set<string>()
+  if (kind === 'PLANT') {
+    const sel = new Set(ids)
+    for (const axis of ['row', 'col'] as Axis[]) {
+      const n = trackList(layout, axis).length
+      if (n <= 1) continue
+      for (let i = 0; i < n; i++) {
+        if (!isRoadTrack(layout, axis, i)) continue
+        const own = roadSegments(layout, axis, i)
+        if (own.length > 0 && own.every((id) => sel.has(id))) {
+          strips.push({ axis, index: i })
+          own.forEach((id) => handled.add(id))
+        }
+      }
+    }
+  }
+  const rest = ids.filter((id) => !handled.has(id))
+  const changed = mapBlocks(layout, rest, (b, l) => {
     if (b.kind === kind) return
     if (kind === 'PLANT') {
       const d = l.defaultInner ?? { rows: 1, cols: 1 }
@@ -687,6 +727,9 @@ export function setBlockKind(layout: FieldLayout, ids: string[], kind: BlockKind
     }
     b.kind = kind
   })
+  let next = fitRoadTracks(layout, changed)
+  for (const s of strips) next = roadToBlocks(next, s.axis, s.index)
+  return next
 }
 
 /**
@@ -1016,6 +1059,229 @@ export function setCellKinds(layout: FieldLayout, id: string, keys: string[], ki
     for (const k of keys) kinds[k] = kind
     putKinds(inner, kinds)
   })
+}
+
+// ---------- 道路 ----------
+//
+// 整行（列）都是道路的叫"整条道路"。加道路是插进一行（列），地块跟着变大，别的区块不变小；
+// 删道路是把这一行（列）去掉，地块跟着变小
+
+const median = (a: number[]) => {
+  const s = [...a].sort((x, y) => x - y)
+  const m = Math.floor(s.length / 2)
+  return s.length % 2 ? s[m]! : (s[m - 1]! + s[m]!) / 2
+}
+
+const trackList = (l: FieldLayout, axis: Axis) => (axis === 'row' ? l.rows : l.cols)
+const cellOf = (axis: Axis, index: number, k: number) => (axis === 'row' ? { r: index, c: k } : { r: k, c: index })
+const startOf = (axis: Axis, s: Span) => (axis === 'row' ? s.r : s.c)
+const lenOf = (axis: Axis, s: Span) => (axis === 'row' ? s.rs : s.cs)
+
+/** 第 index 行（列）是不是整条都是道路 */
+export function isRoadTrack(l: FieldLayout, axis: Axis, index: number): boolean {
+  const tracks = trackList(l, axis)
+  if (index < 0 || index >= tracks.length) return false
+  const n = axis === 'row' ? l.cols.length : l.rows.length
+  for (let k = 0; k < n; k++) {
+    const { r, c } = cellOf(axis, index, k)
+    if (blockAt(l, r, c)?.kind !== 'ROAD') return false
+  }
+  return true
+}
+
+/** 第 index 行（列）里除了和另一个方向的整条道路交叉的地方，还有没有道路 */
+function hasOwnRoad(l: FieldLayout, axis: Axis, index: number): boolean {
+  const perp: Axis = axis === 'row' ? 'col' : 'row'
+  const n = trackList(l, perp).length
+  for (let k = 0; k < n; k++) {
+    const { r, c } = cellOf(axis, index, k)
+    if (blockAt(l, r, c)?.kind === 'ROAD' && !isRoadTrack(l, perp, k)) return true
+  }
+  return false
+}
+
+/** 一条整条道路由哪几段（区块）组成：不算和另一个方向的整条道路交叉的格子 */
+export function roadSegments(l: FieldLayout, axis: Axis, index: number): string[] {
+  const perp: Axis = axis === 'row' ? 'col' : 'row'
+  return l.blocks.filter((b) => {
+    if (b.kind !== 'ROAD') return false
+    const s = blockSpan(l, b)
+    if (startOf(axis, s) !== index || lenOf(axis, s) !== 1) return false
+    return !(lenOf(perp, s) === 1 && isRoadTrack(l, perp, startOf(perp, s)))
+  }).map((b) => b.id)
+}
+
+/** 区块在哪条整条道路上（横向优先）；不在整条道路上时 null */
+export function roadOfBlock(l: FieldLayout, id: string): { axis: Axis; index: number } | null {
+  const b = l.blocks.find((x) => x.id === id)
+  if (!b || b.kind !== 'ROAD') return null
+  const s = blockSpan(l, b)
+  if (s.rs === 1 && isRoadTrack(l, 'row', s.r)) return { axis: 'row', index: s.r }
+  if (s.cs === 1 && isRoadTrack(l, 'col', s.c)) return { axis: 'col', index: s.c }
+  return null
+}
+
+/** 新加道路默认多宽：已有整条道路的宽（取中间值），没有时 1 米 */
+export function defaultRoadWidth(l: FieldLayout): number {
+  const ws = [
+    ...l.rows.filter((_, i) => isRoadTrack(l, 'row', i)),
+    ...l.cols.filter((_, i) => isRoadTrack(l, 'col', i)),
+  ]
+  return round(ws.length ? median(ws) : 1 / l.unit.meters, 3)
+}
+
+/** 道路改回区块时这一行（列）多大：同方向不是道路的行（列）取中间值 */
+function plantTrackSize(l: FieldLayout, axis: Axis): number {
+  const tracks = trackList(l, axis)
+  const ws = tracks.filter((_, i) => !isRoadTrack(l, axis, i))
+  if (ws.length) return round(median(ws), 4)
+  return round(Math.max(...tracks) * 4, 4)
+}
+
+/** 能不能在第 index 行（列）前面加一条道路；不能时返回原因 */
+export function addRoadProblem(l: FieldLayout, axis: Axis, index: number): string | null {
+  const tracks = trackList(l, axis)
+  if (index < 0 || index > tracks.length) return '位置不对'
+  if (tracks.length >= MAX_BLOCK_TRACKS) return `区块最多 ${MAX_BLOCK_TRACKS} 行、${MAX_BLOCK_TRACKS} 列`
+  if (isRoadTrack(l, axis, index - 1) || isRoadTrack(l, axis, index)) return '旁边已经是道路了'
+  for (const m of l.merges) {
+    const s = startOf(axis, m)
+    if (s < index && s + lenOf(axis, m) > index && blockAt(l, m.r, m.c)?.kind !== 'ROAD') {
+      return '有合并的区块跨过这里，先拆开再加道路'
+    }
+  }
+  return null
+}
+
+/**
+ * 在第 index 行（列）前面插一条道路（index 等于行数时加在最后）。axis 为 row 是横向道路，col 是纵向道路。
+ * 地块跟着变大，别的区块大小不变；碰到纵向（横向）道路的地方连通
+ */
+export function addRoad(layout: FieldLayout, axis: Axis, index: number, width: number): FieldLayout {
+  if (!(width > 0) || addRoadProblem(layout, axis, index)) return layout
+  const l = clone(layout)
+  trackList(l, axis).splice(index, 0, round(width, 4))
+  for (const m of l.merges) {
+    if (startOf(axis, m) >= index) {
+      if (axis === 'row') m.r++
+      else m.c++
+    } else if (startOf(axis, m) + lenOf(axis, m) > index) {
+      // 跨过来的道路跟着变长
+      if (axis === 'row') m.rs++
+      else m.cs++
+    }
+  }
+  for (const b of l.blocks) {
+    if (startOf(axis, { r: b.r, c: b.c, rs: 1, cs: 1 }) >= index) {
+      if (axis === 'row') b.r++
+      else b.c++
+    }
+  }
+  fillRoad(l, axis, index)
+  reconcileFits(l)
+  return l
+}
+
+/** 第 index 行（列）里没被盖住的格子，连着的并成一段道路 */
+function fillRoad(l: FieldLayout, axis: Axis, index: number) {
+  const n = axis === 'row' ? l.cols.length : l.rows.length
+  let run: number[] = []
+  const flush = () => {
+    if (run.length === 0) return
+    const k0 = run[0]!
+    const { r, c } = cellOf(axis, index, k0)
+    l.blocks.push(newBlock(l, r, c, 'ROAD'))
+    if (run.length > 1) l.merges.push(axis === 'row' ? { r, c, rs: 1, cs: run.length } : { r, c, rs: run.length, cs: 1 })
+    run = []
+  }
+  for (let k = 0; k < n; k++) {
+    const { r, c } = cellOf(axis, index, k)
+    if (mergeAt(l.merges, r, c)) flush()
+    else run.push(k)
+  }
+  flush()
+}
+
+/** 去掉只占这一行（列）的区块和合并，返回去掉后的布局（不改原来的） */
+function clearTrack(layout: FieldLayout, axis: Axis, index: number): FieldLayout {
+  const l = clone(layout)
+  const inTrack = (s: Span) => startOf(axis, s) === index && lenOf(axis, s) === 1
+  l.blocks = l.blocks.filter((b) => !inTrack(spanOf(layout.merges, b.r, b.c)))
+  l.merges = l.merges.filter((m) => !inTrack(m))
+  return l
+}
+
+/** 删掉一条整条道路：这一行（列）去掉，地块跟着变小 */
+export function removeRoad(layout: FieldLayout, axis: Axis, index: number): FieldLayout {
+  if (!isRoadTrack(layout, axis, index) || trackList(layout, axis).length <= 1) return layout
+  return removeTrack(layout, axis, index)
+}
+
+/** 能不能把一整行（列）改成道路；不能时返回原因 */
+export function trackToRoadProblem(l: FieldLayout, axis: Axis, index: number): string | null {
+  if (index < 0 || index >= trackList(l, axis).length) return '位置不对'
+  for (const m of l.merges) {
+    const s = startOf(axis, m)
+    const crosses = s <= index && s + lenOf(axis, m) > index && lenOf(axis, m) > 1
+    if (crosses && blockAt(l, m.r, m.c)?.kind !== 'ROAD') return '有合并的区块跨过这一行（列），先拆开'
+  }
+  return null
+}
+
+/** 把一整行（列）改成一条道路：里面的区块（和小区）去掉，收窄成 width（不给时用默认道路宽） */
+export function trackToRoad(layout: FieldLayout, axis: Axis, index: number, width?: number): FieldLayout {
+  if (trackToRoadProblem(layout, axis, index)) return layout
+  const l = clearTrack(layout, axis, index)
+  fillRoad(l, axis, index)
+  trackList(l, axis)[index] = round(width ?? defaultRoadWidth(layout), 4)
+  reconcileFits(l)
+  return l
+}
+
+/**
+ * 把一条整条道路改回种植区块：按另一个方向的行（列）分成一个个区块，和整条道路交叉的地方还是道路；
+ * 宽（高）按旁边区块的大小
+ */
+export function roadToBlocks(layout: FieldLayout, axis: Axis, index: number): FieldLayout {
+  if (!isRoadTrack(layout, axis, index)) return layout
+  const perp: Axis = axis === 'row' ? 'col' : 'row'
+  const n = trackList(layout, perp).length
+  const crossing = Array.from({ length: n }, (_, k) => isRoadTrack(layout, perp, k))
+  const size = plantTrackSize(layout, axis)
+  const l = clearTrack(layout, axis, index)
+  for (let k = 0; k < n; k++) {
+    const { r, c } = cellOf(axis, index, k)
+    if (!mergeAt(l.merges, r, c)) l.blocks.push(newBlock(l, r, c, crossing[k] ? 'ROAD' : 'PLANT'))
+  }
+  trackList(l, axis)[index] = size
+  reconcileFits(l)
+  return l
+}
+
+/**
+ * 改了区块类型以后整理道路：一整行（列）新变成道路的，并成一条并收窄成道路宽；
+ * 原来整条是道路、现在只剩和别的道路交叉的地方的，放宽成旁边区块的大小。这个方向上没有别的区块时不动
+ */
+function fitRoadTracks(before: FieldLayout, after: FieldLayout): FieldLayout {
+  let l = after
+  const width = defaultRoadWidth(before)
+  for (const axis of ['row', 'col'] as Axis[]) {
+    const n = trackList(after, axis).length
+    if (n !== trackList(before, axis).length) continue
+    for (let i = 0; i < n; i++) {
+      const was = isRoadTrack(before, axis, i)
+      const now = isRoadTrack(l, axis, i)
+      const others = trackList(l, axis).some((_, j) => j !== i && !isRoadTrack(l, axis, j))
+      if (!others) continue
+      if (!was && now) {
+        l = trackToRoad(l, axis, i, width)
+      } else if (was && !now && !hasOwnRoad(l, axis, i)) {
+        const size = plantTrackSize(before, axis)
+        l = setTrackSize(l, axis, i, size)
+      }
+    }
+  }
+  return l
 }
 
 // ---------- 单位 ----------

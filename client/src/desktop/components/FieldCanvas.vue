@@ -10,7 +10,7 @@
 //   focus 为空时看整块地；为区块 id 时只看这个区块（"进入区块"）
 //   pick  点选的是什么：plot 小区（录入、布置试验）、block 区块（编辑地块）、cell 区块里的格子（编辑区块里的小区）
 //   editable 编辑地块：拖分界线改大小、拖特殊区块、拖区块交换位置、拖格子挪小区
-//   tool  select 选择、pan 拖动画面、measure 测距
+//   tool  select 选择、pan 拖动画面、measure 测距、road 道路（编辑地块时点区块之间的线加道路，点道路删掉）
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Konva from 'konva'
 
@@ -19,8 +19,9 @@ import guardTileUrl from '@/assets/art/guard-tile.webp'
 import roadTileUrl from '@/assets/art/road-tile.webp'
 import { eastNorth, eastNorthText } from '@/shared/compass'
 import {
-  CELL_KIND, anchors, blockRect, blockSlot, blockSpan, canMoveCells, fieldSize, fmt, innerCells, innerSizes, keyOf,
-  parseKey, round, sum, trackRect, type Axis, type CellKind, type FieldLayout, type LayoutBlock, type Rect, type Span,
+  CELL_KIND, addRoadProblem, anchors, blockRect, blockSlot, blockSpan, canMoveCells, fieldSize, fmt, innerCells, innerSizes,
+  keyOf, parseKey, roadOfBlock, round, sum, trackRect, type Axis, type CellKind, type FieldLayout, type LayoutBlock, type Rect,
+  type Span,
 } from '@/shared/fieldLayout'
 
 export interface CanvasCell {
@@ -49,7 +50,14 @@ export interface CanvasLink {
   controlPlotIds: number[]
 }
 
-export type CanvasTool = 'select' | 'pan' | 'measure'
+export type CanvasTool = 'select' | 'pan' | 'measure' | 'road'
+
+/** 道路工具点了哪里：add 在第 index 行（列）前面加一条道路，remove 删掉第 index 行（列）这条道路 */
+export interface RoadAction {
+  action: 'add' | 'remove'
+  axis: Axis
+  index: number
+}
 
 /** 拖动分界线改大小：a 是第 index 行（列）的新大小，b 是下一行（列）的；拖最外边时 b 为 null */
 export interface TrackResize {
@@ -77,11 +85,13 @@ const props = withDefaults(defineProps<{
   /** 编辑地块：可以拖动改大小、挪位置 */
   editable?: boolean
   tool?: CanvasTool
+  /** 道路工具加的道路多宽（单位同布局） */
+  roadWidth?: number
   /** 浮在画布上的工具条占的地方（像素），适应窗口时让开 */
   insets?: { top: number; right: number; bottom: number; left: number }
 }>(), {
   focus: null, pick: 'plot', selectedPlots: () => [], selectedBlocks: () => [], selectedCells: () => [],
-  links: () => [], devices: () => [], rotation: 0, rulers: false, editable: false, tool: 'select',
+  links: () => [], devices: () => [], rotation: 0, rulers: false, editable: false, tool: 'select', roadWidth: 1,
   insets: () => ({ top: 0, right: 0, bottom: 0, left: 0 }),
 })
 
@@ -98,6 +108,8 @@ const emit = defineEmits<{
   track: [axis: Axis, index: number, additive: boolean]
   /** 拖分界线松手 */
   resizeTrack: [r: TrackResize]
+  /** 道路工具点了一下 */
+  road: [r: RoadAction]
   /** 拖选中的格子松手：整体挪 dr 行 dc 列 */
   moveCells: [blockId: string, keys: string[], dr: number, dc: number]
   /** 把选中的区块拖到另一个区块上松手：交换位置 */
@@ -805,7 +817,7 @@ function dividerAt(sp: { x: number; y: number }): Divider | null {
 type Drag =
   | { kind: 'pan'; x: number; y: number; px: number; py: number }
   | { kind: 'select'; x: number; y: number; target: Target; additive: boolean; band: boolean }
-  | { kind: 'resize'; d: Divider; start: number; value: number }
+  | { kind: 'resize'; d: Divider; start: number; value: number; keep: boolean }
   | { kind: 'fit'; id: string; fx: number; fy: number; cx: number; cy: number; x: number; y: number; started: boolean; sx: number; sy: number }
   | { kind: 'swap'; id: string; sx: number; sy: number; started: boolean; over: string | null }
   | { kind: 'cells'; blockId: string; keys: string[]; r: number; c: number; dr: number; dc: number; started: boolean; sx: number; sy: number }
@@ -878,9 +890,15 @@ function onPointerDown(e: PointerEvent) {
     measureClick(toContent(sp))
     return
   }
+  if (props.tool === 'road') {
+    const t = roadTargetAt(sp)
+    clearDragGhost()
+    if (t?.kind === 'add' || t?.kind === 'remove') emit('road', { action: t.kind, axis: t.axis, index: t.index })
+    return
+  }
   const div = dividerAt(sp)
   if (div) {
-    drag = { kind: 'resize', d: div, start: div.pos, value: div.pos }
+    drag = { kind: 'resize', d: div, start: div.pos, value: div.pos, keep: keepTotal(div, e) }
     return
   }
   const target = targetAt(sp)
@@ -942,10 +960,11 @@ function onPointerMove(e: PointerEvent) {
   }
   const p = toContent(sp)
   if (d.kind === 'resize') {
+    d.keep = keepTotal(d.d, e)
     const raw = d.d.axis === 'col' ? p.x : p.y
     const step = niceStep(8 / view.scale)
     let v = Math.round(raw / step) * step
-    v = Math.max(d.d.min, d.d.max == null ? v : Math.min(d.d.max, v))
+    v = Math.max(d.d.min, d.d.max == null || !d.keep ? v : Math.min(d.d.max, v))
     d.value = v
     drawResizeGhost(d)
     return
@@ -1005,7 +1024,7 @@ function onPointerUp(e: PointerEvent) {
     const delta = d.value - d.start
     if (Math.abs(delta) < 1e-6) return
     const a = round(d.d.a + delta, 4)
-    const b = d.d.b == null ? null : round(d.d.b - delta, 4)
+    const b = d.d.b == null || !d.keep ? null : round(d.d.b - delta, 4)
     emit('resizeTrack', { scope: d.d.scope, axis: d.d.axis, index: d.d.index, a, b })
     return
   }
@@ -1042,6 +1061,14 @@ function sameSpan(a: string, b: string): boolean {
   const sa = blockSpan(props.layout, A)
   const sb = blockSpan(props.layout, B)
   return sa.rs === sb.rs && sa.cs === sb.cs
+}
+
+/**
+ * 拖区块之间的线：平时只改线左边（上边）的这一列（行），后面的区块跟着挪，地块跟着变大变小；
+ * 按住 Alt 是两边一起变、地块总大小不变。区块里的小区之间总是两边一起变
+ */
+function keepTotal(d: Divider, e: { altKey: boolean }): boolean {
+  return d.scope === 'inner' || (e.altKey && d.b != null)
 }
 
 /** 拖动时按屏幕上大约多少像素取整：1、2、5 × 10 的几次方 */
@@ -1182,8 +1209,9 @@ function drawResizeGhost(d: Extract<Drag, { kind: 'resize' }>) {
   const a = d.d.a + delta
   const name = d.d.axis === 'col' ? '列' : '行'
   const n = d.d.index + 1
-  const text = d.d.b == null
-    ? `第 ${n} ${name}：${fmt(a, u)}`
+  const total = d.d.axis === 'col' ? fieldSize(props.layout).w : fieldSize(props.layout).h
+  const text = d.d.b == null || !d.keep
+    ? `第 ${n} ${name}：${fmt(a, u)}\n地块${d.d.axis === 'col' ? '宽' : '长'} ${fmt(total + delta, u)}${d.d.scope === 'field' && d.d.b != null ? '（按住 Alt 两边一起变）' : ''}`
     : `第 ${n} ${name}：${fmt(a, u)}　第 ${n + 1} ${name}：${fmt(d.d.b - delta, u)}`
   const s = toScreen(d.d.axis === 'col' ? { x: v, y: d.d.from } : { x: d.d.from, y: v })
   showTip(text, s.x + 12, s.y + 12)
@@ -1259,6 +1287,82 @@ function drawCellsGhost(fb: LayoutBlock, d: Extract<Drag, { kind: 'cells' }>) {
   }
 }
 
+// ---------- 道路工具 ----------
+
+type RoadTarget =
+  | { kind: 'add'; axis: Axis; index: number; pos: number }
+  | { kind: 'remove'; axis: Axis; index: number }
+  | { kind: 'blocked'; reason: string; axis?: Axis; pos?: number; rect?: Rect }
+
+/** 道路工具下鼠标在哪：整条道路上是删掉它，区块之间的线（和最外边）上是加道路 */
+function roadTargetAt(sp: { x: number; y: number }): RoadTarget | null {
+  if (!props.editable || focusBlock()) return null
+  const L = props.layout
+  const p = toContent(sp)
+  const s = fieldSize(L)
+  const tol = 10 / view.scale
+  if (p.x < -tol || p.y < -tol || p.x > s.w + tol || p.y > s.h + tol) return null
+  for (const it of blockItems) {
+    if (it.block.kind !== 'ROAD' || !inRect(it.rect, p)) continue
+    const road = roadOfBlock(L, it.block.id)
+    if (road) return { kind: 'remove', ...road }
+    return { kind: 'blocked', reason: '这块道路只是一个区块改成的，不是整条，右键可以改类型', rect: it.rect }
+  }
+  let best: { axis: Axis; index: number; pos: number; d: number } | null = null
+  for (const axis of ['row', 'col'] as Axis[]) {
+    const tracks = axis === 'row' ? L.rows : L.cols
+    const v = axis === 'row' ? p.y : p.x
+    let acc = 0
+    for (let i = 0; i <= tracks.length; i++) {
+      const d = Math.abs(v - acc)
+      if (d <= tol && (!best || d < best.d)) best = { axis, index: i, pos: acc, d }
+      if (i < tracks.length) acc += tracks[i]!
+    }
+  }
+  if (!best) return null
+  const problem = addRoadProblem(L, best.axis, best.index)
+  if (problem) return { kind: 'blocked', reason: problem, axis: best.axis, pos: best.pos }
+  return { kind: 'add', axis: best.axis, index: best.index, pos: best.pos }
+}
+
+function roadHover(sp: { x: number; y: number }) {
+  hoverKey = ''
+  hoverRect.visible(false)
+  dragGroup.destroyChildren()
+  const t = roadTargetAt(sp)
+  const L = props.layout
+  const u = L.unit
+  const s = fieldSize(L)
+  const at = (text: string) => showTip(text, sp.x > size.w - 260 ? sp.x - 250 : sp.x + 16, sp.y + 16)
+  if (!t) {
+    if (focusBlock()) at('道路加在区块之间：先回到整块地')
+    else if (inRect({ x: 0, y: 0, w: s.w, h: s.h }, toContent(sp))) at('把鼠标移到区块之间的线上加道路，移到道路上删掉它')
+    else hideTip()
+  } else if (t.kind === 'add') {
+    const w = props.roadWidth
+    const r = t.axis === 'row' ? { x: 0, y: t.pos - w / 2, w: s.w, h: w } : { x: t.pos - w / 2, y: 0, w, h: s.h }
+    dragGroup.add(new Konva.Rect({ ...shape, ...box(r), fill: 'rgba(217, 207, 185, 0.92)', stroke: '#8a6118', strokeWidth: 1.5, dash: [6, 4], strokeScaleEnabled: false }))
+    dragGroup.add(new Konva.Line({ ...shape, points: roadLine(r), stroke: '#ffffff', strokeWidth: 1.5, dash: [8, 6], strokeScaleEnabled: false }))
+    at(`点一下加一条${t.axis === 'row' ? '横向' : '纵向'}道路，宽 ${fmt(w, u)}\n别的区块不变小，地块${t.axis === 'row' ? '长' : '宽'}变成 ${fmt((t.axis === 'row' ? s.h : s.w) + w, u)}`)
+  } else if (t.kind === 'remove') {
+    const tracks = t.axis === 'row' ? L.rows : L.cols
+    const r = trackRect(L.rows, L.cols, t.axis === 'row'
+      ? { r: t.index, c: 0, rs: 1, cs: L.cols.length } : { r: 0, c: t.index, rs: L.rows.length, cs: 1 })
+    dragGroup.add(new Konva.Rect({ ...shape, ...box(r), fill: 'rgba(176, 84, 58, 0.28)', stroke: '#b0543a', strokeWidth: 2, strokeScaleEnabled: false }))
+    const w = tracks[t.index]!
+    at(`点一下删掉这条${t.axis === 'row' ? '横向' : '纵向'}道路（宽 ${fmt(w, u)}）\n地块${t.axis === 'row' ? '长' : '宽'}变成 ${fmt((t.axis === 'row' ? s.h : s.w) - w, u)}；右键可以改成区块`)
+  } else {
+    if (t.rect) dragGroup.add(new Konva.Rect({ ...shape, ...box(t.rect), stroke: '#b0543a', strokeWidth: 2, dash: [5, 4], strokeScaleEnabled: false }))
+    else if (t.axis && t.pos != null) {
+      const pts = t.axis === 'row' ? [0, t.pos, s.w, t.pos] : [t.pos, 0, t.pos, s.h]
+      dragGroup.add(new Konva.Line({ ...shape, points: pts, stroke: '#b0543a', strokeWidth: 2.5, dash: [6, 4], strokeScaleEnabled: false }))
+    }
+    at(t.reason)
+  }
+  overlayLayer.batchDraw()
+  setCursor(t?.kind === 'remove' ? 'pointer' : t?.kind === 'add' ? 'copy' : t ? 'not-allowed' : undefined)
+}
+
 // ---------- 测距 ----------
 
 const measure: { a: { x: number; y: number } | null; b: { x: number; y: number } | null } = { a: null, b: null }
@@ -1311,13 +1415,22 @@ function drawMeasure(to: { x: number; y: number }) {
 let hoverKey = ''
 
 function hoverAt(sp: { x: number; y: number }) {
+  if (props.tool === 'road') {
+    roadHover(sp)
+    return
+  }
   const div = dividerAt(sp)
   if (div) {
     hoverKey = ''
     hoverRect.visible(false)
     overlayLayer.batchDraw()
     setCursor(div.axis === 'col' ? 'col-resize' : 'row-resize')
-    showTip(`拖动改${div.axis === 'col' ? '宽' : '高'}${div.outer ? '（最外边，地块跟着变大变小）' : ''}`, sp.x + 14, sp.y + 14)
+    const what = div.axis === 'col' ? '宽' : '高'
+    showTip(
+      div.scope === 'inner' ? `拖动改${what}` : div.outer ? `拖动改${what}，地块跟着变大变小`
+        : `拖动改左边这${div.axis === 'col' ? '列' : '行'}的${what}，后面的跟着挪，地块跟着变\n按住 Alt 拖：两边一起变，地块总${what}不变`,
+      sp.x + 14, sp.y + 14,
+    )
     return
   }
   const t = targetAt(sp)
@@ -1382,6 +1495,7 @@ function blockTip(id: string): string {
 }
 
 function onLeave() {
+  if (props.tool === 'road' && !drag) clearDragGhost()
   hoverKey = ''
   if (stage) {
     hoverRect.visible(false)
@@ -1421,6 +1535,7 @@ function setCursor(c?: string) {
   if (!host.value) return
   let v = c
   if (!v) v = props.tool === 'measure' ? 'crosshair' : props.tool === 'pan' || space.on ? 'grab' : 'default'
+  if (props.tool === 'road' && !c && !space.on) v = 'cell'
   if (space.on && !c) v = 'grab'
   if (host.value.style.cursor !== v) host.value.style.cursor = v
 }
@@ -1540,7 +1655,10 @@ onBeforeUnmount(() => {
   stage = null
 })
 
-watch(() => [props.layout, props.cells, props.focus, props.pick], scheduleBuild)
+watch(() => [props.layout, props.cells, props.focus, props.pick], () => {
+  scheduleBuild()
+  if (props.tool === 'road') clearDragGhost()
+})
 watch(() => props.rotation, () => {
   buildWorld()
   fit()
@@ -1551,6 +1669,7 @@ watch(() => props.links, drawLinks)
 watch(() => [props.devices, props.rulers], refreshLabels)
 watch(() => props.tool, (t) => {
   if (t !== 'measure') clearMeasure()
+  if (t !== 'road') clearDragGhost()
   setCursor()
 })
 watch(() => props.insets, () => { if (!touched) fit() }, { deep: true })

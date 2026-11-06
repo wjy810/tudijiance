@@ -11,7 +11,8 @@ import {
   BLOCK_KIND, CELL_KIND, UNIT_PRESETS, cellKind, setCellKinds, alignBlockFit, anchors, blockRect, blockSlot, blockSpan, evenInnerTracks, fieldSize, fmt,
   innerSizes, insertTrack, keyOf, mergeBlocks, mergeInner, mergeAt, parseKey, removeTrack, removedPlots, renameBlock,
   resizeBlockGrid, resizeInner, round, setBlockFit, setBlockKind, setInnerTrackSize, setTrackSize, setUnit, splitBlock,
-  splitInner, type Align, type BlockKind, type FieldLayout, type LayoutBlock, type Unit,
+  splitInner, isRoadTrack, removeRoad, roadOfBlock, roadToBlocks, addRoad, addRoadProblem, defaultRoadWidth,
+  type Align, type BlockKind, type FieldLayout, type LayoutBlock, type Unit,
 } from '@/shared/fieldLayout'
 import MergeBlocksDialog from './MergeBlocksDialog.vue'
 
@@ -151,6 +152,47 @@ async function removeCurrentTrack() {
     emit('update:track', null)
     emit('update:selectedBlocks', [])
   }
+}
+
+// ---------- 道路 ----------
+
+/** 选中的一个区块是不是整条道路上的一段 */
+const oneRoad = computed(() => (one.value ? roadOfBlock(props.layout, one.value.id) : null))
+/** 标尺选中的一行（列）是不是整条道路 */
+const trackIsRoad = computed(() => !!props.track && !props.focus && isRoadTrack(props.layout, props.track.axis, props.track.index))
+
+function roadWidthOf(r: { axis: 'row' | 'col'; index: number }): number {
+  return (r.axis === 'row' ? props.layout.rows : props.layout.cols)[r.index] ?? 0
+}
+
+function setRoadWidth(r: { axis: 'row' | 'col'; index: number }, v: number | undefined) {
+  if (!v || v <= 0) return
+  emit('apply', setTrackSize(props.layout, r.axis, r.index, v))
+}
+
+function dropRoad(r: { axis: 'row' | 'col'; index: number }) {
+  emit('apply', removeRoad(props.layout, r.axis, r.index))
+  emit('update:selectedBlocks', [])
+  emit('update:track', null)
+}
+
+function roadBack(r: { axis: 'row' | 'col'; index: number }) {
+  emit('apply', roadToBlocks(props.layout, r.axis, r.index))
+  emit('update:selectedBlocks', [])
+}
+
+/** 在选中的一行（列）前面或后面加道路 */
+const roadProblem = (before: boolean) => {
+  const t = props.track
+  if (!t) return '没选'
+  return addRoadProblem(props.layout, t.axis, before ? t.index : t.index + 1)
+}
+
+function roadAt(before: boolean) {
+  const t = props.track
+  if (!t) return
+  emit('apply', addRoad(props.layout, t.axis, before ? t.index : t.index + 1, defaultRoadWidth(props.layout)))
+  if (before) emit('update:track', { axis: t.axis, index: t.index + 1 })
 }
 
 // ---------- 区块 ----------
@@ -425,6 +467,26 @@ function setCellKind(kind: BlockKind) {
       </section>
     </template>
 
+    <!-- 整块地：选了一条整条道路（标尺） -->
+    <template v-else-if="track && trackSize != null && trackIsRoad">
+      <section class="panel panel-pad">
+        <div class="panel-title">{{ trackName }}<span class="sub">{{ track.axis === 'row' ? '横向' : '纵向' }}道路</span></div>
+        <div class="row-form">
+          <span class="lbl">路宽</span>
+          <el-input-number
+            :model-value="round(trackSize, 3)" :min="0.001" :precision="3" :controls="false" size="small" class="w"
+            @change="(v: number | undefined) => setRoadWidth(track!, v)"
+          />
+          <span>{{ u.symbol }}</span>
+        </div>
+        <div class="hint">改路宽时两边的区块不变，地块跟着变大变小。</div>
+        <div class="btn-row">
+          <el-button size="small" @click="roadBack(track)">改成区块</el-button>
+          <el-button size="small" type="danger" plain :icon="Delete" @click="dropRoad(track)">删掉这条道路</el-button>
+        </div>
+      </section>
+    </template>
+
     <!-- 整块地：选了一行或一列区块 -->
     <template v-else-if="track && trackSize != null">
       <section class="panel panel-pad">
@@ -452,7 +514,12 @@ function setCellKind(kind: BlockKind) {
             删除
           </el-button>
         </div>
-        <div class="hint">插入的是普通种植区块，小区按“新区块默认”的行列分。</div>
+        <div class="hint">插入的是普通种植区块，小区按“新区块默认”的行列分。地块跟着变大，别的区块不变。</div>
+        <div class="lbl-top">加道路</div>
+        <div class="btn-row tight">
+          <el-button size="small" :disabled="!!roadProblem(true)" @click="roadAt(true)">{{ track.axis === 'row' ? '上面' : '左边' }}加道路</el-button>
+          <el-button size="small" :disabled="!!roadProblem(false)" @click="roadAt(false)">{{ track.axis === 'row' ? '下面' : '右边' }}加道路</el-button>
+        </div>
       </section>
     </template>
 
@@ -487,7 +554,24 @@ function setCellKind(kind: BlockKind) {
         <div v-if="mergeable" class="hint">合并时可以选：保留原来的小区拼起来，或者重新分几行几列。</div>
       </section>
 
-      <section v-if="one && oneTracks" class="panel panel-pad">
+      <section v-if="oneRoad" class="panel panel-pad">
+        <div class="panel-title">这条道路<span class="sub">{{ oneRoad.axis === 'row' ? '横向' : '纵向' }}，第 {{ oneRoad.index + 1 }} {{ oneRoad.axis === 'row' ? '行' : '列' }}</span></div>
+        <div class="row-form">
+          <span class="lbl">路宽</span>
+          <el-input-number
+            :model-value="round(roadWidthOf(oneRoad), 3)" :min="0.001" :precision="3" :controls="false" size="small" class="w"
+            @change="(v: number | undefined) => setRoadWidth(oneRoad!, v)"
+          />
+          <span>{{ u.symbol }}</span>
+        </div>
+        <div class="hint">改路宽时两边的区块不变，地块跟着变大变小。</div>
+        <div class="btn-row">
+          <el-button size="small" @click="roadBack(oneRoad)">改成区块</el-button>
+          <el-button size="small" type="danger" plain :icon="Delete" @click="dropRoad(oneRoad)">删掉这条道路</el-button>
+        </div>
+      </section>
+
+      <section v-if="one && oneTracks && !oneRoad" class="panel panel-pad">
         <div class="panel-title">大小<span class="sub">{{ u.name }}</span></div>
         <div class="row-form">
           <span class="lbl">这一列宽</span>
@@ -505,10 +589,10 @@ function setCellKind(kind: BlockKind) {
           />
           <span v-else class="muted">合并了 {{ oneTracks.span.rs }} 行，点左边的标尺分别改</span>
         </div>
-        <div class="hint">改的是整列（整行）区块，同一列（行）的区块一起变。</div>
+        <div class="hint">改的是整列（整行）区块，同一列（行）的区块一起变；别的区块不变，地块跟着变大变小。</div>
       </section>
 
-      <section v-if="one && fitInfo" class="panel panel-pad special">
+      <section v-if="one && fitInfo && one.kind !== 'ROAD'" class="panel panel-pad special">
         <div class="panel-title">特殊区块<span class="sub">{{ fitInfo.special ? '已设' : '没设' }}</span></div>
         <div class="hint">
           把这个区块设得比原来的位置小，剩下的地方变成道路；区块可以在原来的位置里拖动。
@@ -640,8 +724,10 @@ function setCellKind(kind: BlockKind) {
       <section class="panel panel-pad tips">
         <div class="panel-title">怎么改</div>
         <ul>
+          <li>道路工具（右下角，R）：点区块之间的线加一条道路，点道路删掉。别的区块不变小，地块跟着变大。</li>
           <li>点区块选中，Ctrl/Shift 加选，拖动框选几个，再“合并”（可以重新分行列）。</li>
-          <li>拖区块之间的线改宽高，拖最外边地块跟着变大；点标尺改一整列、插入、删除。</li>
+          <li>拖区块之间的线改宽高，后面的跟着挪、地块跟着变；按住 Alt 拖是两边一起变。点标尺改一整列、插入、删除。</li>
+          <li>一整行（列）区块改成道路会收窄成路宽；整条道路改成区块会按旁边区块放宽。</li>
           <li>选中一个区块拖到同样大小的区块上，两个交换位置。</li>
           <li>双击区块进去：框选格子设成道路、保护区、空地，或拖到别的位置。</li>
           <li>右键区块、格子有常用操作。Ctrl Z 撤销，Ctrl Y 重做，Ctrl S 保存。</li>
@@ -713,6 +799,10 @@ function setCellKind(kind: BlockKind) {
 
 .btn-row .el-button + .el-button {
   margin-left: 0;
+}
+
+.btn-row.tight {
+  margin-top: 0;
 }
 
 .back {

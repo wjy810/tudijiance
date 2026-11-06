@@ -5,6 +5,7 @@ import {
   insertTrack, mergeBlocks, mergeInner, moveBlockFit, moveCells, plotCount, removeTrack, removedPlots, resizeBlockGrid, resizeInner,
   plotPlace, plotPlaces, setBlockFit, setBlockKind, setInnerTrackPair, setInnerTrackSize, setTrackPair, setTrackSize, setUnit,
   plotSpots, regridInner, setCellKinds, splitBlock, splitInner, swapBlocks, type FieldLayout,
+  addRoad, addRoadProblem, defaultRoadWidth, isRoadTrack, removeRoad, roadOfBlock, roadSegments, roadToBlocks, trackToRoad,
 } from '@/shared/fieldLayout'
 
 const METER = UNIT_PRESETS[0]!
@@ -309,5 +310,103 @@ describe('regrid', () => {
     const r = regridInner(m.layout, 'B1', 4, 3)
     expect(r.dropped).toEqual([])
     expect(Object.keys(block(r.layout, 'B1').inner!.plots)).toHaveLength(12)
+  })
+})
+
+describe('roads', () => {
+  it('builds separate horizontal and vertical roads', () => {
+    const l = createLayout({
+      blockRows: 2, blockCols: 2, blockW: 6, blockH: 20, unit: METER, innerRows: 1, innerCols: 1, roadW: 1, rowRoadW: 2, colRoadW: 0,
+    })
+    expect(l.rows).toEqual([20, 2, 20])
+    expect(l.cols).toEqual([6, 6])
+    expect(isRoadTrack(l, 'row', 1)).toBe(true)
+    expect(isRoadTrack(l, 'col', 0)).toBe(false)
+  })
+
+  it('adds a road without squeezing the blocks: the land grows', () => {
+    const l = saved()
+    const next = addRoad(l, 'col', 1, 1.5)
+    expect(next.cols).toEqual([6, 1.5, 6, 6])
+    expect(fieldSize(next).w).toBe(19.5)
+    expect(isRoadTrack(next, 'col', 1)).toBe(true)
+    // 区块和小区都还在，跟着挪
+    expect(block(next, 'B2').c).toBe(2)
+    expect(removedPlots(l, next)).toEqual([])
+    // 纵向道路是一条（合并起来）
+    const roads = next.blocks.filter((b) => b.kind === 'ROAD')
+    expect(roads).toHaveLength(1)
+    expect(next.merges).toContainEqual({ r: 0, c: 1, rs: 2, cs: 1 })
+  })
+
+  it('crosses existing roads', () => {
+    const l = createLayout({
+      blockRows: 2, blockCols: 2, blockW: 6, blockH: 20, unit: METER, innerRows: 1, innerCols: 1, roadW: 0, rowRoadW: 1,
+    })
+    // 已有横向道路（第 1 行），在两列区块之间加纵向道路：横向道路跟着变长，纵向道路被它隔成两段
+    const next = addRoad(l, 'col', 1, 1)
+    expect(next.cols).toEqual([6, 1, 6])
+    expect(isRoadTrack(next, 'col', 1)).toBe(true)
+    expect(isRoadTrack(next, 'row', 1)).toBe(true)
+    expect(next.merges).toContainEqual({ r: 1, c: 0, rs: 1, cs: 3 })
+    expect(roadSegments(next, 'col', 1)).toHaveLength(2)
+    expect(roadSegments(next, 'row', 1)).toHaveLength(1)
+  })
+
+  it('refuses a road next to a road or through a merged block', () => {
+    const l = saved(1)
+    expect(addRoadProblem(l, 'row', 1)).toBe('旁边已经是道路了')
+    const merged = mergeBlocks(saved(), { r: 0, c: 0 }, { r: 1, c: 0 }).layout
+    expect(addRoadProblem(merged, 'row', 1)).toContain('合并')
+    expect(addRoad(merged, 'row', 1, 1)).toBe(merged)
+    expect(addRoadProblem(merged, 'col', 1)).toBeNull()
+  })
+
+  it('removes a whole road: the land shrinks', () => {
+    const l = saved(1.5)
+    const next = removeRoad(l, 'col', 1)
+    expect(next.cols).toEqual([6, 6, 1.5, 6])
+    expect(removedPlots(l, next)).toEqual([])
+    // 不是整条道路的不删
+    expect(removeRoad(l, 'col', 0)).toBe(l)
+  })
+
+  it('narrows a whole row of blocks turned into road, and widens it back', () => {
+    const l = saved(1)
+    expect(defaultRoadWidth(l)).toBe(1)
+    // 第 2 列整列（两个区块）改成道路：收窄成道路宽，并成一条
+    const ids = l.blocks.filter((b) => b.kind === 'PLANT' && b.c === 2).map((b) => b.id)
+    const road = setBlockKind(l, ids, 'ROAD')
+    expect(road.cols).toEqual([6, 1, 1, 1, 6])
+    expect(isRoadTrack(road, 'col', 2)).toBe(true)
+    // 再改回来：按旁边区块的宽，横向道路交叉的地方还是道路
+    // 只改一段：还是一段窄的种植区块，不动整列
+    const seg = roadSegments(road, 'col', 2)
+    expect(seg).toHaveLength(2)
+    expect(setBlockKind(road, [seg[0]!], 'PLANT').cols).toEqual([6, 1, 1, 1, 6])
+    expect(roadOfBlock(road, seg[0]!)).toEqual({ axis: 'col', index: 2 })
+    // 两段都选上：整条改回来
+    const back = setBlockKind(road, seg, 'PLANT')
+    expect(back.cols).toEqual([6, 1, 6, 1, 6])
+    expect(back.blocks.filter((b) => b.c === 2 && b.kind === 'PLANT')).toHaveLength(2)
+    expect(isRoadTrack(back, 'row', 1)).toBe(true)
+  })
+
+  it('turns a whole horizontal road back into blocks', () => {
+    const l = saved(1)
+    const back = roadToBlocks(l, 'row', 1)
+    expect(back.rows).toEqual([13.3, 13.3, 13.3])
+    // 横向道路那一行变成区块，和纵向道路交叉的格子还是道路
+    expect(back.blocks.filter((b) => b.r === 1 && b.kind === 'PLANT')).toHaveLength(3)
+    expect(back.blocks.filter((b) => b.r === 1 && b.kind === 'ROAD')).toHaveLength(2)
+    expect(isRoadTrack(back, 'col', 1)).toBe(true)
+  })
+
+  it('turns a track into a road and drops its plots', () => {
+    const l = saved()
+    const next = trackToRoad(l, 'row', 0, 2)
+    expect(next.rows).toEqual([2, 13.3])
+    expect(isRoadTrack(next, 'row', 0)).toBe(true)
+    expect(removedPlots(l, next)).toHaveLength(18)
   })
 })
