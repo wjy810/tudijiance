@@ -20,7 +20,7 @@ const newVariety = reactive<{ name: string; controlType: ControlType | null }>({
 
 const filtered = computed(() => {
   const k = keyword.value.trim()
-  return k ? catalog.varieties.filter((v) => v.name.includes(k) || v.code?.includes(k)) : catalog.varieties
+  return k ? catalog.comparisonVarieties.filter((v) => v.name.includes(k) || v.code?.includes(k)) : catalog.comparisonVarieties
 })
 
 watch(visible, (open) => {

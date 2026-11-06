@@ -49,6 +49,22 @@ import type {
   UserView,
   Variety,
   VarietyRequest,
+  Candidates,
+  CrossRequest,
+  CrossResult,
+  FounderItem,
+  LandRequest,
+  LineDetail,
+  LineGraph,
+  LineKind,
+  LineRow,
+  LineStatus,
+  LineUpdateRequest,
+  PlantResult,
+  PlantValueView,
+  SeasonRequest,
+  SeasonView,
+  SelectionRequest,
 } from './types'
 
 import type { FieldLayout } from '@/shared/fieldLayout'
@@ -68,7 +84,8 @@ export const authApi = {
 }
 
 export const fieldApi = {
-  list: () => data<Field[]>(http.get('/api/fields')),
+  /** scope：不填只列原来品种比较的实验田；breeding 只列育种的地块；all 全部 */
+  list: (scope?: 'breeding' | 'all') => data<Field[]>(http.get('/api/fields', { params: { scope } })),
   detail: (id: number) => data<FieldDetail>(http.get(`/api/fields/${id}`)),
   create: (req: FieldRequest) => data<FieldDetail>(http.post('/api/fields', req)),
   update: (id: number, req: FieldRequest) => data<FieldDetail>(http.put(`/api/fields/${id}`, req)),
@@ -211,4 +228,39 @@ export const correctionApi = {
   approve: (id: number, note: string | null) => data<CorrectionView>(http.post(`/api/corrections/${id}/approve`, { note })),
   reject: (id: number, note: string | null) => data<CorrectionView>(http.post(`/api/corrections/${id}/reject`, { note })),
   withdraw: (id: number) => data<void>(http.post(`/api/corrections/${id}/withdraw`)),
+}
+
+export const seasonApi = {
+  list: () => data<SeasonView[]>(http.get('/api/seasons')),
+  create: (req: SeasonRequest) => data<SeasonView>(http.post('/api/seasons', req)),
+  update: (id: number, req: SeasonRequest) => data<SeasonView>(http.put(`/api/seasons/${id}`, req)),
+  remove: (id: number) => data<void>(http.delete(`/api/seasons/${id}`)),
+  createLand: (id: number, req: LandRequest) => data<FieldDetail>(http.post(`/api/seasons/${id}/fields`, req)),
+  removeLand: (id: number, fieldId: number) => data<void>(http.delete(`/api/seasons/${id}/fields/${fieldId}`)),
+  cleanup: (id: number) => data<LineRow[]>(http.get(`/api/seasons/${id}/cleanup`)),
+}
+
+export const lineApi = {
+  list: (params: { keyword?: string; status?: LineStatus; kind?: LineKind } = {}) =>
+    data<LineRow[]>(http.get('/api/lines', { params })),
+  graph: () => data<LineGraph>(http.get('/api/lines/graph')),
+  detail: (id: number) => data<LineDetail>(http.get(`/api/lines/${id}`)),
+  createFounders: (items: FounderItem[]) => data<LineRow[]>(http.post('/api/lines/founders', { items })),
+  adopt: (varietyIds: number[]) => data<LineRow[]>(http.post('/api/lines/adopt', { varietyIds })),
+  cross: (req: CrossRequest) => data<CrossResult>(http.post('/api/lines/crosses', req)),
+  select: (id: number, req: SelectionRequest) => data<LineRow[]>(http.post(`/api/lines/${id}/selections`, req)),
+  update: (id: number, req: LineUpdateRequest) => data<LineRow>(http.put(`/api/lines/${id}`, req)),
+  setStatus: (lineIds: number[], status: LineStatus) => data<LineRow[]>(http.put('/api/lines/status', { lineIds, status })),
+  remove: (id: number) => data<void>(http.delete(`/api/lines/${id}`)),
+  savePlantValues: (id: number, values: { traitId: number; valueNum: number | null; valueText: string | null; valueDate: string | null }[]) =>
+    data<PlantValueView[]>(http.put(`/api/lines/${id}/plant-values`, { values })),
+  exportExcel: (id: number, filename: string) => download(`/api/lines/${id}/export`, {}, filename),
+}
+
+export const breedingApi = {
+  candidates: (fieldId: number) => data<Candidates>(http.get(`/api/breeding/fields/${fieldId}/candidates`)),
+  plant: (fieldId: number, plotIds: number[], lineId: number | null) =>
+    data<PlantResult>(http.put(`/api/breeding/fields/${fieldId}/plantings`, { plotIds, lineId })),
+  setGeneration: (fieldId: number, plotIds: number[], generation: number | null) =>
+    data<PlantResult>(http.put(`/api/breeding/fields/${fieldId}/generation`, { plotIds, generation })),
 }

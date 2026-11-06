@@ -32,11 +32,13 @@ export interface Field {
   irrigated: boolean | null
   previousCrop: string | null
   remark: string | null
+  /** 育种的地块属于哪一季；为空的是原来品种比较用的实验田 */
+  seasonId?: number | null
   createdAt: string
   updatedAt: string
 }
 
-export type FieldRequest = Omit<Field, 'id' | 'createdAt' | 'updatedAt'> & {
+export type FieldRequest = Omit<Field, 'id' | 'createdAt' | 'updatedAt' | 'seasonId'> & {
   /** 新建时直接给区块布局，按布局生成小区 */
   layout?: FieldLayout | null
   /** 新生成小区的默认长和宽（米） */
@@ -91,11 +93,20 @@ export interface Variety {
   controlType: ControlType | null
   remark: string | null
   createdAt: string
+  /** 品系：FOUNDER 原始材料 / CROSS 杂交组合 / SELECTION 选株后代；为空的只是品种比较用的品种 */
+  lineKind?: LineKind | null
+  /** 品系编号，建好后不变 */
+  lineCode?: string | null
+  motherId?: number | null
+  fatherId?: number | null
+  parentId?: number | null
+  lineStatus?: LineStatus | null
+  formerNames?: string | null
 }
 
-export type VarietyRequest = Omit<Variety, 'id' | 'createdAt'>
+export type VarietyRequest = Pick<Variety, 'name' | 'code' | 'breeder' | 'ecotype' | 'qualityType' | 'controlType' | 'remark'>
 
-export type TrialType = 'REGIONAL' | 'PRODUCTION' | 'COMPARISON' | 'OBSERVATION'
+export type TrialType = 'REGIONAL' | 'PRODUCTION' | 'COMPARISON' | 'OBSERVATION' | 'BREEDING'
 
 export interface Trial {
   id: number
@@ -133,6 +144,8 @@ export interface PlantingView {
   plotId: number
   varietyId: number | null
   replicateNo: number | null
+  /** 世代：育种地块里杂交后代这一季是 F 几 */
+  generation?: number | null
 }
 
 export interface LinkView {
@@ -761,4 +774,212 @@ export interface QualityReport {
   }
   issues: QualityIssue[]
   completeness: QualityCompleteness[]
+}
+
+// ---------- 育种：季、地块、品系 ----------
+
+export type LineKind = 'FOUNDER' | 'CROSS' | 'SELECTION'
+/** ACTIVE 在选 / KEPT 保留 / DROPPED 淘汰 / RELEASED 已育成 */
+export type LineStatus = 'ACTIVE' | 'KEPT' | 'DROPPED' | 'RELEASED'
+
+export interface Season {
+  id: number
+  name: string
+  startDate: string
+  endDate: string | null
+  remark: string | null
+  createdAt: string
+}
+
+export interface LandSummary {
+  id: number
+  name: string
+  trialId: number | null
+  plotCount: number
+  plantedCount: number
+  lineCount: number
+}
+
+export interface SeasonView {
+  season: Season
+  /** 接着哪一季（或几季）；为空是"全新开始" */
+  followIds: number[]
+  fields: LandSummary[]
+}
+
+export interface SeasonRequest {
+  name: string
+  startDate: string
+  endDate: string | null
+  remark: string | null
+  followIds: number[]
+}
+
+export interface LandRequest {
+  name: string
+  copyFromFieldId?: number | null
+  layout?: FieldLayout | null
+  location?: string | null
+  remark?: string | null
+}
+
+export interface PlantedIn {
+  seasonId: number
+  generation: number | null
+}
+
+export interface LineRow {
+  id: number
+  name: string
+  code: string
+  kind: LineKind
+  status: LineStatus
+  /** 系谱式，如 周麦16/郑麦366//百农207 */
+  pedigree: string
+  motherId: number | null
+  fatherId: number | null
+  parentId: number | null
+  /** "周麦16 × 郑麦366"、"选自 周麦16"、"原始材料" */
+  parentText: string
+  formerNames: string | null
+  originSeasonId: number | null
+  /** 系谱图里放在哪一季：杂交、选株的季；原始材料是第一次种的季 */
+  homeSeasonId: number | null
+  planted: PlantedIn[]
+  childCount: number
+  ecotype: Ecotype | null
+  qualityType: QualityType | null
+  breeder: string | null
+  remark: string | null
+  tagNo: string | null
+  seqNo: number | null
+}
+
+export interface LineGraph {
+  seasons: Season[]
+  lines: LineRow[]
+}
+
+export interface CandidateGroup {
+  key: 'prev' | 'children' | 'season' | 'recent'
+  title: string
+  lines: LineRow[]
+}
+
+export interface Candidates {
+  seasonId: number
+  /** "全新开始"的季：没有上一季 */
+  fresh: boolean
+  groups: CandidateGroup[]
+}
+
+export interface FounderItem {
+  name: string
+  code?: string | null
+  breeder?: string | null
+  ecotype?: Ecotype | null
+  qualityType?: QualityType | null
+  remark?: string | null
+}
+
+export interface CrossRequest {
+  motherId: number
+  fatherId: number
+  seasonId: number
+  crossYear?: number | null
+  name?: string | null
+  remark?: string | null
+}
+
+export interface CrossResult {
+  line: LineRow
+  /** 同样的父母以前做过的组合编号 */
+  previous: string[]
+}
+
+export interface SelectionRequest {
+  count: number
+  tagNos?: string[]
+  seasonId?: number | null
+  fieldId?: number | null
+  blockId?: string | null
+  plotId?: number | null
+}
+
+export interface LineUpdateRequest {
+  name: string
+  breeder: string | null
+  ecotype: Ecotype | null
+  qualityType: QualityType | null
+  remark: string | null
+}
+
+export interface PlantingRow {
+  seasonId: number
+  seasonName: string
+  fieldId: number
+  fieldName: string
+  trialId: number
+  plotId: number
+  plotCode: string | null
+  blockId: string | null
+  blockName: string | null
+  place: string
+  generation: number | null
+}
+
+export interface ParentPlace {
+  lineId: number
+  lineName: string
+  role: '母本' | '父本' | '选自'
+  seasonId: number
+  seasonName: string
+  fieldId: number
+  fieldName: string
+  plotIds: number[]
+  place: string
+}
+
+export interface PlantValueView {
+  traitId: number
+  traitName: string
+  valueNum: number | null
+  valueText: string | null
+  valueDate: string | null
+  display: string
+}
+
+export interface TraitValueRow {
+  traitId: number
+  traitName: string
+  category: TraitCategory
+  sortOrder: number
+  important: boolean
+  average: number | null
+  display: string
+  count: number
+  plots: { plotId: number; place: string; display: string }[]
+}
+
+export interface SeasonValues {
+  seasonId: number
+  seasonName: string
+  generation: number | null
+  traits: TraitValueRow[]
+}
+
+export interface LineDetail {
+  line: LineRow
+  originText: string
+  parents: LineRow[]
+  children: LineRow[]
+  parentPlaces: ParentPlace[]
+  plantings: PlantingRow[]
+  plantValues: PlantValueView[]
+  seasonValues: SeasonValues[]
+}
+
+export interface PlantResult {
+  layout: Layout
+  notes: string[]
 }

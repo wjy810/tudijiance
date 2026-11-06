@@ -17,8 +17,8 @@ const loading = ref(false)
 const rows = computed(() => {
   const k = keyword.value.trim()
   return k
-    ? catalog.varieties.filter((v) => v.name.includes(k) || v.code?.includes(k) || v.breeder?.includes(k))
-    : catalog.varieties
+    ? catalog.comparisonVarieties.filter((v) => v.name.includes(k) || v.code?.includes(k) || v.breeder?.includes(k))
+    : catalog.comparisonVarieties
 })
 
 async function load(force = true) {
@@ -97,7 +97,7 @@ async function remove(v: Variety) {
     <div class="page-header">
       <div>
         <h2>品种</h2>
-        <div class="page-desc">试验用的品种，共 {{ catalog.varieties.length }} 个。标为对照的品种在统计时作为比较基准。</div>
+        <div class="page-desc">试验用的品种，共 {{ catalog.comparisonVarieties.length }} 个。标为对照的品种在统计时作为比较基准。</div>
       </div>
       <div class="page-actions">
         <el-input v-model="keyword" placeholder="搜索名称、编号、选育单位" clearable class="search" />

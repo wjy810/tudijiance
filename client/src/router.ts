@@ -39,6 +39,22 @@ const router = createRouter({
           meta: { roles: RECORDERS },
         },
         {
+          path: 'breeding/seasons', name: 'breeding-seasons', component: () => import('@/desktop/views/SeasonsView.vue'),
+          meta: { roles: RECORDERS, module: 'breeding' },
+        },
+        {
+          path: 'breeding/lines', name: 'breeding-lines', component: () => import('@/desktop/views/LinesView.vue'),
+          meta: { roles: RECORDERS, module: 'breeding' },
+        },
+        {
+          path: 'breeding/lines/:id', name: 'breeding-line', component: () => import('@/desktop/views/LineDetailView.vue'),
+          meta: { roles: RECORDERS, module: 'breeding' },
+        },
+        {
+          path: 'breeding/graph', name: 'breeding-graph', component: () => import('@/desktop/views/PedigreeView.vue'),
+          meta: { roles: RECORDERS, module: 'breeding' },
+        },
+        {
           path: 'trials/:id/book', name: 'trial-book', component: () => import('@/desktop/views/RecordBookView.vue'),
           meta: { roles: RECORDERS, module: 'record_book' },
         },

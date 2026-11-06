@@ -37,6 +37,9 @@ export const useCatalogStore = defineStore('catalog', () => {
   }
 
   const varietyById = computed(() => new Map(varieties.value.map((v) => [v.id, v])))
+  /** 原来品种比较用的品种：不含育种里的杂交组合、选株后代（原始材料两边都用） */
+  const comparisonVarieties = computed(() =>
+    varieties.value.filter((v) => !v.lineKind || v.lineKind === 'FOUNDER'))
   const traitById = computed(() => new Map(traits.value.map((t) => [t.trait.id, t])))
 
   /** 能手动录入的项目（启用的、不是自动计算的），按分类分组，保持后端给的顺序 */
@@ -71,5 +74,5 @@ export const useCatalogStore = defineStore('catalog', () => {
     varietiesLoaded = null
   }
 
-  return { traits, varieties, varietyById, traitById, entryTraits, statTraits, loadTraits, loadVarieties, reset }
+  return { traits, varieties, varietyById, comparisonVarieties, traitById, entryTraits, statTraits, loadTraits, loadVarieties, reset }
 })

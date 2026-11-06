@@ -4,7 +4,7 @@ import { reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 import { trialApi, type Trial, type TrialRequest, type TrialType } from '@/shared/api'
-import { TRIAL_TYPE, WHEAT_ZONES } from '@/shared/labels'
+import { TRIAL_TYPE_CHOICES, WHEAT_ZONES } from '@/shared/labels'
 
 const props = defineProps<{ fieldId: number; trial?: Trial | null }>()
 const visible = defineModel<boolean>({ required: true })
@@ -80,7 +80,7 @@ async function remove() {
       </el-form-item>
       <el-form-item label="试验类型">
         <el-radio-group v-model="form.trialType">
-          <el-radio-button v-for="(label, key) in TRIAL_TYPE" :key="key" :value="key as TrialType">{{ label }}</el-radio-button>
+          <el-radio-button v-for="(label, key) in TRIAL_TYPE_CHOICES" :key="key" :value="key as TrialType">{{ label }}</el-radio-button>
         </el-radio-group>
       </el-form-item>
       <el-form-item label="麦区">

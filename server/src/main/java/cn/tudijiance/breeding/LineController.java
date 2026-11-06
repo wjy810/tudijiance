@@ -1,6 +1,9 @@
 package cn.tudijiance.breeding;
 
+import java.util.ArrayList;
 import java.util.List;
+
+import org.springframework.http.ResponseEntity;
 
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -27,6 +30,7 @@ import cn.tudijiance.breeding.BreedingDtos.PlantValueView;
 import cn.tudijiance.breeding.BreedingDtos.PlantValuesRequest;
 import cn.tudijiance.breeding.BreedingDtos.SelectionRequest;
 import cn.tudijiance.breeding.BreedingDtos.StatusRequest;
+import cn.tudijiance.common.ExcelExport;
 import cn.tudijiance.security.CurrentUser;
 import cn.tudijiance.security.Roles;
 import jakarta.validation.Valid;
@@ -62,6 +66,24 @@ public class LineController {
     @PreAuthorize(Roles.CAN_RECORD)
     public LineDetail detail(@PathVariable Long id) {
         return detailService.detail(id);
+    }
+
+    /** 导出品系各季的数据：每个项目一行，每季的平均值和各位置的值 */
+    @GetMapping("/{id}/export")
+    @PreAuthorize(Roles.CAN_RECORD)
+    public ResponseEntity<byte[]> export(@PathVariable Long id) {
+        LineDetail d = detailService.detail(id);
+        List<List<Object>> rows = new ArrayList<>();
+        d.plantValues().forEach(v -> rows.add(List.of("选出时的单株数据", v.traitName(), v.display(), "", "")));
+        d.seasonValues().forEach(s -> s.traits().forEach(t -> rows.add(List.of(
+                s.seasonName() + (s.generation() == null ? "" : "（F" + s.generation() + "）"),
+                t.traitName(), t.display(), t.count(),
+                String.join("；", t.plots().stream().map(p -> p.place() + "：" + p.display()).toList())))));
+        String title = d.line().name() + (d.line().name().equals(d.line().code()) ? "" : "（" + d.line().code() + "）");
+        byte[] body = ExcelExport.write("品系数据", List.of(title + " 各季数据",
+                        "系谱式：" + d.line().pedigree() + "　来源：" + d.originText()),
+                List.of("季", "项目", "值（多个位置取平均）", "位置数", "各位置的值"), rows);
+        return ExcelExport.response(d.line().code() + "-品系数据.xlsx", body);
     }
 
     @PostMapping("/founders")

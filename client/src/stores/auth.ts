@@ -3,6 +3,7 @@ import { defineStore } from 'pinia'
 
 import { authApi, setToken, type Role, type UserView } from '@/shared/api'
 import { useCatalogStore } from '@/stores/catalog'
+import { useBreedingStore } from '@/stores/breeding'
 import { useModuleStore } from '@/stores/modules'
 import { OFFLINE_EDITION } from '@/shared/edition'
 
@@ -94,6 +95,7 @@ export const useAuthStore = defineStore('auth', () => {
   function logout(): void {
     // 换账号登录后要重新取品种和项目
     useCatalogStore().reset()
+    useBreedingStore().reset()
     useModuleStore().reset()
     session.value = null
     setToken(null)

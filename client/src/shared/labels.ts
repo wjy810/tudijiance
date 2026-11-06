@@ -5,6 +5,8 @@ import type {
   Role,
   DeviceStatus,
   Ecotype,
+  LineKind,
+  LineStatus,
   PlotKind,
   QualityType,
   TraitCategory,
@@ -32,11 +34,30 @@ export const CONTROL_TYPE: Record<ControlType, string> = {
   RESISTANCE: '抗性对照',
 }
 
-export const TRIAL_TYPE: Record<TrialType, string> = {
+/** 品种比较里能选的试验类型（育种地块自带的试验不在这里选） */
+export const TRIAL_TYPE_CHOICES: Record<Exclude<TrialType, 'BREEDING'>, string> = {
   REGIONAL: '区域试验',
   PRODUCTION: '生产试验',
   COMPARISON: '品比试验',
   OBSERVATION: '观察圃',
+}
+
+export const TRIAL_TYPE: Record<TrialType, string> = {
+  ...TRIAL_TYPE_CHOICES,
+  BREEDING: '育种地块',
+}
+
+export const LINE_KIND: Record<LineKind, string> = {
+  FOUNDER: '原始材料',
+  CROSS: '杂交组合',
+  SELECTION: '选株后代',
+}
+
+export const LINE_STATUS: Record<LineStatus, { label: string; tag: 'success' | 'warning' | 'info' | 'danger' | 'primary' }> = {
+  ACTIVE: { label: '在选', tag: 'success' },
+  KEPT: { label: '保留', tag: 'primary' },
+  DROPPED: { label: '淘汰', tag: 'info' },
+  RELEASED: { label: '已育成', tag: 'warning' },
 }
 
 export const PLOT_KIND: Record<PlotKind, string> = {

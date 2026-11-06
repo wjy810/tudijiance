@@ -5,7 +5,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Collection, Cpu, DataAnalysis, Delete, Document, EditPen, Grid, Link as LinkIcon, Lock, Menu, Monitor, Notebook,
-  PieChart, Plus, Tickets, TopRight, Upload, User, Warning, Finished,
+  PieChart, Plus, Share, Tickets, TopRight, Upload, User, Warning, Finished,
 } from '@element-plus/icons-vue'
 import type { Component } from 'vue'
 
@@ -25,7 +25,7 @@ const busy = ref<string | null>(null)
 const ICONS: Record<string, Component> = {
   field_map: Grid, varieties: Collection, traits: Tickets, data: Document, stats: DataAnalysis, analysis: PieChart,
   record_book: Notebook, import: Upload, screen: Monitor, devices: Cpu, quality: Finished, corrections: EditPen,
-  users: User, modules: Menu,
+  users: User, modules: Menu, breeding: Share,
 }
 
 /** 停用后谁会受影响 */
@@ -39,6 +39,7 @@ const WHO: Record<string, string> = {
   devices: '传感器上报接口拒绝数据（第二期才用）',
   quality: '看不到数据质量检查',
   corrections: '学生不能申请更正，老师看不到待审核的申请',
+  breeding: '看不到季和地块、品系库、系谱图，育种地块不能种植、选株、杂交',
 }
 
 const builtins = computed(() => list.value.filter((m) => m.kind === 'BUILTIN'))

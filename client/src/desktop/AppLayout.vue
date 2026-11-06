@@ -5,7 +5,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch, type Compon
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
-  ArrowDown, ArrowRight, Check, Collection, Cpu, DataAnalysis, Document, Expand, Fold, Grid, HomeFilled,
+  ArrowDown, ArrowRight, Calendar, Check, Collection, Cpu, DataAnalysis, Document, Expand, Fold, Grid, HomeFilled, Notebook, Share,
   DocumentChecked, EditPen, Link as LinkIcon, Lock, Menu, Monitor, PieChart, Search, SwitchButton, Tickets, TopRight, Upload, User,
 } from '@element-plus/icons-vue'
 
@@ -42,26 +42,35 @@ const RECORDERS: Role[] = ['TEACHER', 'STUDENT']
 
 const GROUPS: { title: string; items: MenuItem[] }[] = [
   {
-    title: '日常',
+    title: '育种',
+    items: [
+      { path: '/breeding/seasons', label: '季和地块', icon: Calendar, roles: RECORDERS, module: 'breeding' },
+      { path: '/breeding/lines', label: '品系库', icon: Notebook, roles: RECORDERS, module: 'breeding' },
+      { path: '/breeding/graph', label: '系谱图', icon: Share, roles: RECORDERS, module: 'breeding' },
+    ],
+  },
+  {
+    title: '品种比较',
     items: [
       { path: '/home', label: '首页', icon: HomeFilled, roles: RECORDERS },
       { path: '/data', label: '数据查看', icon: Document, roles: RECORDERS, module: 'data' },
       { path: '/stats', label: '统计分析', icon: DataAnalysis, roles: RECORDERS, module: 'stats' },
       { path: '/analysis', label: '自助分析', icon: PieChart, roles: RECORDERS, module: 'analysis' },
       { path: '/quality', label: '数据质量', icon: DocumentChecked, roles: RECORDERS, module: 'quality' },
+      { path: '/varieties', label: '品种', icon: Collection, roles: RECORDERS },
+      { path: '/import', label: '导入历史表格', icon: Upload, roles: ['TEACHER'], module: 'import' },
+      { path: '/screen', label: '数据大屏', icon: Monitor, roles: ['SYS_ADMIN', 'TEACHER', 'STUDENT'], module: 'screen' },
+    ],
+  },
+  {
+    title: '共用',
+    items: [
       {
         path: '/corrections', label: '更正申请', icon: EditPen, roles: RECORDERS, module: 'corrections',
         // 老师：待审核的；学生：自己还没处理的
         badge: () => corrections.summary?.pending,
       },
-    ],
-  },
-  {
-    title: '资料',
-    items: [
-      { path: '/varieties', label: '品种', icon: Collection, roles: RECORDERS },
       { path: '/traits', label: '录入项目', icon: Tickets, roles: RECORDERS },
-      { path: '/import', label: '导入历史表格', icon: Upload, roles: ['TEACHER'], module: 'import' },
     ],
   },
   {
@@ -70,12 +79,6 @@ const GROUPS: { title: string; items: MenuItem[] }[] = [
       { path: '/users', label: '用户管理', icon: User, roles: ['SYS_ADMIN'] },
       { path: '/modules', label: '功能模块', icon: Menu, roles: ['SYS_ADMIN'] },
       { path: '/devices', label: '设备接入（预留）', icon: Cpu, roles: ['SYS_ADMIN'], module: 'devices' },
-    ],
-  },
-  {
-    title: '展示',
-    items: [
-      { path: '/screen', label: '数据大屏', icon: Monitor, roles: ['SYS_ADMIN', 'TEACHER', 'STUDENT'], module: 'screen' },
     ],
   },
 ]
@@ -97,9 +100,15 @@ const groups = computed(() => {
   return list.filter((g) => g.items.length > 0)
 })
 
-// 平面图是从首页点进去的，菜单仍然高亮"首页"
-const activeMenu = computed(() =>
-  (route.path.startsWith('/fields') || route.path.startsWith('/trials') ? '/home' : '/' + (route.path.split('/')[1] ?? '')))
+// 平面图是从首页点进去的，菜单仍然高亮"首页"；育种的地块高亮"季和地块"
+const activeMenu = computed(() => {
+  if (route.path.startsWith('/fields/') && currentLand.value) return '/breeding/seasons'
+  if (route.path.startsWith('/fields') || route.path.startsWith('/trials')) return '/home'
+  if (route.path.startsWith('/breeding/')) {
+    return route.path.startsWith('/breeding/lines') ? '/breeding/lines' : '/' + route.path.split('/').slice(1, 3).join('/')
+  }
+  return '/' + (route.path.split('/')[1] ?? '')
+})
 
 const displayName = computed(() => auth.user?.displayName || auth.user?.username || '')
 
@@ -114,16 +123,24 @@ const collapsed = ref(localStorage.getItem(COLLAPSE_KEY) === '1')
 watch(collapsed, (v) => localStorage.setItem(COLLAPSE_KEY, v ? '1' : '0'))
 
 // ---------- 实验田（顶栏切换、快速跳转用） ----------
-const fields = ref<Field[]>([])
+const allFields = ref<Field[]>([])
+/** 原来品种比较的实验田（顶栏切换用） */
+const fields = computed(() => allFields.value.filter((f) => !f.seasonId))
+/** 育种的地块 */
+const lands = computed(() => allFields.value.filter((f) => !!f.seasonId))
 
 async function loadFields() {
   if (!auth.canRecord) return
   try {
-    fields.value = await fieldApi.list()
+    allFields.value = await fieldApi.list('all')
   } catch {
     // 顶栏的实验田列表取不到不影响页面本身
   }
 }
+
+/** 正在看的是育种的地块 */
+const currentLand = computed(() =>
+  (route.path.startsWith('/fields/') ? lands.value.find((f) => f.id === Number(route.params.id)) ?? null : null))
 
 /** 当前实验田：在平面图里就是正在看的那块，否则是上次打开的那块 */
 const currentField = computed(() => {
@@ -141,9 +158,15 @@ function openField(id: number) {
 
 // ---------- 面包屑 ----------
 const crumbs = computed<{ label: string; to?: string }[]>(() => {
+  if (route.path.startsWith('/fields/') && currentLand.value) {
+    return [{ label: '季和地块', to: '/breeding/seasons' }, { label: currentLand.value.name }]
+  }
   if (route.path.startsWith('/fields/')) {
     const f = fields.value.find((x) => x.id === Number(route.params.id))
     return [{ label: '首页', to: '/home' }, { label: f?.name ?? '实验田平面图' }]
+  }
+  if (route.path.startsWith('/breeding/lines/')) {
+    return [{ label: '育种' }, { label: '品系库', to: '/breeding/lines' }, { label: '品系详情' }]
   }
   if (route.path.startsWith('/trials/')) {
     return [{ label: '首页', to: '/home' }, { label: '试验记载本' }]
@@ -176,6 +199,15 @@ const paletteItems = computed<PaletteItem[]>(() => [
     keywords: '平面图 录入',
     run: () => openField(f.id),
   })),
+  ...lands.value.map((f) => ({
+    id: 'land:' + f.id,
+    group: '育种地块',
+    label: f.name,
+    desc: '育种地块',
+    icon: Calendar,
+    keywords: '育种 地块 平面图 种植',
+    run: () => openField(f.id),
+  })),
   { id: 'act:password', group: '账号', label: '修改密码', icon: Lock, run: () => openPassword() },
 ])
 
@@ -205,7 +237,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 
 // 新建、改名实验田后，顶栏的列表跟着更新：回到首页时刷新；打开了列表里没有的实验田时也刷新
 watch(() => route.path, (p) => {
-  const missing = p.startsWith('/fields/') && !fields.value.some((f) => f.id === Number(route.params.id))
+  const missing = p.startsWith('/fields/') && !allFields.value.some((f) => f.id === Number(route.params.id))
   if (p === '/home' || missing) loadFields()
 })
 

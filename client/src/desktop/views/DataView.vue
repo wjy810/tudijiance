@@ -206,7 +206,7 @@ async function exportExcel() {
       </el-select>
       <el-divider direction="vertical" />
       <el-select v-model="filters.varietyId" placeholder="全部品种" clearable filterable class="w120">
-        <el-option v-for="v in catalog.varieties" :key="v.id" :value="v.id" :label="v.name" />
+        <el-option v-for="v in catalog.comparisonVarieties" :key="v.id" :value="v.id" :label="v.name" />
       </el-select>
       <el-select v-model="filters.plotId" placeholder="全部小区" clearable filterable class="w110">
         <el-option v-for="p in trialPlots" :key="p.id" :value="p.id" :label="p.code || `${p.rowNo}-${p.colNo}`" />

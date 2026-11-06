@@ -295,7 +295,7 @@ function setChartType(t: ChartType) {
 
         <div class="sub-title">品种<span class="muted">{{ config.scope.varietyIds.length ? `选了 ${config.scope.varietyIds.length} 个` : '全部' }}</span></div>
         <el-select v-model="config.scope.varietyIds" multiple collapse-tags collapse-tags-tooltip filterable clearable placeholder="全部品种" class="full">
-          <el-option v-for="v in catalog.varieties" :key="v.id" :value="v.id" :label="v.name" />
+          <el-option v-for="v in catalog.comparisonVarieties" :key="v.id" :value="v.id" :label="v.name" />
         </el-select>
 
         <div class="sub-title">重复<span class="muted">{{ config.scope.replicates.length ? '' : '全部' }}</span></div>
