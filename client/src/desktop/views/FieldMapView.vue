@@ -2697,6 +2697,7 @@ function runEdit(fn: () => void) {
       :plots="entryPlots"
       :initial-trait-id="entryTraitId"
       :whole-block="isBreeding ? entryWholeBlock : undefined"
+      :name-of="(id: number) => catalog.varietyById.get(plantingByPlot.get(id)?.varietyId ?? -1)?.name ?? '—'"
       @saved="onEntrySaved"
     />
     <FieldFormDialog v-model="fieldDialog" :field="field" :layout-saved="detail?.layoutSaved" @saved="onFieldSaved" />
