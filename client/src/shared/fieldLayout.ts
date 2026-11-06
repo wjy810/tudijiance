@@ -336,6 +336,8 @@ export function createLayout(o: CreateOptions): FieldLayout {
   const blocks: LayoutBlock[] = []
   let no = 1
   let roadNo = 1
+  // 没有横向道路时，纵向道路上下连成一条
+  const wholeColumn = !roadRow.some(Boolean) && rows.length > 1
   for (let r = 0; r < rows.length; r++) {
     if (roadRow[r]) {
       // 横向道路整行合并成一条
@@ -345,6 +347,8 @@ export function createLayout(o: CreateOptions): FieldLayout {
     }
     for (let c = 0; c < cols.length; c++) {
       if (roadCol[c]) {
+        if (wholeColumn && r > 0) continue
+        if (wholeColumn) merges.push({ r: 0, c, rs: rows.length, cs: 1 })
         blocks.push({ id: `R${roadNo++}`, r, c, name: '道路', kind: 'ROAD', fit: null, inner: null })
       } else {
         blocks.push({

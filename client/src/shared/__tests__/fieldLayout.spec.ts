@@ -324,6 +324,17 @@ describe('roads', () => {
     expect(isRoadTrack(l, 'col', 0)).toBe(false)
   })
 
+  it('makes each vertical road one strip when there are no horizontal roads', () => {
+    const l = createLayout({
+      blockRows: 2, blockCols: 2, blockW: 6, blockH: 20, unit: METER, innerRows: 1, innerCols: 1, roadW: 0, colRoadW: 1,
+    })
+    expect(l.cols).toEqual([6, 1, 6])
+    expect(l.blocks.filter((b) => b.kind === 'ROAD')).toHaveLength(1)
+    expect(l.merges).toEqual([{ r: 0, c: 1, rs: 2, cs: 1 }])
+    expect(roadSegments(l, 'col', 1)).toHaveLength(1)
+    expect(anchors(l.rows.length, l.cols.length, l.merges)).toHaveLength(l.blocks.length)
+  })
+
   it('adds a road without squeezing the blocks: the land grows', () => {
     const l = saved()
     const next = addRoad(l, 'col', 1, 1.5)
