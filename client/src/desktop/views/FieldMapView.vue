@@ -1432,6 +1432,19 @@ function runMenuBlock(action: (blockId: string) => void) {
   if (b) action(b.id)
 }
 
+/** 录入的小区块正好是整个区块、种的同一个品系时：可以按整块录一个值 */
+const entryWholeBlock = computed(() => {
+  const ids = entryPlots.value.map((p) => p.id)
+  if (ids.length < 2) return null
+  const blockId = blockOfPlot(ids[0]!)
+  if (!blockId) return null
+  const all = plantPlotsOfBlock(blockId)
+  if (all.length !== ids.length || !all.every((id) => ids.includes(id))) return null
+  const lines = new Set(ids.map(lineOf))
+  if (lines.size !== 1 || lines.has(null)) return null
+  return { name: menuBlockName(blockId) }
+})
+
 /** 右键菜单"种植"子菜单里每组最多列几个，更多的点"搜全部品系" */
 const MENU_LINES = 8
 
@@ -2380,6 +2393,7 @@ function runEdit(fn: () => void) {
       :trial-id="trialId"
       :plots="entryPlots"
       :initial-trait-id="entryTraitId"
+      :whole-block="isBreeding ? entryWholeBlock : undefined"
       @saved="onEntrySaved"
     />
     <FieldFormDialog v-model="fieldDialog" :field="field" :layout-saved="detail?.layoutSaved" @saved="onFieldSaved" />

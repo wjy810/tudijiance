@@ -6,6 +6,12 @@
 
 ## 当前进度
 
+**育种（2026-11 新增）**：以品系为主线管理种植和数据。一季一次种植周期（一年可以两季），每季的地块可以重新划；
+原始材料、杂交组合、选株后代都是"品系"，编号建好后不变（杂交组合 25-001、选株后代 25-001-3），系谱式自动写（周麦16/郑麦366//百农207）。
+平面图上把品系拖到区块或小区块上种，右键种植、整块种、选株、杂交；系谱图按季分列，看谁是谁的父代、子代；
+品系库里看每个品系每季种在哪、各季的数据，和父母、兄弟品系对比。左侧菜单分"育种"和"品种比较"两组，原来的功能都还在。
+详见[育种：季、地块和品系](docs/育种.md)。
+
 第一期的后端和电脑端大部分已完成：平面图录入、布置试验、数据查看、统计、自助分析（自己选字段做折线、柱状、饼图等）、数据大屏，
 以及历史表格导入（框选区域、按行或按列、对应到录入项目，表头会记成录入项目的别名）。界面按"麦田手记"风格做了改版。
 
@@ -32,6 +38,7 @@
 ```
 docs/
   需求分析.md                                 需求分析（老师需求 + 确认结果）
+  育种.md                                     育种：季、地块、品系，编号规则，怎么用
   技术选型.md                                 技术选型：客户端、后端、权限、导入、预留接口、当前进度
   地块布局与记载本.md                          区块布局（合并、特殊区块、方位、视角）和河南省记载本字段的对应
   界面设计规范.md                              电脑端界面设计规范
@@ -42,6 +49,7 @@ docs/
 server/                                       后端（Spring Boot 4 + MyBatis-Plus + MySQL）
 client/                                       电脑端（Vue 3 + Element Plus + Electron）和手机端（Vant + Capacitor，src/mobile、android/）
 scripts/seed-demo.mjs                         本地演示数据（实验田、品种、4 个年度的试验和数据）
+scripts/seed-breeding.mjs                     本地育种演示数据（4 季的地块、原始材料、选株、杂交和数据）
 reference-code/                               参考论文对应的代码，仅供参考
   final-iot-web/                              前端：Vue 3 + Element Plus + ECharts
   iot_final-training/                         后端：Spring Boot 3 + MyBatis-Plus + MySQL + MQTT/Vert.x
@@ -69,6 +77,12 @@ cd client && pnpm install && pnpm dev:electron
 
 ```bash
 node scripts/seed-demo.mjs
+```
+
+育种的演示数据（四季的地块、原始材料、选株、杂交，按需求一的验收场景）：
+
+```bash
+node scripts/seed-breeding.mjs
 ```
 
 打 Windows 安装包（输出在 `client/release/`，Linux、macOS 上也能打，不用装 wine）：

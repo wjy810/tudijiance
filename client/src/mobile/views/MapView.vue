@@ -109,7 +109,7 @@ function hold(plotId: number) {
 // ---------- 换地、换试验 ----------
 const fieldSheet = ref(false)
 const trialSheet = ref(false)
-const fieldActions = computed(() => field.fields.map((f) => ({ name: f.name, id: f.id, color: f.id === field.fieldId ? '#2e6b4f' : undefined })))
+const fieldActions = computed(() => field.fields.map((f) => ({ name: field.fieldLabel(f), id: f.id, color: f.id === field.fieldId ? '#2e6b4f' : undefined })))
 const trialActions = computed(() => field.trials.map((t) => ({ name: `${t.seasonYear} 年 · ${t.name}`, id: t.id, color: t.id === field.trialId ? '#2e6b4f' : undefined })))
 </script>
 

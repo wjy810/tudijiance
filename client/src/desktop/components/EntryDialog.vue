@@ -17,6 +17,8 @@ const props = defineProps<{
   plots: Plot[]
   /** 打开时默认选中的项目 */
   initialTraitId?: number | null
+  /** 育种的地块：选中的正好是整个区块（种的同一个品系）时，可以按整块录一个值 */
+  wholeBlock?: { name: string } | null
 }>()
 const visible = defineModel<boolean>({ required: true })
 const emit = defineEmits<{ saved: [] }>()
@@ -38,6 +40,23 @@ const categories = computed(() => [...catalog.entryTraits.keys()])
 const traitsInCategory = computed(() => catalog.entryTraits.get(category.value) ?? [])
 const trait = computed<TraitView | null>(() => catalog.traitById.get(traitId.value ?? -1) ?? null)
 const plotCodes = computed(() => props.plots.map((p) => p.code || `${p.rowNo}-${p.colNo}`))
+
+/** 整块收的总数要按面积分到各小区块的项目（产量、株数这类越大块越多的） */
+const SPLIT_CODES = new Set(['plot_yield', 'off_type_count'])
+const splitWhole = ref(true)
+const canSplit = computed(() => !!props.wholeBlock && props.plots.length > 1 && !!trait.value
+  && SPLIT_CODES.has(trait.value.trait.code) && props.plots.every((p) => (p.lengthM ?? 0) > 0 && (p.widthM ?? 0) > 0))
+
+/** 按面积分：各小区块的值，四舍五入后差的补到最后一块，合计等于整块的数 */
+function splitByArea(total: number, digits: number): number[] {
+  const areas = props.plots.map((p) => (p.lengthM ?? 0) * (p.widthM ?? 0))
+  const sum = areas.reduce((a, b) => a + b, 0)
+  const k = 10 ** digits
+  const out = areas.map((a) => Math.round((total * a) / sum * k) / k)
+  const diff = Math.round((total - out.reduce((a, b) => a + b, 0)) * k) / k
+  out[out.length - 1] = Math.round((out[out.length - 1]! + diff) * k) / k
+  return out
+}
 
 watch(visible, async (open) => {
   if (!open) {
@@ -103,6 +122,28 @@ async function save(keepOpen: boolean) {
   }
   saving.value = true
   try {
+    if (canSplit.value && splitWhole.value && v.valueNum != null) {
+      const parts = splitByArea(v.valueNum, t.trait.precisionDigits ?? 2)
+      const unit = t.trait.unit ?? ''
+      const extra = `整块（${props.wholeBlock!.name}）${v.valueNum}${unit}，按面积分到 ${props.plots.length} 个小区块`
+      for (const [i, p] of props.plots.entries()) {
+        await observationApi.create({
+          trialId: props.trialId,
+          traitId: t.trait.id,
+          items: [{ plotId: p.id, clientUuid: uuids.get(p.id)! }],
+          observedOn: observedOnFor(t.trait, v, observedOn.value),
+          note: [note.value.trim(), extra].filter(Boolean).join('；').slice(0, 200),
+          ...v,
+          valueNum: parts[i]!,
+        })
+      }
+      uuids = new Map()
+      ElMessage.success(`已按面积把整块的"${t.trait.name}"分到 ${props.plots.length} 个小区块`)
+      emit('saved')
+      if (keepOpen) nextTrait()
+      else visible.value = false
+      return
+    }
     const created = await observationApi.create({
       trialId: props.trialId,
       traitId: t.trait.id,
@@ -147,7 +188,7 @@ async function onCustomCreated(created: TraitView) {
 <template>
   <el-dialog v-model="visible" title="录入数据" width="760px" top="6vh" :close-on-click-modal="false">
     <div class="plots">
-      <span class="muted">给 {{ plots.length }} 个小区录入：</span>
+      <span class="muted">给 {{ plots.length }} 个{{ wholeBlock !== undefined ? '小区块' : '小区' }}录入<template v-if="wholeBlock">（整个{{ wholeBlock.name }}）</template>：</span>
       <el-tag v-for="c in plotCodes.slice(0, 12)" :key="c" size="small" type="info">{{ c }}</el-tag>
       <span v-if="plotCodes.length > 12" class="muted">等</span>
     </div>
@@ -180,6 +221,14 @@ async function onCustomCreated(created: TraitView) {
       </div>
       <div v-if="trait.trait.description" class="hint book-note">{{ trait.trait.description }}</div>
       <TraitValueInput v-model="value" :trait="trait" />
+      <div v-if="canSplit" class="whole">
+        <el-checkbox v-model="splitWhole">这是整个{{ wholeBlock!.name }}一起收的总数</el-checkbox>
+        <span class="hint">
+          {{ splitWhole
+            ? `按面积分到 ${plots.length} 个小区块，合计等于这个数，折亩产不变`
+            : `不勾：每个小区块都记这个数` }}
+        </span>
+      </div>
 
       <el-form label-width="80px" class="extra">
         <el-form-item v-if="trait.trait.dataType !== 'DATE'" label="调查日期">
@@ -231,6 +280,16 @@ async function onCustomCreated(created: TraitView) {
 
 .std {
   margin: -4px 0 8px;
+}
+
+.whole {
+  margin-top: 10px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--wheat-wash);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .extra {

@@ -268,6 +268,11 @@ class BreedingIntegrationTest {
         JsonNode height = find(firstSeason.get("traits"), t -> t.get("traitId").asLong() == heightTrait);
         assertThat(height.get("display").asString()).isEqualTo("82 cm");
 
+        // 导出品系各季的数据
+        String type = mvc.perform(get("/api/lines/" + a + "/export").header("Authorization", "Bearer " + student))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentType();
+        assertThat(type).contains("spreadsheetml");
+
         // 12. 改名：编号不变，用旧名、编号都能找到
         call(teacher, put("/api/lines/" + a1), Map.of("name", "校麦1号" + sfx), status().isOk());
         JsonNode renamed = call(teacher, put("/api/lines/" + a1), Map.of("name", "校麦2号" + sfx), status().isOk());

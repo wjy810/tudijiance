@@ -1,8 +1,9 @@
 // 手机端取数据：先找服务器，取到了顺便存一份在本机；没网时用本机存的那份。
 // 页面据此显示"离线"和数据是什么时候的
 import {
-  ApiError, fieldApi, isNetworkError, observationApi, traitApi, trialApi, varietyApi,
-  type Field, type FieldDetail, type Layout, type PlotDetail, type Trial, type TrialStatus, type TraitView, type Variety,
+  ApiError, fieldApi, isNetworkError, observationApi, seasonApi, traitApi, trialApi, varietyApi,
+  type Field, type FieldDetail, type Layout, type PlotDetail, type SeasonView, type Trial, type TrialStatus, type TraitView,
+  type Variety,
 } from '@/shared/api'
 import { db as defaultDb, type MobileDb } from './db'
 import { OFFLINE_EDITION } from '@/shared/edition'
@@ -35,7 +36,8 @@ export async function cached<T>(key: string, fetcher: () => Promise<T>, database
 }
 
 export const repo = OFFLINE_EDITION ? createLocalRepo() : {
-  fields: () => cached<Field[]>('fields', fieldApi.list),
+  // 原来的实验田和育种的地块都列出来
+  fields: () => cached<Field[]>('fields', () => fieldApi.list('all')),
   fieldDetail: (fieldId: number) => cached<FieldDetail>(`field:${fieldId}`, () => fieldApi.detail(fieldId)),
   trials: (fieldId: number) => cached<Trial[]>(`trials:${fieldId}`, () => trialApi.list(fieldId)),
   layout: (trialId: number) => cached<Layout>(`layout:${trialId}`, () => trialApi.layout(trialId)),
@@ -44,6 +46,14 @@ export const repo = OFFLINE_EDITION ? createLocalRepo() : {
     cached<PlotDetail>(`plot:${trialId}:${plotId}`, () => observationApi.plotDetail(trialId, plotId)),
   traits: () => cached<TraitView[]>('traits', traitApi.list),
   varieties: () => cached<Variety[]>('varieties', varietyApi.list),
+}
+
+/** 育种的季（地块属于哪一季，换地时显示）；离线版没有育种 */
+export function loadSeasons(): Promise<Loaded<SeasonView[]>> {
+  if (OFFLINE_EDITION) {
+    return Promise.resolve({ data: [], offline: false, savedAt: Date.now() })
+  }
+  return cached<SeasonView[]>('seasons', seasonApi.list)
 }
 
 /** 最近的试验排在前面 */
@@ -64,6 +74,7 @@ export async function downloadForOffline(onProgress?: (text: string) => void): P
   }
   await step('录入项目', repo.traits)
   await step('品种', repo.varieties)
+  await step('季', () => loadSeasons().catch(() => null))
   const fields = (await repo.fields()).data
   for (const f of fields) {
     await step(`${f.name}：小区`, () => repo.fieldDetail(f.id))

@@ -4,12 +4,12 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 
 import type {
-  Field, Layout, Plot, PlotStatus, TraitCategory, TraitView, Trial, TrialStatus, Variety,
+  Field, Layout, Plot, PlotStatus, SeasonView, TraitCategory, TraitView, Trial, TrialStatus, Variety,
 } from '@/shared/api'
 import type { FieldLayout } from '@/shared/fieldLayout'
 import { useAuthStore } from '@/stores/auth'
 import { mobileStorageKey } from '@/shared/edition'
-import { repo, sortTrials } from '../repo'
+import { loadSeasons, repo, sortTrials } from '../repo'
 import { unsyncedPlots } from '../outbox'
 
 const FIELD_KEY = mobileStorageKey('field')
@@ -21,6 +21,8 @@ const readNum = (k: string) => Number(localStorage.getItem(k)) || null
 export const useFieldStore = defineStore('mobile-field', () => {
   const auth = useAuthStore()
   const fields = ref<Field[]>([])
+  /** 育种的季：地块属于哪一季 */
+  const seasons = ref<SeasonView[]>([])
   const trials = ref<Trial[]>([])
   const plots = ref<Plot[]>([])
   const layout = ref<Layout | null>(null)
@@ -39,6 +41,13 @@ export const useFieldStore = defineStore('mobile-field', () => {
   const error = ref<string | null>(null)
 
   const field = computed(() => fields.value.find((f) => f.id === fieldId.value) ?? null)
+  const seasonNameById = computed(() => new Map(seasons.value.map((v) => [v.season.id, v.season.name])))
+
+  /** 换地时显示的名字：育种的地块带上季，例如"2026-2027 年度大田 · 东地" */
+  function fieldLabel(f: Field): string {
+    const s = f.seasonId ? seasonNameById.value.get(f.seasonId) : null
+    return s ? `${s} · ${f.name}` : f.name
+  }
   const trial = computed(() => trials.value.find((t) => t.id === trialId.value) ?? null)
   const varietyById = computed(() => new Map(varieties.value.map((v) => [v.id, v])))
   const traitById = computed(() => new Map(traits.value.map((t) => [t.trait.id, t])))
@@ -116,7 +125,15 @@ export const useFieldStore = defineStore('mobile-field', () => {
     try {
       await loadCatalog()
       const f = await repo.fields()
-      fields.value = f.data
+      // 季取不到（例如育种模块停用了）不影响录入
+      seasons.value = (await loadSeasons().catch(() => null))?.data ?? []
+      // 最近一季的地块排在最前面，原来的实验田在后面
+      const start = new Map(seasons.value.map((v) => [v.season.id, v.season.startDate]))
+      fields.value = [...f.data].sort((a, b) => {
+        const sa = a.seasonId ? start.get(a.seasonId) ?? '' : ''
+        const sb = b.seasonId ? start.get(b.seasonId) ?? '' : ''
+        return sb.localeCompare(sa) || a.id - b.id
+      })
       noteOffline(f)
       if (!fields.value.some((x) => x.id === fieldId.value)) {
         fieldId.value = fields.value[0]?.id ?? null
@@ -162,8 +179,8 @@ export const useFieldStore = defineStore('mobile-field', () => {
     .filter((t): t is TraitView => !!t && t.trait.enabled && !t.trait.isComputed))
 
   return {
-    fields, trials, plots, layout, blockLayout, status, traits, varieties, fieldId, trialId, offlineSince, unsynced, loading, error,
-    field, trial, varietyById, traitById, plantingByPlot, statusByPlot, entryGroups, recentTraits,
+    fields, seasons, trials, plots, layout, blockLayout, status, traits, varieties, fieldId, trialId, offlineSince, unsynced, loading, error,
+    field, trial, fieldLabel, varietyById, traitById, plantingByPlot, statusByPlot, entryGroups, recentTraits,
     load, loadTrial, selectField, selectTrial, refreshUnsynced, rememberTrait,
   }
 })
