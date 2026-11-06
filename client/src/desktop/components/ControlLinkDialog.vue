@@ -1,8 +1,8 @@
 <script setup lang="ts">
 // 设对照：两种方式
-//   一个（几个）小区当对照：选中的小区里勾出哪几个是对照，其余的和它比；
-//   整个区块当对照组：选一个区块，里面的小区都是对照，别的小区和这一组的平均比。
-// 平面图上不画连线：对照小区描红边、标 CK，对照区块整块描边、挂"对照组"；点开一组时比较的小区标出比对照高多少
+//   一个（几个）小区块当对照：选中的小区块里勾出哪几个是对照，其余的和它比；
+//   整个区块当对照组：选一个区块，里面的小区块都是对照，别的小区块和这一组的平均比。
+// 平面图上不画连线：对照小区块描红边、标 CK，对照区块整块描边、挂"对照组"；点开一组时比较的小区块标出比对照高多少
 import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 
@@ -11,18 +11,18 @@ import type { FieldLayout } from '@/shared/fieldLayout'
 
 const props = withDefaults(defineProps<{
   trialId: number
-  /** 选中的试验小区 */
+  /** 选中的试验小区块 */
   plots: Plot[]
-  /** 地块里所有小区（只算试验小区） */
+  /** 地块里所有小区块（只算试验小区块） */
   allPlots: Plot[]
   layout: FieldLayout | null
-  /** 小区上种的品种（品系）名称 */
+  /** 小区块上种的品种（品系）名称 */
   nameOf: (plotId: number) => string
   /** 种的是不是对照品种 */
   isCk: (plotId: number) => boolean
-  /** "小区"还是"小区块" */
+  /** "小区块"还是"小区块" */
   unit?: string
-}>(), { unit: '小区' })
+}>(), { unit: '小区块' })
 const visible = defineModel<boolean>({ required: true })
 const emit = defineEmits<{ saved: [layout: Layout] }>()
 
@@ -44,7 +44,7 @@ const code = (id: number) => {
   return p ? p.code || `${p.rowNo}-${p.colNo}` : `#${id}`
 }
 
-/** 能当对照组的区块：里面有试验小区的种植区块 */
+/** 能当对照组的区块：里面有试验小区块的种植区块 */
 const blocks = computed(() => (props.layout?.blocks ?? [])
   .filter((b) => b.kind === 'PLANT' && b.inner)
   .map((b) => ({ id: b.id, name: b.name, plotIds: Object.values(b.inner!.plots).filter((id) => trialIds.value.has(id)) }))
@@ -52,7 +52,7 @@ const blocks = computed(() => (props.layout?.blocks ?? [])
 
 const selectedIds = computed(() => props.plots.map((p) => p.id))
 
-/** 选中的正好是一个区块的全部试验小区 */
+/** 选中的正好是一个区块的全部试验小区块 */
 const selectedBlock = computed(() => {
   const set = new Set(selectedIds.value)
   return blocks.value.find((b) => b.plotIds.length === set.size && b.plotIds.every((id) => set.has(id))) ?? null

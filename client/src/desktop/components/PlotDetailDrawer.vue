@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 小区详情：基本信息、各项目最新的值（标准项目和自定义项目分开）、全部录入记录
+// 小区块详情：基本信息、各项目最新的值（标准项目和自定义项目分开）、全部录入记录
 import { computed, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { EditPen, Warning } from '@element-plus/icons-vue'
@@ -15,7 +15,7 @@ import CorrectionDialog from './CorrectionDialog.vue'
 const props = defineProps<{
   trialId: number | null
   plotId: number | null
-  /** 小区在哪（区块布局时写区块和区块里的行列），不传时写第几行第几列 */
+  /** 小区块在哪（区块布局时写区块和区块里的行列），不传时写第几行第几列 */
   place?: string | null
 }>()
 const visible = defineModel<boolean>({ required: true })
@@ -64,7 +64,7 @@ defineExpose({ reload: load })
 const plot = computed(() => detail.value?.plot ?? null)
 const title = computed(() => {
   const p = plot.value
-  return p ? `小区 ${p.code || '未编号'}（${props.place ?? `第 ${p.rowNo} 行第 ${p.colNo} 列`}）` : '小区详情'
+  return p ? `小区块 ${p.code || '未编号'}（${props.place ?? `第 ${p.rowNo} 行第 ${p.colNo} 列`}）` : '小区块详情'
 })
 const area = computed(() => {
   const p = plot.value
@@ -242,7 +242,7 @@ async function onEdited() {
                 </template>
               </el-table-column>
             </el-table>
-            <div v-if="detail.records.length >= 200" class="hint">只显示最近 200 条，更多的到"数据查看"里按小区筛选。</div>
+            <div v-if="detail.records.length >= 200" class="hint">只显示最近 200 条，更多的到"数据查看"里按小区块筛选。</div>
           </el-tab-pane>
         </el-tabs>
       </template>

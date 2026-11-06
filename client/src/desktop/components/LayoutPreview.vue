@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 区块布局的小预览（SVG）：区块、道路、保护区和区块里的小区格子，按实际比例
+// 区块布局的小预览（SVG）：区块、道路、保护区和区块里的小区块格子，按实际比例
 import { computed } from 'vue'
 
 import { blockRect, blockSlot, fieldSize, innerCells, type FieldLayout } from '@/shared/fieldLayout'

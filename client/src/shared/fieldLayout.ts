@@ -1,9 +1,9 @@
-// 实验田的区块布局：实验田 → 区块 → 小区两层网格。和服务器 FieldLayout.java 的字段一致。
+// 实验田的区块布局：实验田 → 区块 → 小区块两层网格。和服务器 FieldLayout.java 的字段一致。
 //
 //   区块网格  rows（每行区块的高）× cols（每列区块的宽），单位见 unit，可以合并（merges）
-//   区块      PLANT 种植区块里再分小区网格（inner）；ROAD 道路、GUARD 保护区、BLANK 空地没有小区
+//   区块      PLANT 种植区块里再分小区块网格（inner）；ROAD 道路、GUARD 保护区、BLANK 空地没有小区块
 //   特殊区块  fit 比原来的位置（槽位）小时，槽位里其余部分是道路，区块可以在槽位里移动
-//   小区网格  inner.rows / inner.cols 是相对大小，按区块实际大小分；可以合并；inner.plots 记格子对应的小区 id
+//   小区块网格  inner.rows / inner.cols 是相对大小，按区块实际大小分；可以合并；inner.plots 记格子对应的小区块 id
 //
 // 这里都是纯函数：每个操作返回新的布局，不改原来的，方便撤销和测试。
 
@@ -30,16 +30,16 @@ export interface Unit {
   meters: number
 }
 
-/** 区块里一格（小区）的类型：种植小区、道路（走道）、保护区、空地 */
+/** 区块里一格（小区块）的类型：种植小区块、道路（走道）、保护区、空地 */
 export type CellKind = 'PLANT' | 'ROAD' | 'GUARD' | 'BLANK'
 
 export interface Inner {
   rows: number[]
   cols: number[]
   merges: Span[]
-  /** "行,列" → 小区 id；新加的格子没有，保存后服务器补上 */
+  /** "行,列" → 小区块 id；新加的格子没有，保存后服务器补上 */
   plots: Record<string, number>
-  /** "行,列" → 格子类型；没写的是种植小区 */
+  /** "行,列" → 格子类型；没写的是种植小区块 */
   kinds?: Record<string, CellKind>
 }
 
@@ -74,13 +74,13 @@ export const BLOCK_KIND: Record<BlockKind, string> = {
 }
 
 export const CELL_KIND: Record<CellKind, string> = {
-  PLANT: '种植小区',
+  PLANT: '种植小区块',
   ROAD: '道路',
   GUARD: '保护区',
   BLANK: '空地',
 }
 
-/** 格子类型，没写的是种植小区 */
+/** 格子类型，没写的是种植小区块 */
 export function cellKind(inner: Inner | null | undefined, key: string): CellKind {
   return inner?.kinds?.[key] ?? 'PLANT'
 }
@@ -205,7 +205,7 @@ export interface CellGeom {
   kind: CellKind
 }
 
-/** 区块里的小区（格子），rect 是在整块地里的位置 */
+/** 区块里的小区块（格子），rect 是在整块地里的位置 */
 export function innerCells(l: FieldLayout, b: LayoutBlock): CellGeom[] {
   if (!b.inner) return []
   const box = blockRect(l, b)
@@ -222,7 +222,7 @@ export function innerCells(l: FieldLayout, b: LayoutBlock): CellGeom[] {
   })
 }
 
-/** 区块里每一行、每一列小区的实际大小（单位同布局） */
+/** 区块里每一行、每一列小区块的实际大小（单位同布局） */
 export function innerSizes(l: FieldLayout, b: LayoutBlock): { rows: number[]; cols: number[] } {
   if (!b.inner) return { rows: [], cols: [] }
   const box = blockRect(l, b)
@@ -235,20 +235,20 @@ export function plotCount(l: FieldLayout): number {
   return l.blocks.reduce((n, b) => n + (b.inner ? anchors(b.inner.rows.length, b.inner.cols.length, b.inner.merges).length : 0), 0)
 }
 
-/** 布局里引用的所有小区 id */
+/** 布局里引用的所有小区块 id */
 export function plotIds(l: FieldLayout): Set<number> {
   const out = new Set<number>()
   for (const b of l.blocks) for (const id of Object.values(b.inner?.plots ?? {})) out.add(id)
   return out
 }
 
-/** 改布局后会去掉的小区 */
+/** 改布局后会去掉的小区块 */
 export function removedPlots(before: FieldLayout, after: FieldLayout): number[] {
   const keep = plotIds(after)
   return [...plotIds(before)].filter((id) => !keep.has(id))
 }
 
-/** 小区所在的区块和格子 */
+/** 小区块所在的区块和格子 */
 export function locatePlot(l: FieldLayout, plotId: number): { block: LayoutBlock; key: string } | null {
   for (const b of l.blocks) {
     for (const [key, id] of Object.entries(b.inner?.plots ?? {})) if (id === plotId) return { block: b, key }
@@ -256,7 +256,7 @@ export function locatePlot(l: FieldLayout, plotId: number): { block: LayoutBlock
   return null
 }
 
-/** 小区在哪：区块名称和在区块里的第几行第几列（合并的写跨几行几列）；找不到时 null */
+/** 小区块在哪：区块名称和在区块里的第几行第几列（合并的写跨几行几列）；找不到时 null */
 export function plotPlace(l: FieldLayout | null | undefined, plotId: number): string | null {
   if (!l) return null
   const hit = locatePlot(l, plotId)
@@ -268,7 +268,7 @@ export function plotPlace(l: FieldLayout | null | undefined, plotId: number): st
   return `${hit.block.name} · ${rows}${cols}`
 }
 
-/** 所有小区在哪（一次算好，平面图上每个小区的说明用） */
+/** 所有小区块在哪（一次算好，平面图上每个小区块的说明用） */
 export function plotPlaces(l: FieldLayout | null | undefined): Map<number, string> {
   const out = new Map<number, string>()
   if (!l) return out
@@ -290,7 +290,7 @@ export interface CreateOptions {
   blockW: number
   blockH: number
   unit: Unit
-  /** 每个区块里几行几列小区 */
+  /** 每个区块里几行几列小区块 */
   innerRows: number
   innerCols: number
   /** 区块之间的道路宽，0 表示不留 */
@@ -306,7 +306,7 @@ function evenInner(rows: number, cols: number): Inner {
 }
 
 /**
- * 初始化：几行几列区块、每块多宽多高、里面几行几列小区，区块之间可以留横向、纵向道路。
+ * 初始化：几行几列区块、每块多宽多高、里面几行几列小区块，区块之间可以留横向、纵向道路。
  * 地块大小就是区块加道路加起来，以后加区块、加道路地块跟着变大
  */
 export function createLayout(o: CreateOptions): FieldLayout {
@@ -460,7 +460,7 @@ export function insertTrack(layout: FieldLayout, axis: Axis, index: number, size
   return l
 }
 
-/** 删掉第 index 行（列）区块；整个在这一行里的区块（和里面的小区）一起删掉，跨行合并的区块变小 */
+/** 删掉第 index 行（列）区块；整个在这一行里的区块（和里面的小区块）一起删掉，跨行合并的区块变小 */
 export function removeTrack(layout: FieldLayout, axis: Axis, index: number): FieldLayout {
   const tracks = axis === 'row' ? layout.rows : layout.cols
   if (tracks.length <= 1 || index < 0 || index >= tracks.length) return layout
@@ -515,7 +515,7 @@ function blockAt(l: FieldLayout, r: number, c: number): LayoutBlock | undefined 
 }
 
 /**
- * 区块里小区网格的绝对大小：相对大小换算成实际长度，用来拼接、切分
+ * 区块里小区块网格的绝对大小：相对大小换算成实际长度，用来拼接、切分
  */
 function absInner(inner: Inner, w: number, h: number): Inner {
   const rs = sum(inner.rows)
@@ -525,16 +525,16 @@ function absInner(inner: Inner, w: number, h: number): Inner {
 
 export interface MergeResult {
   layout: FieldLayout
-  /** 合并后不再有的小区 id（被并掉的区块里的） */
+  /** 合并后不再有的小区块 id（被并掉的区块里的） */
   dropped: number[]
-  /** 小区网格是不是拼起来了（所有小区都保留） */
+  /** 小区块网格是不是拼起来了（所有小区块都保留） */
   joined: boolean
 }
 
 /**
  * 合并一片区块。左上角的区块留下（名称、类型），其余并进来。
- * 如果都是普通种植区块，而且同一行的小区行数一样、同一列的小区列数一样，就把小区网格拼起来，所有小区都保留；
- * 否则留下左上角区块的小区网格（拉大），其它区块的小区去掉。
+ * 如果都是普通种植区块，而且同一行的小区块行数一样、同一列的小区块列数一样，就把小区块网格拼起来，所有小区块都保留；
+ * 否则留下左上角区块的小区块网格（拉大），其它区块的小区块去掉。
  */
 export function mergeBlocks(layout: FieldLayout, a: { r: number; c: number }, b: { r: number; c: number }): MergeResult {
   const rect = expandRect(layout.merges, a, b)
@@ -600,7 +600,7 @@ export function mergeBlocks(layout: FieldLayout, a: { r: number; c: number }, b:
   return { layout: l, dropped, joined: canJoin }
 }
 
-/** 把合并的区块拆开。小区网格能按原来的行列边界切开时分给各个区块，否则留在左上角区块里，其它新建 */
+/** 把合并的区块拆开。小区块网格能按原来的行列边界切开时分给各个区块，否则留在左上角区块里，其它新建 */
 export function splitBlock(layout: FieldLayout, blockId: string): FieldLayout {
   const src = layout.blocks.find((b) => b.id === blockId)
   if (!src) return layout
@@ -629,11 +629,11 @@ export function splitBlock(layout: FieldLayout, blockId: string): FieldLayout {
   return l
 }
 
-/** 按区块网格的边界把小区网格切开；切不开（边界不对齐，或合并的小区跨过边界）返回 null */
+/** 按区块网格的边界把小区块网格切开；切不开（边界不对齐，或合并的小区块跨过边界）返回 null */
 function cutInner(l: FieldLayout, b: LayoutBlock, span: Span): Inner[][] | null {
   const box = trackRect(l.rows, l.cols, span)
   const abs = absInner(b.inner!, box.w, box.h)
-  // 每条区块边界落在第几条小区分界线上；对不上就切不开
+  // 每条区块边界落在第几条小区块分界线上；对不上就切不开
   const cut = (sizes: number[], tracks: number[]): number[] | null => {
     const cum = [0]
     for (const v of sizes) cum.push(cum[cum.length - 1]! + v)
@@ -702,7 +702,7 @@ export function renameBlock(layout: FieldLayout, id: string, name: string): Fiel
 }
 
 /**
- * 改区块类型。改成道路、保护区、空地时，里面的小区去掉；改回种植区块时按默认行列分小区。
+ * 改区块类型。改成道路、保护区、空地时，里面的小区块去掉；改回种植区块时按默认行列分小区块。
  * 一整行（列）都成了道路时，这一行（列）收窄成道路宽，并成一条；整条道路改回种植区块时，
  * 按旁边区块的大小放宽，并按列（行）分成一个个区块（和纵向道路交叉的地方还是道路）
  */
@@ -786,7 +786,7 @@ export function alignBlockFit(layout: FieldLayout, id: string, align: Align): Fi
   return moveBlockFit(layout, id, pos.x, pos.y)
 }
 
-// ---------- 区块里的小区网格 ----------
+// ---------- 区块里的小区块网格 ----------
 
 function mapInner(layout: FieldLayout, id: string, fn: (inner: Inner, b: LayoutBlock, l: FieldLayout) => void): FieldLayout {
   const b = layout.blocks.find((x) => x.id === id)
@@ -794,7 +794,7 @@ function mapInner(layout: FieldLayout, id: string, fn: (inner: Inner, b: LayoutB
   return mapBlocks(layout, [id], (x, l) => fn(x.inner!, x, l))
 }
 
-/** 区块里改成 rows 行 cols 列小区：多了在后面加（大小取平均），少了从后面删（合并跨过去的拆开） */
+/** 区块里改成 rows 行 cols 列小区块：多了在后面加（大小取平均），少了从后面删（合并跨过去的拆开） */
 export function resizeInner(layout: FieldLayout, id: string, rows: number, cols: number): FieldLayout {
   const nr = clamp(Math.round(rows), 1, MAX_INNER_TRACKS)
   const nc = clamp(Math.round(cols), 1, MAX_INNER_TRACKS)
@@ -819,7 +819,7 @@ export function resizeInner(layout: FieldLayout, id: string, rows: number, cols:
 }
 
 /**
- * 改区块里一行（列）小区的实际大小，其它行（列）按原来的比例分剩下的，区块总大小不变。
+ * 改区块里一行（列）小区块的实际大小，其它行（列）按原来的比例分剩下的，区块总大小不变。
  * size 超出区块大小时不改
  */
 export function setInnerTrackSize(layout: FieldLayout, id: string, axis: Axis, index: number, size: number): FieldLayout {
@@ -839,7 +839,7 @@ export function setInnerTrackSize(layout: FieldLayout, id: string, axis: Axis, i
   })
 }
 
-/** 拖动区块里小区之间的分界线：第 index 行（列）小区改成 a，下一行（列）改成 b（实际大小），其它不变 */
+/** 拖动区块里小区块之间的分界线：第 index 行（列）小区块改成 a，下一行（列）改成 b（实际大小），其它不变 */
 export function setInnerTrackPair(layout: FieldLayout, id: string, axis: Axis, index: number, a: number, b: number): FieldLayout {
   const blk = layout.blocks.find((x) => x.id === id)
   if (!blk?.inner || !(a > 0) || !(b > 0)) return layout
@@ -885,8 +885,8 @@ export function canMoveCells(layout: FieldLayout, id: string, keys: string[], dr
 }
 
 /**
- * 把区块里选中的格子整体挪 dr 行 dc 列：小区（编号、品种、数据都跟着小区）和格子类型一起挪，
- * 挪过去的地方原来的小区换到空出来的格子里。挪不了时返回原布局
+ * 把区块里选中的格子整体挪 dr 行 dc 列：小区块（编号、品种、数据都跟着小区块）和格子类型一起挪，
+ * 挪过去的地方原来的小区块换到空出来的格子里。挪不了时返回原布局
  */
 export function moveCells(layout: FieldLayout, id: string, keys: string[], dr: number, dc: number): FieldLayout {
   if ((dr === 0 && dc === 0) || !canMoveCells(layout, id, keys, dr, dc)) return layout
@@ -919,7 +919,7 @@ export function moveCells(layout: FieldLayout, id: string, keys: string[], dr: n
   })
 }
 
-/** 交换两个区块的位置（占的行列数一样的才能换）：名称、类型、里面的小区都跟着换 */
+/** 交换两个区块的位置（占的行列数一样的才能换）：名称、类型、里面的小区块都跟着换 */
 export function swapBlocks(layout: FieldLayout, a: string, b: string): FieldLayout {
   const A = layout.blocks.find((x) => x.id === a)
   const B = layout.blocks.find((x) => x.id === b)
@@ -936,7 +936,7 @@ export function swapBlocks(layout: FieldLayout, a: string, b: string): FieldLayo
   return l
 }
 
-/** 区块里各行（列）小区平分 */
+/** 区块里各行（列）小区块平分 */
 export function evenInnerTracks(layout: FieldLayout, id: string, axis: Axis): FieldLayout {
   return mapInner(layout, id, (inner) => {
     if (axis === 'row') inner.rows = inner.rows.map(() => 1)
@@ -945,8 +945,8 @@ export function evenInnerTracks(layout: FieldLayout, id: string, axis: Axis): Fi
 }
 
 /**
- * 合并区块里的一片小区。留下左上角的小区（没有就留范围里第一个已有的小区），
- * 其余小区去掉；返回去掉的小区 id
+ * 合并区块里的一片小区块。留下左上角的小区块（没有就留范围里第一个已有的小区块），
+ * 其余小区块去掉；返回去掉的小区块 id
  */
 export function mergeInner(
   layout: FieldLayout, id: string, a: { r: number; c: number }, b: { r: number; c: number },
@@ -983,7 +983,7 @@ export function mergeInner(
   return { layout: next, dropped }
 }
 
-/** 拆开区块里合并的小区：左上角留原来的小区，其它格子是新小区（类型和原来一样） */
+/** 拆开区块里合并的小区块：左上角留原来的小区块，其它格子是新小区块（类型和原来一样） */
 export function splitInner(layout: FieldLayout, id: string, r: number, c: number): FieldLayout {
   return mapInner(layout, id, (inner) => {
     const m = mergeAt(inner.merges, r, c)
@@ -998,7 +998,7 @@ export function splitInner(layout: FieldLayout, id: string, r: number, c: number
   })
 }
 
-/** 一个小区的中心点（在整块地里的坐标）和格子类型，重新分小区时按位置找新格子 */
+/** 一个小区块的中心点（在整块地里的坐标）和格子类型，重新分小区块时按位置找新格子 */
 export interface PlotSpot {
   plotId: number
   kind: CellKind | null
@@ -1006,7 +1006,7 @@ export interface PlotSpot {
   y: number
 }
 
-/** 这些区块里每个小区的中心点 */
+/** 这些区块里每个小区块的中心点 */
 export function plotSpots(l: FieldLayout, blockIds: string[]): PlotSpot[] {
   const out: PlotSpot[] = []
   for (const b of l.blocks) {
@@ -1020,9 +1020,9 @@ export function plotSpots(l: FieldLayout, blockIds: string[]): PlotSpot[] {
 }
 
 /**
- * 区块里重新分成 rows 行 cols 列（各行各列一样大）。原来的小区按位置留下：小区中心落在哪个新格子里，
- * 就成为那个格子的小区（编号、品种、数据都跟着）；一个新格子落进几个小区时留左上角的，其余去掉。
- * spots 是原来的小区在哪（合并区块时传合并前各个区块的小区），不传时用这个区块现在的小区
+ * 区块里重新分成 rows 行 cols 列（各行各列一样大）。原来的小区块按位置留下：小区块中心落在哪个新格子里，
+ * 就成为那个格子的小区块（编号、品种、数据都跟着）；一个新格子落进几个小区块时留左上角的，其余去掉。
+ * spots 是原来的小区块在哪（合并区块时传合并前各个区块的小区块），不传时用这个区块现在的小区块
  */
 export function regridInner(
   layout: FieldLayout, id: string, rows: number, cols: number, spots?: PlotSpot[],
@@ -1060,7 +1060,7 @@ export function regridInner(
   return { layout: next, dropped }
 }
 
-/** 给区块里选中的格子设类型：种植小区、道路、保护区、空地（小区还在，保存后小区类型跟着变） */
+/** 给区块里选中的格子设类型：种植小区块、道路、保护区、空地（小区块还在，保存后小区块类型跟着变） */
 export function setCellKinds(layout: FieldLayout, id: string, keys: string[], kind: CellKind): FieldLayout {
   const blk = layout.blocks.find((x) => x.id === id)
   if (!blk?.inner || keys.length === 0) return layout
@@ -1239,7 +1239,7 @@ export function trackToRoadProblem(l: FieldLayout, axis: Axis, index: number): s
   return null
 }
 
-/** 把一整行（列）改成一条道路：里面的区块（和小区）去掉，收窄成 width（不给时用默认道路宽） */
+/** 把一整行（列）改成一条道路：里面的区块（和小区块）去掉，收窄成 width（不给时用默认道路宽） */
 export function trackToRoad(layout: FieldLayout, axis: Axis, index: number, width?: number): FieldLayout {
   if (trackToRoadProblem(layout, axis, index)) return layout
   const l = clearTrack(layout, axis, index)
@@ -1317,9 +1317,9 @@ export function setUnit(layout: FieldLayout, unit: Unit, convert: boolean): Fiel
 export function checkLayout(l: FieldLayout): string | null {
   if (!(l.unit.meters > 0) || l.unit.meters > 1000) return '长度单位不对'
   if (l.rows.length > MAX_BLOCK_TRACKS || l.cols.length > MAX_BLOCK_TRACKS) return `区块最多 ${MAX_BLOCK_TRACKS} 行、${MAX_BLOCK_TRACKS} 列`
-  if (plotCount(l) > MAX_PLOTS) return `小区太多了：一块地最多 ${MAX_PLOTS} 个小区`
+  if (plotCount(l) > MAX_PLOTS) return `小区块太多了：一块地最多 ${MAX_PLOTS} 个小区块`
   if (l.blocks.some((b) => b.kind === 'PLANT' && b.inner && (b.inner.rows.length > MAX_INNER_TRACKS || b.inner.cols.length > MAX_INNER_TRACKS))) {
-    return `一个区块里最多 ${MAX_INNER_TRACKS} 行、${MAX_INNER_TRACKS} 列小区`
+    return `一个区块里最多 ${MAX_INNER_TRACKS} 行、${MAX_INNER_TRACKS} 列小区块`
   }
   return null
 }

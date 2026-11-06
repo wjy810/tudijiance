@@ -1,8 +1,8 @@
 <script setup lang="ts">
 // 实验田 3D 视角：可以自由转动、俯仰、缩放、平移，看实验田的立体样子。
-//   小区画成立起来的方块：高度按长势（没种、生长中、已收获），"按指标"着色时按指标的值（像立体柱状图）；
-//   道路、保护区、空地按类型铺；选中的小区抬高、变金色。
-//   左键拖动转视角，右键（或按住 Ctrl 左键）拖动平移，滚轮缩放；单击选小区，Ctrl 单击加选，Shift 拖动框选，双击看详情。
+//   小区块画成立起来的方块：高度按长势（没种、生长中、已收获），"按指标"着色时按指标的值（像立体柱状图）；
+//   道路、保护区、空地按类型铺；选中的小区块抬高、变金色。
+//   左键拖动转视角，右键（或按住 Ctrl 左键）拖动平移，滚轮缩放；单击选小区块，Ctrl 单击加选，Shift 拖动框选，双击看详情。
 // 坐标：1 个单位 = 1 米；布局的 x 向右是 X，y 向下是 Z，Y 朝上。
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as THREE from 'three'
@@ -22,7 +22,7 @@ export type CameraPreset = 'top' | 'oblique' | 'north' | 'east' | 'south' | 'wes
 const props = withDefaults(defineProps<{
   layout: FieldLayout
   cells: Map<number, CanvasCell>
-  /** 每个小区立起来多高（米） */
+  /** 每个小区块立起来多高（米） */
   heights: Map<number, number>
   selectedPlots?: number[]
   focus?: string | null
@@ -173,7 +173,7 @@ function build() {
   cx = s.w / 2
   cy = s.h / 2
   radius = Math.max(4, Math.hypot(s.w * m, s.h * m) / 2)
-  // 高度放大得太多，小区立起来像一根根柱子，看着变形：大地块最多放大 2.5 倍
+  // 高度放大得太多，小区块立起来像一根根柱子，看着变形：大地块最多放大 2.5 倍
   ex = Math.min(2.5, Math.max(1, radius / 12))
   root = new THREE.Group()
 
@@ -216,7 +216,7 @@ function build() {
     }
   }
 
-  // 小区：一个实例化网格画全部
+  // 小区块：一个实例化网格画全部
   const geo = track(new THREE.BoxGeometry(1, 1, 1))
   const mat = track(new THREE.MeshStandardMaterial({ roughness: 0.88, metalness: 0 }))
   plotMesh = new THREE.InstancedMesh(geo, mat, Math.max(1, insts.length))
@@ -226,7 +226,7 @@ function build() {
   root.add(plotMesh)
   applyInstances()
 
-  // 对照：对照小区描红框，正在看的一组里比较的小区描虚线框（不画连线）
+  // 对照：对照小区块描红框，正在看的一组里比较的小区块描虚线框（不画连线）
   const frame = (i: number, color: string, dashed: boolean) => {
     const r = insts[i]!.rect
     const y = PLATE + insts[i]!.height + 0.04
@@ -277,7 +277,7 @@ function build() {
     for (const [text, v] of [['北', n], ['东', e], ['南', n.clone().negate()], ['西', e.clone().negate()]] as [string, THREE.Vector3][]) {
       dirLabels.push({ el: label(text, text === '北' ? 'dir north' : 'dir'), pos: v.clone().multiplyScalar(k) })
     }
-    // 小区编号：靠近时才显示，先建一池
+    // 小区块编号：靠近时才显示，先建一池
     for (let i = 0; i < Math.min(insts.length, 400); i++) plotLabels.push({ el: label('', 'plot'), idx: -1 })
   }
 
@@ -309,10 +309,10 @@ function vivid(c: THREE.Color): THREE.Color {
 const tmp = new THREE.Object3D()
 const tint = new THREE.Color()
 
-/** 选中的小区抬多高 */
+/** 选中的小区块抬多高 */
 const lift = () => 0.35 * ex
 
-/** 按选中情况放好每个小区：选中的抬高、偏金色 */
+/** 按选中情况放好每个小区块：选中的抬高、偏金色 */
 function applyInstances() {
   if (!plotMesh) return
   const sel = new Set(props.selectedPlots)
@@ -461,7 +461,7 @@ function place(el: HTMLDivElement, p: { x: number; y: number; z: number }, show 
 function updateLabels() {
   for (const b of blockLabels) place(b.el, project(b.pos))
   for (const d of dirLabels) place(d.el, project(d.pos))
-  // 小区编号：屏幕上够大的才写，最近的优先
+  // 小区块编号：屏幕上够大的才写，最近的优先
   const focal = size.h / 2 / Math.tan((camera.fov * Math.PI) / 360)
   const camPos = camera.position
   const shown: { idx: number; d: number; px: number }[] = []
@@ -640,7 +640,7 @@ function hoverAt(p: { x: number; y: number }) {
     hideTip()
     return
   }
-  const text = it.plotId != null ? props.cells.get(it.plotId)?.tooltip ?? '' : it.kind === 'PLANT' ? '新小区' : CELL_KIND[it.kind]
+  const text = it.plotId != null ? props.cells.get(it.plotId)?.tooltip ?? '' : it.kind === 'PLANT' ? '新小区块' : CELL_KIND[it.kind]
   const el = tipEl.value
   if (!el || !text) {
     hideTip()
@@ -676,7 +676,7 @@ function exportJpeg(filename: string) {
 
 defineExpose({ preset, home, zoomBy, zoomToPlots, exportJpeg })
 
-// 开发时给自动化测试用：小区中心在画面上的位置、点一下能选中什么
+// 开发时给自动化测试用：小区块中心在画面上的位置、点一下能选中什么
 if (import.meta.env.DEV) {
   ;(window as unknown as { __scene3d?: unknown }).__scene3d = {
     pick: (x: number, y: number) => pickAt({ x, y })?.plotId ?? null,

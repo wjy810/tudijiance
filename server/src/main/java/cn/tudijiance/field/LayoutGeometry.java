@@ -18,11 +18,11 @@ import cn.tudijiance.field.FieldLayout.Span;
 import cn.tudijiance.field.FieldLayout.Unit;
 
 /**
- * 区块布局的检查和计算：每个小区的实际大小、在"拉平的网格"里的行号列号。
+ * 区块布局的检查和计算：每个小区块的实际大小、在"拉平的网格"里的行号列号。
  *
- * 拉平的网格是给手机端、大屏、导入这些还按"第几行第几列"处理小区的地方用的：
- * 每一行区块占的行数 = 这一行里各区块小区行数的最大值（道路、空地占 0 行），列同理；
- * 小区的行号 = 它所在区块之前各行区块占的行数 + 它在区块里的行号。
+ * 拉平的网格是给手机端、大屏、导入这些还按"第几行第几列"处理小区块的地方用的：
+ * 每一行区块占的行数 = 这一行里各区块小区块行数的最大值（道路、空地占 0 行），列同理；
+ * 小区块的行号 = 它所在区块之前各行区块占的行数 + 它在区块里的行号。
  */
 public final class LayoutGeometry {
 
@@ -35,13 +35,13 @@ public final class LayoutGeometry {
     private LayoutGeometry() {
     }
 
-    /** 一个小区：所在区块、在区块里的位置（合并时是左上角和跨度）、实际大小（米）、拉平后的行号列号（从 1 开始） */
+    /** 一个小区块：所在区块、在区块里的位置（合并时是左上角和跨度）、实际大小（米）、拉平后的行号列号（从 1 开始） */
     public record Leaf(Block block, Span cell, Long plotId, double widthM, double lengthM, int rowNo, int colNo) {
         public String key() {
             return cell.r() + "," + cell.c();
         }
 
-        /** 这一格的小区类型（PLOT、PATH、GUARD、BLANK） */
+        /** 这一格的小区块类型（PLOT、PATH、GUARD、BLANK） */
         public String plotKind() {
             return Plot.kindOfCell(block.inner().kindAt(key()));
         }
@@ -99,19 +99,19 @@ public final class LayoutGeometry {
             if (FieldLayout.PLANT.equals(b.kind())) {
                 Inner in = b.inner();
                 if (in == null) {
-                    throw ApiException.badRequest("区块" + label(b) + "没有小区网格");
+                    throw ApiException.badRequest("区块" + label(b) + "没有小区块网格");
                 }
-                tracks(in.rows(), MAX_INNER_TRACKS, "区块" + label(b) + "里小区的行");
-                tracks(in.cols(), MAX_INNER_TRACKS, "区块" + label(b) + "里小区的列");
+                tracks(in.rows(), MAX_INNER_TRACKS, "区块" + label(b) + "里小区块的行");
+                tracks(in.cols(), MAX_INNER_TRACKS, "区块" + label(b) + "里小区块的列");
                 List<Span> cells = anchors(in.rows().size(), in.cols().size(),
-                        in.merges() == null ? List.of() : in.merges(), "区块" + label(b) + "里的小区");
+                        in.merges() == null ? List.of() : in.merges(), "区块" + label(b) + "里的小区块");
                 plotCount += cells.size();
                 if (in.plots() != null) {
                     Set<String> cellKeys = new HashSet<>();
                     cells.forEach(cs -> cellKeys.add(cs.r() + "," + cs.c()));
                     for (String k : in.plots().keySet()) {
                         if (!cellKeys.contains(k)) {
-                            throw ApiException.badRequest("区块" + label(b) + "里的小区位置不对：" + k);
+                            throw ApiException.badRequest("区块" + label(b) + "里的小区块位置不对：" + k);
                         }
                     }
                 }
@@ -120,18 +120,18 @@ public final class LayoutGeometry {
                     cells.forEach(cs -> cellKeys.add(cs.r() + "," + cs.c()));
                     for (Map.Entry<String, String> e : in.kinds().entrySet()) {
                         if (!cellKeys.contains(e.getKey()) || !KINDS.contains(e.getValue())) {
-                            throw ApiException.badRequest("区块" + label(b) + "里小区的类型不对：" + e.getKey());
+                            throw ApiException.badRequest("区块" + label(b) + "里小区块的类型不对：" + e.getKey());
                         }
                     }
                 }
             }
         }
         if (plotCount > MAX_PLOTS) {
-            throw ApiException.badRequest("小区太多了：一块实验田最多 " + MAX_PLOTS + " 个小区");
+            throw ApiException.badRequest("小区块太多了：一块实验田最多 " + MAX_PLOTS + " 个小区块");
         }
         InnerSize d = l.defaultInner();
         if (d != null && (d.rows() < 1 || d.cols() < 1 || d.rows() > MAX_INNER_TRACKS || d.cols() > MAX_INNER_TRACKS)) {
-            throw ApiException.badRequest("默认的小区行列数不对");
+            throw ApiException.badRequest("默认的小区块行列数不对");
         }
     }
 
@@ -207,9 +207,9 @@ public final class LayoutGeometry {
                 sum(l.cols(), s.c(), s.c() + s.cs()), sum(l.rows(), s.r(), s.r() + s.rs()));
     }
 
-    // ---------- 计算小区 ----------
+    // ---------- 计算小区块 ----------
 
-    /** 所有小区（种植区块里的格子），按区块、再按区块里的行列排序 */
+    /** 所有小区块（种植区块里的格子），按区块、再按区块里的行列排序 */
     public static Flat flatten(FieldLayout l) {
         List<Span> merges = l.merges() == null ? List.of() : l.merges();
         int nr = l.rows().size();
@@ -277,8 +277,8 @@ public final class LayoutGeometry {
     // ---------- 以前按行列建的实验田 ----------
 
     /**
-     * 还没有布局的实验田：整块地当作一个区块，里面是原来的 rowCount × colCount 个小区；
-     * 每行的高按这一行小区最常见的长、每列的宽按这一列小区最常见的宽（没填时按 1 米）。
+     * 还没有布局的实验田：整块地当作一个区块，里面是原来的 rowCount × colCount 个小区块；
+     * 每行的高按这一行小区块最常见的长、每列的宽按这一列小区块最常见的宽（没填时按 1 米）。
      */
     public static FieldLayout legacy(Field field, List<Plot> plots) {
         int rows = Math.max(1, field.getRowCount());

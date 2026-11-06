@@ -1,6 +1,6 @@
 <script setup lang="ts">
-// 给选中的小区录入数据。左边选项目（能搜，最近录过的在最上面，按分类分组，★ 是重要项目），
-// 右边填值（标准、单位、常见范围、调查日期、备注都在一张卡片里）。一次可以给很多个小区录同一个值
+// 给选中的小区块录入数据。左边选项目（能搜，最近录过的在最上面，按分类分组，★ 是重要项目），
+// 右边填值（标准、单位、常见范围、调查日期、备注都在一张卡片里）。一次可以给很多个小区块录同一个值
 import { computed, nextTick, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Plus, Search } from '@element-plus/icons-vue'
@@ -20,7 +20,7 @@ const props = defineProps<{
   initialTraitId?: number | null
   /** 育种的地块：选中的正好是整个区块（种的同一个品系）时，可以按整块录一个值 */
   wholeBlock?: { name: string } | null
-  /** 小区上种的品种（品系）名称，标题里显示 */
+  /** 小区块上种的品种（品系）名称，标题里显示 */
   nameOf?: (plotId: number) => string
 }>()
 const visible = defineModel<boolean>({ required: true })
@@ -40,11 +40,11 @@ const listEl = ref<HTMLElement | null>(null)
 // 同一次提交重试时用同一组编号，服务器据此去掉重复
 let uuids = new Map<number, string>()
 
-const U = computed(() => (props.wholeBlock !== undefined ? '小区块' : '小区'))
+const U = computed(() => '小区块')
 const trait = computed<TraitView | null>(() => catalog.traitById.get(traitId.value ?? -1) ?? null)
 const plotCodes = computed(() => props.plots.map((p) => p.code || `${p.rowNo}-${p.colNo}`))
 
-/** 选中的小区种的是什么：周麦16 × 3、25-001 × 2 */
+/** 选中的小区块种的是什么：周麦16 × 3、25-001 × 2 */
 const lineSummary = computed(() => {
   if (!props.nameOf) return ''
   const counts = new Map<string, number>()
@@ -152,9 +152,9 @@ watch(traitId, async () => {
 
 // ---------- 以前录过的 ----------
 
-/** 只选了一个小区时，它每个项目最近一次的值 */
+/** 只选了一个小区块时，它每个项目最近一次的值 */
 const latest = ref(new Map<number, LatestTraitValue>())
-/** 选了几个小区时，当前项目已经有值的有几个（数值、分级项目） */
+/** 选了几个小区块时，当前项目已经有值的有几个（数值、分级项目） */
 const recorded = ref<{ count: number; mean: number | null } | null>(null)
 
 async function loadLatest() {
@@ -393,7 +393,7 @@ const unitText = computed(() => (trait.value?.trait.unit && trait.value.trait.un
             >
               <span class="star" :class="{ off: !t.trait.important }">★</span>
               <span class="name">{{ t.trait.name }}</span>
-              <span v-if="plots.length === 1 && latest.has(t.trait.id)" class="done" title="这个小区已经录过">✓</span>
+              <span v-if="plots.length === 1 && latest.has(t.trait.id)" class="done" title="这个小区块已经录过">✓</span>
               <span v-else-if="t.trait.unit && t.trait.unit !== '级'" class="u">{{ t.trait.unit }}</span>
             </button>
           </template>

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // 编辑地块的属性面板：按选中的东西显示——整块地（单位、区块行列）、一行或一列区块（高、宽、插入、删除）、
-// 一个或几个区块（名称、类型、合并、拆分、小区行列、特殊大小）、区块里的小区（行列、行高列宽、合并拆分）
+// 一个或几个区块（名称、类型、合并、拆分、小区块行列、特殊大小）、区块里的小区块（行列、行高列宽、合并拆分）
 import { computed, reactive, ref, watch } from 'vue'
 import { ElMessageBox } from 'element-plus'
 import {
@@ -24,7 +24,7 @@ const props = defineProps<{
   track: { axis: 'row' | 'col'; index: number } | null
   /** 画面现在转了多少度：设"屏幕上方为北"时用 */
   rotation?: number
-  /** 小区 id → 编号，提示会去掉哪些小区时用 */
+  /** 小区块 id → 编号，提示会去掉哪些小区块时用 */
   plotCode: (id: number) => string
 }>()
 
@@ -42,15 +42,15 @@ const blocks = computed(() => props.selectedBlocks.map((id) => props.layout.bloc
 const one = computed(() => (blocks.value.length === 1 ? blocks.value[0]! : null))
 const focusBlock = computed(() => props.layout.blocks.find((b) => b.id === props.focus) ?? null)
 
-/** 会去掉小区时先问一下 */
+/** 会去掉小区块时先问一下 */
 async function confirmDrop(next: FieldLayout, what: string): Promise<boolean> {
   const gone = removedPlots(props.layout, next)
   if (gone.length === 0) return true
   const codes = gone.slice(0, 8).map(props.plotCode).join('、')
   try {
     await ElMessageBox.confirm(
-      `${what}会去掉 ${gone.length} 个已有的小区（${codes}${gone.length > 8 ? ' 等' : ''}）。保存时，已经分配了品种或录了数据的小区不能去掉。`,
-      '会去掉小区', { type: 'warning', confirmButtonText: '继续', cancelButtonText: '取消' },
+      `${what}会去掉 ${gone.length} 个已有的小区块（${codes}${gone.length > 8 ? ' 等' : ''}）。保存时，已经分配了品种或录了数据的小区块不能去掉。`,
+      '会去掉小区块', { type: 'warning', confirmButtonText: '继续', cancelButtonText: '取消' },
     )
     return true
   } catch {
@@ -273,7 +273,7 @@ async function setInnerCounts(rows: number | undefined, cols: number | undefined
     if (!b.inner) continue
     next = resizeInner(next, b.id, rows ?? b.inner.rows.length, cols ?? b.inner.cols.length)
   }
-  await commit(next, '减少小区行列')
+  await commit(next, '减少小区块行列')
 }
 
 const plotsIn = (b: LayoutBlock) => (b.inner ? anchors(b.inner.rows.length, b.inner.cols.length, b.inner.merges).length : 0)
@@ -317,7 +317,7 @@ function setFitPos(x: number | undefined, y: number | undefined) {
   emit('apply', setBlockFit(props.layout, b.id, b.fit.w, b.fit.h, { x: x ?? b.fit.x, y: y ?? b.fit.y }))
 }
 
-// ---------- 区块里的小区 ----------
+// ---------- 区块里的小区块 ----------
 
 const innerTrackSize = computed(() => {
   const b = focusBlock.value
@@ -341,7 +341,7 @@ function evenTracks(axis: 'row' | 'col') {
 async function setFocusInner(rows: number | undefined, cols: number | undefined) {
   const b = focusBlock.value
   if (!b?.inner || !rows || !cols) return
-  await commit(resizeInner(props.layout, b.id, rows, cols), '减少小区行列')
+  await commit(resizeInner(props.layout, b.id, rows, cols), '减少小区块行列')
 }
 
 const cellsSel = computed(() => props.selectedCells.map(parseKey))
@@ -358,7 +358,7 @@ const cellMerge = computed(() => {
 async function mergeCells() {
   const m = cellMerge.value
   if (!m) return
-  if (await confirmDrop(m.result.layout, '合并这几个小区')) {
+  if (await confirmDrop(m.result.layout, '合并这几个小区块')) {
     emit('apply', m.result.layout)
     emit('update:selectedCells', [keyOf(m.a.r, m.a.c)])
   }
@@ -400,11 +400,11 @@ function setCellKind(kind: BlockKind) {
     <template v-if="focusBlock">
       <section class="panel panel-pad">
         <div class="panel-title">
-          {{ focusBlock.name }}<span class="sub">区块里的小区</span>
+          {{ focusBlock.name }}<span class="sub">区块里的小区块</span>
         </div>
         <el-button size="small" :icon="ArrowLeft" class="back" @click="emit('leave')">回到整块地</el-button>
         <div class="row-form">
-          <span class="lbl">小区</span>
+          <span class="lbl">小区块</span>
           <el-input-number
             :model-value="focusBlock.inner?.rows.length" :min="1" :max="60" size="small" controls-position="right" class="n"
             @change="(v: number | undefined) => setFocusInner(v, focusBlock?.inner?.cols.length)"
@@ -416,7 +416,7 @@ function setCellKind(kind: BlockKind) {
           />
           <span>列</span>
         </div>
-        <div class="hint">区块 {{ fmt(blockRect(layout, focusBlock).w, u) }} × {{ fmt(blockRect(layout, focusBlock).h, u) }}，小区按比例分。</div>
+        <div class="hint">区块 {{ fmt(blockRect(layout, focusBlock).w, u) }} × {{ fmt(blockRect(layout, focusBlock).h, u) }}，小区块按比例分。</div>
         <div class="btn-row">
           <el-button size="small" @click="evenTracks('row')">各行一样高</el-button>
           <el-button size="small" @click="evenTracks('col')">各列一样宽</el-button>
@@ -424,7 +424,7 @@ function setCellKind(kind: BlockKind) {
       </section>
 
       <section v-if="track && innerTrackSize != null" class="panel panel-pad">
-        <div class="panel-title">{{ trackName }}小区</div>
+        <div class="panel-title">{{ trackName }}小区块</div>
         <div class="row-form">
           <span class="lbl">{{ track.axis === 'row' ? '高' : '宽' }}</span>
           <el-input-number
@@ -438,10 +438,10 @@ function setCellKind(kind: BlockKind) {
 
       <section class="panel panel-pad">
         <div class="panel-title">
-          选中的小区<span class="sub">{{ selectedCells.length }} 个</span>
+          选中的小区块<span class="sub">{{ selectedCells.length }} 个</span>
         </div>
         <div v-if="selectedCells.length === 0" class="hint">
-          点小区选中；拖动框选几个；点上面、左边的行号列号选整行整列。选中后可以拖到别的位置，拖小区之间的线改行高列宽。
+          点小区块选中；拖动框选几个；点上面、左边的行号列号选整行整列。选中后可以拖到别的位置，拖小区块之间的线改行高列宽。
         </div>
         <template v-else>
           <div class="lbl-top">类型</div>
@@ -453,16 +453,16 @@ function setCellKind(kind: BlockKind) {
               <i />{{ CELL_KIND[k] }}
             </button>
           </div>
-          <div class="hint">道路、保护区、空地不种试验品种，也不录数据；保存布局后小区类型跟着变。</div>
+          <div class="hint">道路、保护区、空地不种试验品种，也不录数据；保存布局后小区块类型跟着变。</div>
         </template>
         <div class="btn-row">
           <el-button v-if="cellMerge" type="primary" size="small" :icon="CopyDocument" @click="mergeCells">
-            合并成一个小区
+            合并成一个小区块
           </el-button>
           <el-button v-if="splittableCell" size="small" :icon="Scissor" @click="splitCell">拆开</el-button>
         </div>
         <div v-if="cellMerge && cellMerge.result.dropped.length" class="hint warn">
-          合并后留下左上角的小区，其余 {{ cellMerge.result.dropped.length }} 个小区去掉。
+          合并后留下左上角的小区块，其余 {{ cellMerge.result.dropped.length }} 个小区块去掉。
         </div>
       </section>
     </template>
@@ -514,7 +514,7 @@ function setCellKind(kind: BlockKind) {
             删除
           </el-button>
         </div>
-        <div class="hint">插入的是普通种植区块，小区按“新区块默认”的行列分。地块跟着变大，别的区块不变。</div>
+        <div class="hint">插入的是普通种植区块，小区块按“新区块默认”的行列分。地块跟着变大，别的区块不变。</div>
         <div class="lbl-top">加道路</div>
         <div class="btn-row tight">
           <el-button size="small" :disabled="!!roadProblem(true)" @click="roadAt(true)">{{ track.axis === 'row' ? '上面' : '左边' }}加道路</el-button>
@@ -549,9 +549,9 @@ function setCellKind(kind: BlockKind) {
         <div class="btn-row">
           <el-button v-if="mergeable" type="primary" size="small" :icon="CopyDocument" @click="merge">合并</el-button>
           <el-button v-if="isMerged" size="small" :icon="Scissor" @click="split">拆开</el-button>
-          <el-button v-if="one?.kind === 'PLANT'" size="small" :icon="Grid" @click="emit('enter', one.id)">进入区块改小区</el-button>
+          <el-button v-if="one?.kind === 'PLANT'" size="small" :icon="Grid" @click="emit('enter', one.id)">进入区块改小区块</el-button>
         </div>
-        <div v-if="mergeable" class="hint">合并时可以选：保留原来的小区拼起来，或者重新分几行几列。</div>
+        <div v-if="mergeable" class="hint">合并时可以选：保留原来的小区块拼起来，或者重新分几行几列。</div>
       </section>
 
       <section v-if="oneRoad" class="panel panel-pad">
@@ -636,7 +636,7 @@ function setCellKind(kind: BlockKind) {
 
       <section v-if="innerCountOfSelection" class="panel panel-pad">
         <div class="panel-title">
-          区块里的小区<span class="sub">{{ innerCountOfSelection.n > 1 ? `${innerCountOfSelection.n} 个区块一起改` : `${plotsIn(one!)} 个` }}</span>
+          区块里的小区块<span class="sub">{{ innerCountOfSelection.n > 1 ? `${innerCountOfSelection.n} 个区块一起改` : `${plotsIn(one!)} 个` }}</span>
         </div>
         <div class="row-form">
           <el-input-number
@@ -681,7 +681,7 @@ function setCellKind(kind: BlockKind) {
             :model-value="layout.defaultInner?.cols ?? 1" :min="1" :max="60" size="small" controls-position="right" class="n"
             @change="(v: number | undefined) => setDefaultInner(layout.defaultInner?.rows ?? 1, v)"
           />
-          <span>个小区</span>
+          <span>个小区块</span>
         </div>
       </section>
 

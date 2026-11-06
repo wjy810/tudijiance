@@ -1,15 +1,15 @@
 <script setup lang="ts">
-// 平面图（俯视）：按实际尺寸画实验田的区块、道路、保护区、空地和区块里的小区。
+// 平面图（俯视）：按实际尺寸画实验田的区块、道路、保护区、空地和区块里的小区块。
 //
 // 为了快，这里不用 Vue 模板画图形，而是直接用 Konva 画，分三层：
-//   world   区块、小区的底色和格子（布局、颜色变了才重画）
+//   world   区块、小区块的底色和格子（布局、颜色变了才重画）
 //   label   文字、名称牌、标尺、传感器（缩放后按屏幕大小重排）
 //   overlay 选中、鼠标所在、对照的红框、拖动时的影子、测距
 // 缩放、平移只改这三层的变换；鼠标移动不触发 Vue 重新渲染。图形都不监听事件，点到哪个格子自己按坐标算。
 //
 //   focus 为空时看整块地；为区块 id 时只看这个区块（"进入区块"）
-//   pick  点选的是什么：plot 小区（录入、布置试验）、block 区块（编辑地块）、cell 区块里的格子（编辑区块里的小区）
-//   editable 编辑地块：拖分界线改大小、拖特殊区块、拖区块交换位置、拖格子挪小区
+//   pick  点选的是什么：plot 小区块（录入、布置试验）、block 区块（编辑地块）、cell 区块里的格子（编辑区块里的小区块）
+//   editable 编辑地块：拖分界线改大小、拖特殊区块、拖区块交换位置、拖格子挪小区块
 //   tool  select 选择、pan 拖动画面、measure 测距、road 道路（编辑地块时点区块之间的线加道路，点道路删掉）
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Konva from 'konva'
@@ -30,7 +30,7 @@ export interface CanvasCell {
   badge?: string
   marker?: boolean
   tooltip?: string
-  /** 保护区、走道的小区画得淡一些 */
+  /** 保护区、走道的小区块画得淡一些 */
   muted?: boolean
 }
 
@@ -43,13 +43,13 @@ export interface CanvasDevice {
   color: string
 }
 
-/** 一组对照：对照小区描红边（整个区块是对照组时整块描边、挂"对照组"），正在看的一组再把比较的小区描出来 */
+/** 一组对照：对照小区块描红边（整个区块是对照组时整块描边、挂"对照组"），正在看的一组再把比较的小区块描出来 */
 export interface CanvasLink {
   id: number
   label: string
   controlPlotIds: number[]
   comparePlotIds: number[]
-  /** 对照小区正好是这些区块的全部小区 */
+  /** 对照小区块正好是这些区块的全部小区块 */
   controlBlockIds: string[]
   /** 正在看的一组 */
   active: boolean
@@ -258,7 +258,7 @@ function fit(animate = false) {
   setView(v, animate)
 }
 
-/** 放大到一片区域（找到小区时用） */
+/** 放大到一片区域（找到小区块时用） */
 function zoomToRect(r: Rect) {
   const v = viewFor(r, 60)
   v.scale = Math.min(v.scale, fitScale * 8)
@@ -348,7 +348,7 @@ function rebuildModel() {
 
 const box = (r: Rect) => ({ x: r.x, y: r.y, width: r.w, height: r.h })
 
-/** 小区之间留一点缝（按小区大小算，不随缩放变） */
+/** 小区块之间留一点缝（按小区块大小算，不随缩放变） */
 function inset(r: Rect, k = 0.035): Rect {
   const g = Math.min(r.w, r.h) * k
   return { x: r.x + g, y: r.y + g, w: r.w - g * 2, h: r.h - g * 2 }
@@ -462,7 +462,7 @@ function buildWorld() {
       }))
       let lines: string[]
       if (special) lines = [...(info?.lines.slice(0, 1) ?? []), CELL_KIND[c.kind]]
-      else if (c.plotId == null) lines = ['新小区']
+      else if (c.plotId == null) lines = ['新小区块']
       else lines = info?.lines ?? []
       addText(c.rect, lines, c.plotId == null && !special ? '#2e6b4f' : special ? '#6b5d40' : INK)
       if (info?.badge) {
@@ -515,7 +515,7 @@ let devGroup: Konva.Group
 
 /**
  * 文字保持正着：画在格子中心，反着转回来；转了 90° 时宽高对调。
- * 格子又窄又长（小麦小区常见 2 m × 6.67 m）、横着写不下时，顺着长边竖着写
+ * 格子又窄又长（小麦小区块常见 2 m × 6.67 m）、横着写不下时，顺着长边竖着写
  */
 function upright(r: Rect) {
   const quarter = Math.abs(((props.rotation % 180) + 180) % 180 - 90) < 20
@@ -588,7 +588,7 @@ function refreshLabels() {
 
 let labelTimer = 0
 
-/** 缩放过程中文字先跟着缩放，停下来再按屏幕大小排（小区多时每一帧都排太慢） */
+/** 缩放过程中文字先跟着缩放，停下来再按屏幕大小排（小区块多时每一帧都排太慢） */
 function scheduleLabels() {
   clearTimeout(labelTimer)
   if (texts.length < 500) {
@@ -722,7 +722,7 @@ function drawLinks() {
     labelLayer.add(tag)
     ckTags.push({ node: tag, rect: s.rect })
   }
-  // 单个的对照小区：红边
+  // 单个的对照小区块：红边
   for (const [id, active] of ckPlots) {
     if (inCkBlock.has(id)) continue
     const c = cellByPlot.get(id)
@@ -733,7 +733,7 @@ function drawLinks() {
       strokeScaleEnabled: false, cornerRadius: Math.min(r.w, r.h) * 0.06,
     }))
   }
-  // 正在看的一组里和对照比的小区：虚线框
+  // 正在看的一组里和对照比的小区块：虚线框
   for (const id of compared) {
     const c = cellByPlot.get(id)
     if (!c) continue
@@ -790,7 +790,7 @@ function blockIdOf(t: Target): string | null {
   return null
 }
 
-/** 编辑时鼠标是不是在分界线上：整块地上是区块之间（和最外边），区块里是小区之间 */
+/** 编辑时鼠标是不是在分界线上：整块地上是区块之间（和最外边），区块里是小区块之间 */
 interface Divider {
   scope: 'field' | 'inner'
   axis: Axis
@@ -1111,7 +1111,7 @@ function sameSpan(a: string, b: string): boolean {
 
 /**
  * 拖区块之间的线：平时只改线左边（上边）的这一列（行），后面的区块跟着挪，地块跟着变大变小；
- * 按住 Shift（或 Alt）是两边一起变、地块总大小不变。区块里的小区之间总是两边一起变
+ * 按住 Shift（或 Alt）是两边一起变、地块总大小不变。区块里的小区块之间总是两边一起变
  */
 function keepTotal(d: Divider, e: { altKey: boolean; shiftKey: boolean }): boolean {
   return d.scope === 'inner' || ((e.altKey || e.shiftKey) && d.b != null)
@@ -1488,7 +1488,7 @@ function hoverAt(sp: { x: number; y: number }) {
     rect = inset(t.cell.rect)
     text = t.cell.plotId != null ? props.cells.get(t.cell.plotId)?.tooltip ?? '' : ''
     if (t.cell.kind !== 'PLANT') text = [text.split('\n')[0] ?? '', CELL_KIND[t.cell.kind]].filter(Boolean).join('\n')
-    if (!text && t.cell.plotId == null) text = t.cell.kind === 'PLANT' ? '新小区（保存布局后建好）' : CELL_KIND[t.cell.kind]
+    if (!text && t.cell.plotId == null) text = t.cell.kind === 'PLANT' ? '新小区块（保存布局后建好）' : CELL_KIND[t.cell.kind]
   } else if (t.kind === 'block' || t.kind === 'tag') {
     const id = blockIdOf(t)!
     key = `b:${id}`
@@ -1530,7 +1530,7 @@ function blockTip(id: string): string {
   if (b.fit) lines.push(`特殊区块：原来 ${fmt(slot.w, u)} × ${fmt(slot.h, u)}，四周是道路`)
   if (b.inner) {
     const n = anchors(b.inner.rows.length, b.inner.cols.length, b.inner.merges).length
-    lines.push(`${b.inner.rows.length} 行 × ${b.inner.cols.length} 列，${n} 个小区`)
+    lines.push(`${b.inner.rows.length} 行 × ${b.inner.cols.length} 列，${n} 个小区块`)
   }
   if (props.editable && props.pick === 'block') {
     lines.push(props.selectedBlocks.includes(b.id) ? (b.fit ? '拖动在原位置里挪动' : '拖到别的区块上交换位置') : '双击进入区块')
@@ -1632,7 +1632,7 @@ function screenOf(p: { x: number; y: number }) {
   return toScreen(p)
 }
 
-/** 屏幕上这个点是哪个区块、哪个小区（拖品系到平面图上种植时用）；onTag 表示在区块名称牌上 */
+/** 屏幕上这个点是哪个区块、哪个小区块（拖品系到平面图上种植时用）；onTag 表示在区块名称牌上 */
 function hitAt(clientX: number, clientY: number): { plotId?: number; blockId?: string; onTag: boolean } | null {
   if (!host.value) return null
   const r = host.value.getBoundingClientRect()

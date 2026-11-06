@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 按区块布局画的实验田缩略图（SVG，按实际比例）：区块、道路、保护区，小区按状态着色。
+// 按区块布局画的实验田缩略图（SVG，按实际比例）：区块、道路、保护区，小区块按状态着色。
 // 首页（浅色）和数据大屏（深色）用；没保存过区块布局的地还用 MiniPlotMap 按行列画
 import { computed } from 'vue'
 
@@ -12,9 +12,9 @@ const props = withDefaults(defineProps<{
   plots: ScreenPlot[]
   /** 状态 → 颜色，不传用平面图的颜色 */
   colors?: Partial<Record<PlotStatusCode, string>>
-  /** 今天录过的小区 */
+  /** 今天录过的小区块 */
   entered?: number[]
-  /** 格子里写什么：不写、编号、编号和品种（小区多了自动不写） */
+  /** 格子里写什么：不写、编号、编号和品种（小区块多了自动不写） */
   labels?: 'none' | 'code' | 'full'
   theme?: 'light' | 'dark'
 }>(), { colors: () => ({}), entered: () => [], labels: 'none', theme: 'light' })
@@ -72,7 +72,7 @@ function textOf(c: CellShape) {
 
 function tipOf(c: CellShape): string {
   const p = c.plot
-  if (!p) return '新小区'
+  if (!p) return '新小区块'
   return `${p.code ?? ''} ${p.varietyName ?? ''} · ${PLOT_STATUS[p.status].label}${p.abnormalNote ? '：' + p.abnormalNote : ''}`
     + (enteredSet.value.has(p.plotId) ? ' · 今天录过' : '')
 }
@@ -85,7 +85,7 @@ function tipOf(c: CellShape): string {
     :viewBox="`${-hair * 3} ${-hair * 3} ${size.w + hair * 6} ${size.h + hair * 6}`"
     preserveAspectRatio="xMidYMid meet"
     role="img"
-    :aria-label="`实验田平面图，${cellCount} 个小区`"
+    :aria-label="`实验田平面图，${cellCount} 个小区块`"
   >
     <rect
       :x="-hair" :y="-hair" :width="size.w + hair * 2" :height="size.h + hair * 2" :rx="hair * 2"

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 给选中的小区批量编号，先预览再保存
+// 给选中的小区块批量编号，先预览再保存
 import { computed, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 
@@ -48,7 +48,7 @@ async function save() {
   saving.value = true
   try {
     const saved = await fieldApi.updateCodes(props.fieldId, codes)
-    ElMessage.success(`已给 ${preview.value.length} 个小区编号`)
+    ElMessage.success(`已给 ${preview.value.length} 个小区块编号`)
     visible.value = false
     emit('saved', saved)
   } catch (e) {
@@ -102,7 +102,7 @@ async function clearCodes() {
         <span class="label-gap">位</span>
       </el-form-item>
     </el-form>
-    <div class="section-title">预览（{{ preview.length }} 个小区）</div>
+    <div class="section-title">预览（{{ preview.length }} 个小区块）</div>
     <div class="preview">
       <div v-for="[rowNo, items] in rows" :key="rowNo" class="preview-row">
         <span class="row-no muted">第 {{ rowNo }} 行</span>

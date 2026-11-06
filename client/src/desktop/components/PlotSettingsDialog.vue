@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 批量改小区的类型和尺寸。只改填了的项，不填的保持原样
+// 批量改小区块的类型和尺寸。只改填了的项，不填的保持原样
 import { reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 
@@ -9,7 +9,7 @@ import { PLOT_KIND } from '@/shared/labels'
 const props = defineProps<{
   fieldId: number
   plots: Plot[]
-  /** 按区块布局管理的地：小区大小由布局决定，这里不改 */
+  /** 按区块布局管理的地：小区块大小由布局决定，这里不改 */
   layoutSaved?: boolean
 }>()
 const visible = defineModel<boolean>({ required: true })
@@ -24,7 +24,7 @@ const form = reactive<{
 }>({ kind: null, lengthM: undefined, widthM: undefined, plantingRows: undefined, rowSpacingCm: undefined })
 const saving = ref(false)
 
-/** 选中的小区这一项都一样时显示出来，不一样时留空 */
+/** 选中的小区块这一项都一样时显示出来，不一样时留空 */
 function common<T>(pick: (p: Plot) => T | null): T | undefined {
   const values = new Set(props.plots.map(pick))
   return values.size === 1 ? ([...values][0] ?? undefined) : undefined
@@ -54,7 +54,7 @@ async function save() {
   saving.value = true
   try {
     const saved = await fieldApi.patchPlots(props.fieldId, patch)
-    ElMessage.success(`已修改 ${props.plots.length} 个小区`)
+    ElMessage.success(`已修改 ${props.plots.length} 个小区块`)
     visible.value = false
     emit('saved', saved)
   } catch (e) {
@@ -66,8 +66,8 @@ async function save() {
 </script>
 
 <template>
-  <el-dialog v-model="visible" title="小区设置" width="520px">
-    <div class="hint top">给选中的 {{ plots.length }} 个小区设置。留空的项不修改。</div>
+  <el-dialog v-model="visible" title="小区块设置" width="520px">
+    <div class="hint top">给选中的 {{ plots.length }} 个小区块设置。留空的项不修改。</div>
     <el-form label-width="88px">
       <el-form-item label="类型">
         <el-radio-group v-model="form.kind">

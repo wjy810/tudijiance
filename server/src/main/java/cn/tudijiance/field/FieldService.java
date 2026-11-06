@@ -119,7 +119,7 @@ public class FieldService {
     }
 
     /**
-     * 格子类型以小区类型为准：在"布置试验"里改了小区类型（保护区、道路……）后，布局里的格子跟着显示，
+     * 格子类型以小区块类型为准：在"布置试验"里改了小区块类型（保护区、道路……）后，布局里的格子跟着显示，
      * 编辑地块时拿到的草稿也是对的
      */
     static FieldLayout withKinds(FieldLayout l, List<Plot> plots) {
@@ -165,7 +165,7 @@ public class FieldService {
                 ? null : json.readValue(field.getLayout(), FieldLayout.class);
     }
 
-    /** 几块地的小区（一次查询） */
+    /** 几块地的小区块（一次查询） */
     public List<Plot> plotsOf(java.util.Collection<Long> fieldIds) {
         if (fieldIds.isEmpty()) {
             return List.of();
@@ -179,7 +179,7 @@ public class FieldService {
                 .orderByAsc(Plot::getRowNo, Plot::getColNo));
     }
 
-    /** 新建实验田，并按行顺序生成小区，默认编号 1、2、3…… */
+    /** 新建实验田，并按行顺序生成小区块，默认编号 1、2、3…… */
     @Transactional
     public FieldDetail create(FieldRequest req) {
         Field field = new Field();
@@ -202,7 +202,7 @@ public class FieldService {
         return detail(field.getId());
     }
 
-    /** 修改实验田信息。行列数变小时，删掉网格外的小区；这些小区已经种了品种的话不允许缩小。 */
+    /** 修改实验田信息。行列数变小时，删掉网格外的小区块；这些小区块已经种了品种的话不允许缩小。 */
     @Transactional
     public FieldDetail update(Long id, FieldRequest req) {
         Field field = get(id);
@@ -210,7 +210,7 @@ public class FieldService {
         int oldCols = field.getColCount();
         apply(field, req);
         field.setUpdatedAt(LocalDateTime.now(clock));
-        // 有区块布局的实验田，小区由布局决定，这里不改行列
+        // 有区块布局的实验田，小区块由布局决定，这里不改行列
         if (field.getLayout() != null) {
             field.setRowCount(oldRows);
             field.setColCount(oldCols);
@@ -226,7 +226,7 @@ public class FieldService {
             List<Long> ids = outside.stream().map(Plot::getId).toList();
             long used = plantingMapper.selectCount(Wrappers.<Planting>lambdaQuery().in(Planting::getPlotId, ids));
             if (used > 0) {
-                throw ApiException.conflict("要删除的小区里已经分配了品种，不能缩小网格");
+                throw ApiException.conflict("要删除的小区块里已经分配了品种，不能缩小网格");
             }
             plotMapper.deleteByIds(ids);
         }
@@ -259,7 +259,7 @@ public class FieldService {
 
     /**
      * 批量修改编号。先检查修改后整块田里没有重复编号，再分两步更新（先清空再写入），
-     * 这样两个小区互换编号时不会撞上唯一约束。
+     * 这样两个小区块互换编号时不会撞上唯一约束。
      */
     @Transactional
     public List<Plot> updateCodes(Long fieldId, Map<Long, String> codes) {
@@ -271,7 +271,7 @@ public class FieldService {
         Map<Long, String> normalized = new HashMap<>();
         codes.forEach((plotId, code) -> {
             if (!byId.containsKey(plotId)) {
-                throw ApiException.badRequest("小区 " + plotId + " 不属于这块实验田");
+                throw ApiException.badRequest("小区块 " + plotId + " 不属于这块实验田");
             }
             String c = code == null ? null : code.trim();
             if (c != null && c.length() > 32) {
@@ -302,10 +302,10 @@ public class FieldService {
     public List<Plot> patchPlots(Long fieldId, PlotPatchRequest req) {
         Field field = get(fieldId);
         if (field.getLayout() != null && (req.lengthM() != null || req.widthM() != null)) {
-            throw ApiException.badRequest("这块地的小区大小由区块布局决定，请在平面图的“编辑地块”里改");
+            throw ApiException.badRequest("这块地的小区块大小由区块布局决定，请在平面图的“编辑地块”里改");
         }
         if (req.kind() != null && !KINDS.contains(req.kind())) {
-            throw ApiException.badRequest("小区类型只能是 PLOT、GUARD、PATH 或 BLANK");
+            throw ApiException.badRequest("小区块类型只能是 PLOT、GUARD、PATH 或 BLANK");
         }
         requireInField(fieldId, req.plotIds());
         if (req.kind() != null && !Plot.KIND_PLOT.equals(req.kind())) {
@@ -313,7 +313,7 @@ public class FieldService {
                     .in(Planting::getPlotId, req.plotIds())
                     .isNotNull(Planting::getVarietyId));
             if (used > 0) {
-                throw ApiException.conflict("选中的小区已经分配了品种，请先清除品种再改成保护区或走道");
+                throw ApiException.conflict("选中的小区块已经分配了品种，请先清除品种再改成保护区或走道");
             }
         }
         var update = Wrappers.<Plot>lambdaUpdate().in(Plot::getId, req.plotIds());
@@ -346,9 +346,9 @@ public class FieldService {
     }
 
     /**
-     * 保存区块布局，并按布局更新小区：布局里带着小区 id 的格子更新它的位置和大小，没带的新建小区，
-     * 布局里没有了的小区删掉——但已经分配了品种、设了重复、录了数据或设了对照的小区不能删，要先清掉。
-     * 新小区按顺序编号（用没被占用的最小数字）。
+     * 保存区块布局，并按布局更新小区块：布局里带着小区块 id 的格子更新它的位置和大小，没带的新建小区块，
+     * 布局里没有了的小区块删掉——但已经分配了品种、设了重复、录了数据或设了对照的小区块不能删，要先清掉。
+     * 新小区块按顺序编号（用没被占用的最小数字）。
      */
     @Transactional
     public FieldDetail saveLayout(Long fieldId, FieldLayout layout) {
@@ -361,23 +361,23 @@ public class FieldService {
         Set<Long> kept = new HashSet<>();
         for (Leaf leaf : flat.leaves()) {
             if (leaf.widthM() > 9999 || leaf.lengthM() > 9999) {
-                throw ApiException.badRequest("小区太大了：长和宽不能超过 9999 米");
+                throw ApiException.badRequest("小区块太大了：长和宽不能超过 9999 米");
             }
             if (leaf.plotId() == null) {
                 continue;
             }
             if (!byId.containsKey(leaf.plotId())) {
-                throw ApiException.conflict("实验田的小区刚刚被别人改过，请刷新后再改布局");
+                throw ApiException.conflict("实验田的小区块刚刚被别人改过，请刷新后再改布局");
             }
             if (!kept.add(leaf.plotId())) {
-                throw ApiException.badRequest("同一个小区在布局里出现了两次");
+                throw ApiException.badRequest("同一个小区块在布局里出现了两次");
             }
         }
         List<Plot> removed = existing.stream().filter(p -> !kept.contains(p.getId())).toList();
         removePlots(removed);
         checkKindChanges(flat, byId);
 
-        // 先把留下的小区挪到临时位置（负数），再写新位置，免得互换位置时撞上唯一约束
+        // 先把留下的小区块挪到临时位置（负数），再写新位置，免得互换位置时撞上唯一约束
         for (Long id : kept) {
             plotMapper.update(null, Wrappers.<Plot>lambdaUpdate()
                     .set(Plot::getRowNo, -id).set(Plot::getColNo, -id).eq(Plot::getId, id));
@@ -419,7 +419,7 @@ public class FieldService {
         }
         insertPlots(created);
 
-        // 新建的小区按位置找回 id，写进布局
+        // 新建的小区块按位置找回 id，写进布局
         Map<String, Long> idAt = new HashMap<>();
         plots(fieldId).forEach(p -> idAt.put(p.getRowNo() + "," + p.getColNo(), p.getId()));
         Map<String, Map<String, Long>> idsByBlock = new LinkedHashMap<>();
@@ -456,7 +456,7 @@ public class FieldService {
         return detail(fieldId);
     }
 
-    /** 已经分配了品种的小区不能改成道路、保护区、空地 */
+    /** 已经分配了品种的小区块不能改成道路、保护区、空地 */
     private void checkKindChanges(Flat flat, Map<Long, Plot> byId) {
         List<Long> toNonPlot = flat.leaves().stream()
                 .filter(leaf -> leaf.plotId() != null && !Plot.KIND_PLOT.equals(leaf.plotKind())
@@ -473,12 +473,12 @@ public class FieldService {
                 Plot p = byId.get(id);
                 return p.getCode() == null ? p.getRowNo() + "-" + p.getColNo() : p.getCode();
             }).collect(Collectors.joining("、"));
-            throw ApiException.conflict("小区 " + codes + (busy.size() > 6 ? " 等 " + busy.size() + " 个" : "")
+            throw ApiException.conflict("小区块 " + codes + (busy.size() > 6 ? " 等 " + busy.size() + " 个" : "")
                     + " 已经分配了品种，不能改成道路、保护区或空地。请先在“布置试验”里清掉品种");
         }
     }
 
-    /** 删除布局里去掉的小区；有品种、重复、数据或对照关系的不能删 */
+    /** 删除布局里去掉的小区块；有品种、重复、数据或对照关系的不能删 */
     private void removePlots(List<Plot> removed) {
         if (removed.isEmpty()) {
             return;
@@ -505,7 +505,7 @@ public class FieldService {
                 Plot p = byId.get(id);
                 return p.getCode() == null ? p.getRowNo() + "-" + p.getColNo() : p.getCode();
             }).collect(Collectors.joining("、"));
-            throw ApiException.conflict("这样改会去掉小区 " + codes + (busy.size() > 6 ? " 等 " + busy.size() + " 个" : "")
+            throw ApiException.conflict("这样改会去掉小区块 " + codes + (busy.size() > 6 ? " 等 " + busy.size() + " 个" : "")
                     + "，它们已经分配了品种、录了数据或设了对照。请先在“布置试验”里清掉，或者换一种改法");
         }
         if (!plantingIds.isEmpty()) {
@@ -518,18 +518,18 @@ public class FieldService {
         return BigDecimal.valueOf(v).setScale(2, RoundingMode.HALF_UP);
     }
 
-    /** 检查这些小区都属于这块实验田，返回这些小区。 */
+    /** 检查这些小区块都属于这块实验田，返回这些小区块。 */
     public List<Plot> requireInField(Long fieldId, List<Long> plotIds) {
         List<Plot> found = plotMapper.selectList(Wrappers.<Plot>lambdaQuery()
                 .eq(Plot::getFieldId, fieldId)
                 .in(Plot::getId, plotIds));
         if (found.size() != new HashSet<>(plotIds).size()) {
-            throw ApiException.badRequest("有小区不属于这块实验田");
+            throw ApiException.badRequest("有小区块不属于这块实验田");
         }
         return found;
     }
 
-    /** 每 500 个小区一条 INSERT，几百上千个小区也不用一个个发 SQL */
+    /** 每 500 个小区块一条 INSERT，几百上千个小区块也不用一个个发 SQL */
     private void insertPlots(List<Plot> plots) {
         for (int i = 0; i < plots.size(); i += 500) {
             plotMapper.insertAll(plots.subList(i, Math.min(i + 500, plots.size())));

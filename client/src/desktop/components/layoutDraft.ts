@@ -51,7 +51,7 @@ export function useLayoutDraft(saved: Ref<FieldLayout | null>) {
 
   const dirty = computed(() => !!draft.value && !!saved.value && JSON.stringify(draft.value) !== JSON.stringify(saved.value))
   const removed = computed(() => (draft.value && saved.value ? removedPlots(saved.value, draft.value) : []))
-  /** 保存后要新建的小区个数 */
+  /** 保存后要新建的小区块个数 */
   const added = computed(() => {
     const d = draft.value
     if (!d) return 0

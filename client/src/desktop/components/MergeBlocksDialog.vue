@@ -1,6 +1,6 @@
 <script setup lang="ts">
-// 合并几个区块：选好的区块围成一个矩形，合并成一个区块。可以保留原来的小区（能拼起来时），
-// 也可以重新分成几行几列——原来的小区按位置留下，落不进新格子的去掉
+// 合并几个区块：选好的区块围成一个矩形，合并成一个区块。可以保留原来的小区块（能拼起来时），
+// 也可以重新分成几行几列——原来的小区块按位置留下，落不进新格子的去掉
 import { computed, reactive, watch } from 'vue'
 
 import {
@@ -33,7 +33,7 @@ const base = computed(() => {
     return s.r >= a.r && s.c >= a.c && s.r + s.rs - 1 <= z.r && s.c + s.cs - 1 <= z.c
   })
   const extra = inside.filter((b) => !props.blockIds.includes(b.id))
-  // 合并前各个区块里的小区在哪：重新分小区时按位置放进新格子
+  // 合并前各个区块里的小区块在哪：重新分小区块时按位置放进新格子
   const spots = plotSpots(props.layout, inside.map((b) => b.id))
   return { res, anchor, extra, inside, count: inside.length, spots }
 })
@@ -46,7 +46,7 @@ watch(visible, (open) => {
   form.name = b.anchor.name
   form.kind = b.anchor.kind
   form.mode = b.res.joined && b.anchor.inner ? 'keep' : 'regrid'
-  // 重新分时默认把各区块的小区行列加起来：并排的区块列数相加，上下的行数相加，原来的小区正好都有地方放
+  // 重新分时默认把各区块的小区块行列加起来：并排的区块列数相加，上下的行数相加，原来的小区块正好都有地方放
   const d = props.layout.defaultInner ?? { rows: 2, cols: 3 }
   const plant = b.inside.filter((x) => x.kind === 'PLANT' && x.inner)
   const byRow = new Map<number, number>()
@@ -77,7 +77,7 @@ const result = computed(() => {
   return { layout: l, id, dropped: removedPlots(props.layout, l) }
 })
 
-/** 预览：新区块里的格子，留下原来小区的标出来 */
+/** 预览：新区块里的格子，留下原来小区块的标出来 */
 const preview = computed(() => {
   const r = result.value
   const blk = r?.layout.blocks.find((b) => b.id === r.id)
@@ -121,10 +121,10 @@ function apply() {
           </div>
         </el-form-item>
         <template v-if="form.kind === 'PLANT'">
-          <el-form-item label="小区">
+          <el-form-item label="小区块">
             <el-radio-group v-model="form.mode" class="modes">
               <el-radio value="keep" :disabled="!base.res.joined || !base.anchor.inner">
-                保留原来的小区，拼起来
+                保留原来的小区块，拼起来
                 <span v-if="base.res.joined && base.anchor.inner" class="muted">
                   （{{ base.anchor.inner.rows.length }} 行 × {{ base.anchor.inner.cols.length }} 列）
                 </span>
@@ -149,14 +149,14 @@ function apply() {
           <span v-for="c in preview.cells" :key="c.key" :class="{ kept: c.kept }" />
         </div>
         <div class="legend">
-          <span><i class="kept" />原来的小区（编号、品种、数据都留着）</span>
-          <span><i />新小区（保存后编号）</span>
+          <span><i class="kept" />原来的小区块（编号、品种、数据都留着）</span>
+          <span><i />新小区块（保存后编号）</span>
         </div>
       </div>
 
       <div v-if="result.dropped.length" class="warn">
-        会去掉 {{ result.dropped.length }} 个小区（{{ result.dropped.slice(0, 8).map(plotCode).join('、') }}{{ result.dropped.length > 8 ? ' 等' : '' }}）。
-        已经分配了品种、录了数据的小区保存时不能去掉，会提示你先清掉。
+        会去掉 {{ result.dropped.length }} 个小区块（{{ result.dropped.slice(0, 8).map(plotCode).join('、') }}{{ result.dropped.length > 8 ? ' 等' : '' }}）。
+        已经分配了品种、录了数据的小区块保存时不能去掉，会提示你先清掉。
       </div>
     </template>
     <template #footer>

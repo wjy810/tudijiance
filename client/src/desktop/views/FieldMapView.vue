@@ -1,8 +1,8 @@
 <script setup lang="ts">
 // 实验田平面图（第一期的主界面）。分两种模式：
-//   录入数据：日常用，选中小区后录入、标记异常、看详情；
-//   布置试验：老师每季开始时用，分配品种、设重复、设对照、编号、改小区类型和尺寸。
-// 选中小区后，底部浮出对应模式的操作条；右键小区弹出菜单，双击打开详情
+//   录入数据：日常用，选中小区块后录入、标记异常、看详情；
+//   布置试验：老师每季开始时用，分配品种、设重复、设对照、编号、改小区块类型和尺寸。
+// 选中小区块后，底部浮出对应模式的操作条；右键小区块弹出菜单，双击打开详情
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -85,8 +85,8 @@ const selectedTrialPlots = computed(() => selectedPlots.value.filter((p) => p.ki
 /** 育种的地块（属于某一季）：布置试验里种品系、选株、杂交，没有"试验"可选 */
 const isBreeding = computed(() => !!detail.value?.field.seasonId)
 const season = computed(() => (field.value?.seasonId ? breeding.seasonById.get(field.value.seasonId) ?? null : null))
-/** 育种的地块里"小区"叫"小区块" */
-const U = computed(() => (isBreeding.value ? '小区块' : '小区'))
+/** 育种的地块里"小区块"叫"小区块" */
+const U = computed(() => '小区块')
 
 // ---------- 读取数据 ----------
 
@@ -165,7 +165,7 @@ onMounted(async () => {
   rememberTrial(fieldId.value, trialId.value)
   await nextTick()
   canvasRef.value?.fit()
-  // 从数据质量等页面带着 ?plot= 过来：选中这个小区并打开详情
+  // 从数据质量等页面带着 ?plot= 过来：选中这个小区块并打开详情
   const plotId = Number(route.query.plot)
   if (plotId && plotById.value.has(plotId)) {
     selected.value = [plotId]
@@ -258,7 +258,7 @@ watch(focus, (f) => {
   if (f && tool.value === 'road') tool.value = 'select'
 })
 
-/** 点了标尺：编辑时选中那一行（列）的区块或小区，并显示它的大小 */
+/** 点了标尺：编辑时选中那一行（列）的区块或小区块，并显示它的大小 */
 function onTrack(axis: 'row' | 'col', index: number) {
   if (mode.value !== 'edit') {
     return
@@ -335,7 +335,7 @@ function roadBeside(blockId: string, side: 'top' | 'bottom' | 'left' | 'right') 
   onRoad({ action: 'add', axis, index })
 }
 
-/** 区块所在的这一行（列）改成道路：里面的小区会去掉，先问 */
+/** 区块所在的这一行（列）改成道路：里面的小区块会去掉，先问 */
 async function trackOfBlockToRoad(blockId: string, axis: Axis) {
   const l = draft.draft.value
   const b = l?.blocks.find((x) => x.id === blockId)
@@ -399,7 +399,7 @@ function removeRoadAt(r: { axis: Axis; index: number }) {
   onRoad({ action: 'remove', ...r })
 }
 
-/** 拖选中的格子：小区跟着挪，原来那里的小区换过来 */
+/** 拖选中的格子：小区块跟着挪，原来那里的小区块换过来 */
 function onMoveCells(blockId: string, keys: string[], dr: number, dc: number) {
   const l = draft.draft.value
   if (!l) {
@@ -448,8 +448,8 @@ async function saveLayout() {
   if (gone.length > 0) {
     try {
       await ElMessageBox.confirm(
-        `保存后会去掉 ${gone.length} 个小区（${gone.slice(0, 10).map(plotCode).join('、')}${gone.length > 10 ? ' 等' : ''}）`
-          + `${draft.added.value ? `，新建 ${draft.added.value} 个小区` : ''}。已经分配了品种、录了数据的小区不能去掉，会提示你先清掉。`,
+        `保存后会去掉 ${gone.length} 个小区块（${gone.slice(0, 10).map(plotCode).join('、')}${gone.length > 10 ? ' 等' : ''}）`
+          + `${draft.added.value ? `，新建 ${draft.added.value} 个小区块` : ''}。已经分配了品种、录了数据的小区块不能去掉，会提示你先清掉。`,
         '保存布局', { type: 'warning', confirmButtonText: '保存', cancelButtonText: '取消' },
       )
     } catch {
@@ -463,7 +463,7 @@ async function saveLayout() {
     draft.begin()
     selected.value = []
     await loadTrialData().catch(() => undefined)
-    ElMessage.success(`已保存布局，共 ${d.plots.length} 个小区`)
+    ElMessage.success(`已保存布局，共 ${d.plots.length} 个小区块`)
   } catch (e) {
     ElMessage.error((e as Error).message)
   } finally {
@@ -735,7 +735,7 @@ function fillOf(p: Plot): string {
     : '#f1ebdd'
 }
 
-/** 区块布局时每个小区在哪个区块的第几行第几列 */
+/** 区块布局时每个小区块在哪个区块的第几行第几列 */
 const placeById = computed(() => (detail.value?.layoutSaved ? plotPlaces(fieldLayout.value) : new Map<number, string>()))
 
 const cells = computed(() => {
@@ -782,7 +782,7 @@ const cells = computed(() => {
   return out
 })
 
-/** 3D 里每个小区立起来多高（米）：按指标着色时按指标的值，否则按长势 */
+/** 3D 里每个小区块立起来多高（米）：按指标着色时按指标的值，否则按长势 */
 const STATUS_HEIGHT: Partial<Record<PlotStatusCode, number>> = { NONE: 0.06, GROWING: 0.55, ABNORMAL: 0.35, HARVESTED: 0.12 }
 
 const heights = computed(() => {
@@ -812,7 +812,7 @@ function togglePinnedLink(id: number) {
 }
 
 /**
- * 现在看的是哪一组对照：右侧点了某一组；或者只选了一个小区，它在哪一组里（优先它是被比较的那一组）
+ * 现在看的是哪一组对照：右侧点了某一组；或者只选了一个小区块，它在哪一组里（优先它是被比较的那一组）
  */
 const activeLink = computed(() => {
   const links = layout.value?.links ?? []
@@ -833,7 +833,7 @@ watch(selected, (ids) => {
   }
 })
 
-/** 对照小区正好是某个区块的全部试验小区：这个区块是对照组 */
+/** 对照小区块正好是某个区块的全部试验小区块：这个区块是对照组 */
 function controlBlocksOf(controls: number[]): string[] {
   const l = fieldLayout.value
   if (!l) {
@@ -846,7 +846,7 @@ function controlBlocksOf(controls: number[]): string[] {
   }).map((b) => b.id)
 }
 
-/** 平面图上不画连线：对照描红边（整个区块是对照组时整块描边），点开的一组再把比较的小区描出来 */
+/** 平面图上不画连线：对照描红边（整个区块是对照组时整块描边），点开的一组再把比较的小区块描出来 */
 const gridLinks = computed<CanvasLink[]>(() =>
   (layout.value?.links ?? []).map((link) => {
     const controls = link.plots.filter((p) => p.control).map((p) => p.plotId)
@@ -861,7 +861,7 @@ const gridLinks = computed<CanvasLink[]>(() =>
   }),
 )
 
-/** 当对照的小区（任何一组里） */
+/** 当对照的小区块（任何一组里） */
 const controlPlotIds = computed(() => new Set((layout.value?.links ?? []).flatMap((l) => l.plots.filter((p) => p.control).map((p) => p.plotId))))
 
 // ---------- 和对照比 ----------
@@ -895,7 +895,7 @@ watch([() => activeLink.value?.id, compareTraitId, trialId], loadCompareValues)
 
 const roundTo = (v: number) => Math.round(v * 100) / 100
 
-/** 点开的一组对照：对照的平均值，每个比较的小区比对照高多少（按百分比从高到低） */
+/** 点开的一组对照：对照的平均值，每个比较的小区块比对照高多少（按百分比从高到低） */
 const comparison = computed(() => {
   const link = activeLink.value
   if (!link) {
@@ -934,7 +934,7 @@ function pctText(v: number): string {
 const compareShowAll = ref(false)
 watch(() => activeLink.value?.id, () => { compareShowAll.value = false })
 
-// 传感器（第二期）：登记时填的是第几行第几列，画在那个小区的中间
+// 传感器（第二期）：登记时填的是第几行第几列，画在那个小区块的中间
 const DEVICE_COLORS: Record<string, string> = { ONLINE: '#2f9e44', OFFLINE: '#868e96', NEVER: '#f08c00' }
 
 const gridDevices = computed<CanvasDevice[]>(() => {
@@ -1009,7 +1009,7 @@ function typing(e: KeyboardEvent) {
 
 function onKey(e: KeyboardEvent) {
   const ctrl = e.ctrlKey || e.metaKey
-  // 找小区：/ 或 Ctrl F（输入框里不拦）
+  // 找小区块：/ 或 Ctrl F（输入框里不拦）
   if ((e.key === '/' && !typing(e)) || (ctrl && e.key.toLowerCase() === 'f')) {
     e.preventDefault()
     searchInput.value?.focus()
@@ -1121,7 +1121,7 @@ const menuBlock = computed(() => {
   return fieldLayout.value.blocks.find((b) => b.id === id) ?? null
 })
 
-/** 先记下右键的小区再关菜单，关了菜单 menuPlot 就没了 */
+/** 先记下右键的小区块再关菜单，关了菜单 menuPlot 就没了 */
 function runMenu(action: (plot: Plot) => void) {
   const plot = menuPlot.value
   closeMenu()
@@ -1139,7 +1139,7 @@ const entryOpen = ref(false)
 const entryPlots = ref<Plot[]>([])
 const entryTraitId = ref<number | null>(null)
 
-/** 用选中的小区做图表：带着实验田、试验和小区去自助分析 */
+/** 用选中的小区块做图表：带着实验田、试验和小区块去自助分析 */
 function analyzeSelection() {
   router.push({
     path: '/analysis',
@@ -1163,7 +1163,7 @@ function openEntry(list: Plot[], traitId: number | null = null) {
   }
   const targets = list.filter((p) => p.kind === 'PLOT')
   if (targets.length === 0) {
-    ElMessage.warning('保护区和走道不录入数据，请选试验小区')
+    ElMessage.warning('保护区和走道不录入数据，请选试验小区块')
     return
   }
   entryPlots.value = targets
@@ -1186,7 +1186,7 @@ async function onEntrySaved() {
   }
 }
 
-/** 选中的试验小区是不是全都标了异常：是就显示"取消异常"，否则显示"标记异常" */
+/** 选中的试验小区块是不是全都标了异常：是就显示"取消异常"，否则显示"标记异常" */
 const allAbnormal = computed(() =>
   selectedTrialPlots.value.length > 0
   && selectedTrialPlots.value.every((p) => statusByPlot.value.get(p.id)?.status === 'ABNORMAL'))
@@ -1197,14 +1197,14 @@ async function toggleAbnormal(list: Plot[]) {
   }
   const targets = list.filter((p) => p.kind === 'PLOT')
   if (targets.length === 0) {
-    ElMessage.warning('只能给试验小区标记异常')
+    ElMessage.warning('只能给试验小区块标记异常')
     return
   }
   const abnormal = !targets.every((p) => statusByPlot.value.get(p.id)?.status === 'ABNORMAL')
   let note: string | null = null
   if (abnormal) {
     try {
-      const res = await ElMessageBox.prompt(`给 ${targets.length} 个小区标记异常。写一下是什么情况（可不填），例如：倒伏、缺苗、积水`,
+      const res = await ElMessageBox.prompt(`给 ${targets.length} 个小区块标记异常。写一下是什么情况（可不填），例如：倒伏、缺苗、积水`,
         '标记异常', { inputPlaceholder: '异常情况', confirmButtonText: '标记', cancelButtonText: '取消',
           inputValidator: (v) => !v || v.length <= 200 || '不能超过 200 个字' })
       note = res.value?.trim() || null
@@ -1287,7 +1287,7 @@ function openLayoutDialog(which: 'variety' | 'link') {
     return
   }
   if (selectedTrialPlots.value.length === 0) {
-    ElMessage.warning('请选择试验小区（保护区、走道不分配品种）')
+    ElMessage.warning('请选择试验小区块（保护区、走道不分配品种）')
     return
   }
   if (which === 'variety') {
@@ -1308,7 +1308,7 @@ async function assignReplicate() {
   }
   let value: number | null
   try {
-    const res = await ElMessageBox.prompt(`给 ${targets.length} 个小区设重复号（1 到 20，清空表示取消）`, '设重复号', {
+    const res = await ElMessageBox.prompt(`给 ${targets.length} 个小区块设重复号（1 到 20，清空表示取消）`, '设重复号', {
       inputPattern: /^(|[1-9]|1\d|20)$/, inputErrorMessage: '请输入 1 到 20 的整数',
       inputValue: '1', confirmButtonText: '保存', cancelButtonText: '取消',
     })
@@ -1387,7 +1387,7 @@ async function removeLink(id: number, label: string) {
   }
 }
 
-/** 对照是哪些：整个区块写区块名，否则写小区编号 */
+/** 对照是哪些：整个区块写区块名，否则写小区块编号 */
 function linkControlText(l: { plots: { plotId: number; control: boolean }[] }): string {
   const ids = l.plots.filter((p) => p.control).map((p) => p.plotId)
   const blocks = controlBlocksOf(ids)
@@ -1746,7 +1746,7 @@ watch(inspectorOpen, (v) => {
   }
 })
 
-/** 只选了一个小区时显示它的最近数据：选中后停一下再取，免得快速点选时连发请求 */
+/** 只选了一个小区块时显示它的最近数据：选中后停一下再取，免得快速点选时连发请求 */
 const single = computed(() => (mode.value !== 'edit' && selectedPlots.value.length === 1 ? selectedPlots.value[0]! : null))
 const singleDetail = ref<PlotDetail | null>(null)
 const singleLoading = ref(false)
@@ -1769,7 +1769,7 @@ watch([single, trialId], ([p, t]) => {
   }, 220)
 })
 
-/** 选中的小区：品种、重复、状态各有几个，点一下选中同样的 */
+/** 选中的小区块：品种、重复、状态各有几个，点一下选中同样的 */
 interface Facet {
   key: string
   label: string
@@ -1845,14 +1845,14 @@ function selectByLegend(label: string) {
   }
 }
 
-// ---------- 找小区 ----------
+// ---------- 找小区块 ----------
 
 const searchText = ref('')
 const searchOpen = ref(false)
 const searchInput = ref<{ focus: () => void } | null>(null)
 const searchIndex = ref(0)
 
-/** 全部匹配的小区：输数字只按编号找（编号开头一样的），输文字时也按品种名找 */
+/** 全部匹配的小区块：输数字只按编号找（编号开头一样的），输文字时也按品种名找 */
 const searchAll = computed(() => {
   const q = searchText.value.trim().toLowerCase()
   if (!q) return []
@@ -1865,7 +1865,7 @@ const searchAll = computed(() => {
     const name = v?.name.toLowerCase() ?? ''
     if (code.startsWith(q) || (!numeric && name.includes(q))) {
       out.push({
-        plot: p, text: `小区 ${p.code || code}`, exact: code === q,
+        plot: p, text: `小区块 ${p.code || code}`, exact: code === q,
         sub: [v?.name, pl?.replicateNo ? `重复 ${replicateLabel(pl.replicateNo)}` : '', placeById.value.get(p.id)].filter(Boolean).join(' · '),
       })
     }
@@ -1881,7 +1881,7 @@ watch(searchText, () => {
   searchOpen.value = true
 })
 
-/** 定位到小区：选中、放大过去（在别的区块里时先回到整块地） */
+/** 定位到小区块：选中、放大过去（在别的区块里时先回到整块地） */
 function locatePlot(ids: number[]) {
   if (ids.length === 0) return
   if (focus.value && !ids.every((id) => Object.values(focusBlock.value?.inner?.plots ?? {}).includes(id))) {
@@ -1929,7 +1929,7 @@ function onSearchKey(e: KeyboardEvent) {
 
 // ---------- 方向键挪选中 ----------
 
-/** 只选了一个小区时，方向键选旁边的小区（按拉平后的行列），回车录入 */
+/** 只选了一个小区块时，方向键选旁边的小区块（按拉平后的行列），回车录入 */
 function stepSelection(dr: number, dc: number) {
   const p = selectedPlots.value.length === 1 ? selectedPlots.value[0]! : null
   if (!p) return false
@@ -1950,10 +1950,10 @@ const shortcutsOpen = ref(false)
 const SHORTCUTS: { keys: string; text: string }[] = [
   { keys: '1 / 2 / 3', text: '录入数据 / 布置试验 / 编辑地块（老师）' },
   { keys: 'T', text: '俯视图和 3D 切换' },
-  { keys: '/ 或 Ctrl F', text: '找小区（编号或品种）' },
-  { keys: 'Ctrl A', text: '选中全部小区（区块里时选这个区块的）' },
-  { keys: '方向键', text: '只选了一个小区时，选旁边的小区' },
-  { keys: 'Enter', text: '给选中的小区录入数据' },
+  { keys: '/ 或 Ctrl F', text: '找小区块（编号或品种）' },
+  { keys: 'Ctrl A', text: '选中全部小区块（区块里时选这个区块的）' },
+  { keys: '方向键', text: '只选了一个小区块时，选旁边的小区块' },
+  { keys: 'Enter', text: '给选中的小区块录入数据' },
   { keys: 'Esc', text: '取消选择；再按回到整块地' },
   { keys: 'F', text: '适应窗口（3D 里回到默认视角）' },
   { keys: 'N', text: '图纸朝上和正北朝上切换' },
@@ -1983,7 +1983,7 @@ function applyBlockKind(kind: BlockKind) {
   if (!l) return
   const next = setBlockKind(l, selectedBlocks.value, kind)
   if (removedPlots(l, next).length > 0) {
-    ElMessage.warning('改成这个类型会去掉区块里的小区，请在右边面板里改，会先提醒你')
+    ElMessage.warning('改成这个类型会去掉区块里的小区块，请在右边面板里改，会先提醒你')
     return
   }
   draft.apply(next)
@@ -2018,8 +2018,8 @@ function runEdit(fn: (blockId: string, road: { axis: Axis; index: number } | nul
       </el-select>
       <div v-if="ind" class="chips">
         <span class="chip-stat stage" title="当前生育期">{{ ind.currentStage ?? '未开始' }}</span>
-        <span class="chip-stat" title="今天录过数据的小区"><em>今天</em><b class="num">{{ ind.enteredToday }}</b><small>/{{ ind.totalPlots }}</small></span>
-        <span class="chip-stat" :class="{ danger: ind.abnormal > 0 }" title="标了异常的小区">
+        <span class="chip-stat" title="今天录过数据的小区块"><em>今天</em><b class="num">{{ ind.enteredToday }}</b><small>/{{ ind.totalPlots }}</small></span>
+        <span class="chip-stat" :class="{ danger: ind.abnormal > 0 }" title="标了异常的小区块">
           <el-icon v-if="ind.abnormal > 0"><Warning /></el-icon><em>异常</em><b class="num">{{ ind.abnormal }}</b>
         </span>
         <span class="chip-stat" title="最近 7 天录入的条数"><em>本周</em><b class="num">{{ ind.weekEntries }}</b><small>条</small></span>
@@ -2120,24 +2120,24 @@ function runEdit(fn: (blockId: string, road: { axis: Axis; index: number } | nul
           <div class="ov ov-tl">
             <div class="tl-row">
             <div v-if="auth.isTeacher" class="seg modes" role="tablist" aria-label="模式">
-              <button role="tab" :class="{ on: mode === 'record' }" title="选小区录入数据、标异常（1）" @click="modeModel = 'record'">
+              <button role="tab" :class="{ on: mode === 'record' }" title="选小区块录入数据、标异常（1）" @click="modeModel = 'record'">
                 <el-icon><EditPen /></el-icon>录入数据
               </button>
               <button role="tab" :class="{ on: mode === 'layout' }" :title="isBreeding ? '种植、选株、杂交、编号（2）' : '分配品种、设重复、设对照、编号（2）'" @click="modeModel = 'layout'">
                 <el-icon><Grid /></el-icon>布置试验
               </button>
-              <button role="tab" :class="{ on: mode === 'edit' }" title="区块和小区的大小、合并、类型（3）" @click="modeModel = 'edit'">
+              <button role="tab" :class="{ on: mode === 'edit' }" title="区块和小区块的大小、合并、类型（3）" @click="modeModel = 'edit'">
                 <el-icon><Crop /></el-icon>编辑地块
               </button>
             </div>
-            <!-- 找小区 -->
+            <!-- 找小区块 -->
             <div class="search" @keydown.stop>
             <el-input
               ref="searchInput"
               v-model="searchText"
               :prefix-icon="Search"
               clearable
-              :placeholder="isBreeding ? '找小区块：编号或品系（/）' : '找小区：编号或品种（/）'"
+              :placeholder="isBreeding ? '找小区块：编号或品系（/）' : '找小区块：编号或品种（/）'"
               class="search-input"
               @focus="searchOpen = true"
               @blur="onSearchBlur"
@@ -2150,7 +2150,7 @@ function runEdit(fn: (blockId: string, road: { axis: Axis; index: number } | nul
               >
                 <b>{{ h.text }}</b><span>{{ h.sub || PLOT_KIND[h.plot.kind] }}</span>
               </button>
-              <div v-if="searchHits.length === 0" class="hit empty">没找到。可以输小区编号，或者品种名的一部分</div>
+              <div v-if="searchHits.length === 0" class="hit empty">没找到。可以输小区块编号，或者品种名的一部分</div>
               <button
                 v-else-if="searchAll.length > 1" type="button" class="hit all"
                 @mousedown.prevent="locatePlot(searchAll.map((h) => h.plot.id)); searchOpen = false"
@@ -2268,7 +2268,7 @@ function runEdit(fn: (blockId: string, road: { axis: Axis; index: number } | nul
           <span class="sel edit-state">
             <template v-if="draft.dirty.value">
               有改动未保存
-              <em v-if="draft.removed.value.length" class="gone">去掉 {{ draft.removed.value.length }} 个小区</em>
+              <em v-if="draft.removed.value.length" class="gone">去掉 {{ draft.removed.value.length }} 个小区块</em>
               <em v-if="draft.added.value" class="new">新建 {{ draft.added.value }} 个</em>
             </template>
             <template v-else>和保存的布局一样</template>
@@ -2312,7 +2312,7 @@ function runEdit(fn: (blockId: string, road: { axis: Axis; index: number } | nul
               <el-button @click="assignReplicate">设重复</el-button>
               <el-button @click="openLayoutDialog('link')">设对照</el-button>
               <el-button @click="numberingDialog = true">编号</el-button>
-              <el-button @click="plotDialog = true">{{ detail?.layoutSaved ? '小区类型' : '类型和尺寸' }}</el-button>
+              <el-button @click="plotDialog = true">{{ detail?.layoutSaved ? '小区块类型' : '类型和尺寸' }}</el-button>
             </template>
             <el-button text :icon="Close" class="clear" title="取消选择（Esc）" @click="selected = []" />
           </div>
@@ -2321,7 +2321,7 @@ function runEdit(fn: (blockId: string, road: { axis: Axis; index: number } | nul
               ? `点选或框选${U}开始录入 · 双击看详情 · 右键更多`
               : isBreeding
                 ? '把右边的品系拖到区块或小区块上种 · 选中小区块后种植、选株、杂交 · 右键更多'
-                : '选中小区后分配品种、设重复、设对照 · 点区块名称牌选整个区块' }}
+                : '选中小区块后分配品种、设重复、设对照 · 点区块名称牌选整个区块' }}
           </div>
         </transition>
       </section>
@@ -2349,7 +2349,7 @@ function runEdit(fn: (blockId: string, road: { axis: Axis; index: number } | nul
           @leave="leaveBlock"
         />
 
-        <!-- 选了一个小区：它的情况和最近数据 -->
+        <!-- 选了一个小区块：它的情况和最近数据 -->
         <template v-else-if="single">
           <section class="panel panel-pad plot-card">
             <div class="plot-head">
@@ -2397,7 +2397,7 @@ function runEdit(fn: (blockId: string, road: { axis: Axis; index: number } | nul
           </section>
         </template>
 
-        <!-- 选了好几个小区：分布，点一下选中同样的 -->
+        <!-- 选了好几个小区块：分布，点一下选中同样的 -->
         <template v-else-if="selected.length > 1">
           <section class="panel panel-pad">
             <div class="panel-title">已选 {{ selected.length }} 个{{ U }}<span v-if="selected.length !== selectedTrialPlots.length" class="sub">其中能种的 {{ selectedTrialPlots.length }} 个</span></div>
@@ -2409,13 +2409,13 @@ function runEdit(fn: (blockId: string, road: { axis: Axis; index: number } | nul
             </div>
             <div class="facet-group">
               <div class="facet-title">重复</div>
-              <button v-for="f in facets.replicate" :key="f.key" type="button" class="facet" title="选中这个重复的所有小区" @click="f.pick()">
+              <button v-for="f in facets.replicate" :key="f.key" type="button" class="facet" title="选中这个重复的所有小区块" @click="f.pick()">
                 <i :style="{ background: f.color }" /><span>{{ f.label }}</span><b class="num">{{ f.count }}</b>
               </button>
             </div>
             <div v-if="trial" class="facet-group">
               <div class="facet-title">状态</div>
-              <button v-for="f in facets.status" :key="f.key" type="button" class="facet" title="选中这个状态的所有小区" @click="f.pick()">
+              <button v-for="f in facets.status" :key="f.key" type="button" class="facet" title="选中这个状态的所有小区块" @click="f.pick()">
                 <i :style="{ background: f.color }" /><span>{{ f.label }}</span><b class="num">{{ f.count }}</b>
               </button>
             </div>
@@ -2432,7 +2432,7 @@ function runEdit(fn: (blockId: string, road: { axis: Axis; index: number } | nul
               <template v-if="metricRange">
                 <div class="ramp" :style="{ background: SEQUENTIAL_GRADIENT }" />
                 <div class="ramp-labels num"><span>{{ metricRange.min }}</span><span>{{ metricRange.max }}</span></div>
-                <div v-if="view3d" class="hint">3D 里小区越高，这项的值越大。</div>
+                <div v-if="view3d" class="hint">3D 里小区块越高，这项的值越大。</div>
               </template>
               <div v-else class="hint">这个试验还没有这项数据</div>
               <div class="legend-row"><span class="swatch" style="background: #f1ebdd" />无数据</div>
@@ -2445,7 +2445,7 @@ function runEdit(fn: (blockId: string, road: { axis: Axis; index: number } | nul
                 <span class="swatch" :style="{ background: l.color }" />{{ l.label }}
               </button>
               <div v-if="legend.length === 0" class="hint">还没有分配</div>
-              <div v-if="view3d && display.view === 'status'" class="hint">3D 里小区的高度按长势：生长中最高，收获后变矮。</div>
+              <div v-if="view3d && display.view === 'status'" class="hint">3D 里小区块的高度按长势：生长中最高，收获后变矮。</div>
             </template>
             <div class="legend-sep" />
             <div class="legend-row"><span class="dot" />今天录过数据</div>
@@ -2534,9 +2534,9 @@ function runEdit(fn: (blockId: string, road: { axis: Axis; index: number } | nul
           <section v-if="!isBreeding" class="panel panel-pad tips">
             <div class="panel-title">怎么用</div>
             <ul>
-              <li>点小区选中，<kbd>Ctrl</kbd> 点加选，拖动框选</li>
+              <li>点小区块选中，<kbd>Ctrl</kbd> 点加选，拖动框选</li>
               <li>双击区块名称牌进入区块；<kbd>Esc</kbd> 返回</li>
-              <li><kbd>/</kbd> 找小区，<kbd>T</kbd> 切换 3D</li>
+              <li><kbd>/</kbd> 找小区块，<kbd>T</kbd> 切换 3D</li>
               <li>按 <kbd>?</kbd> 看全部快捷键</li>
             </ul>
           </section>
@@ -2580,7 +2580,7 @@ function runEdit(fn: (blockId: string, road: { axis: Axis; index: number } | nul
         <template v-if="menuPlot.kind === 'PLOT'">
           <div class="menu-sep" />
           <div v-if="plantingByPlot.get(menuPlot.id)?.varietyId" class="menu-item" @click="runMenu((p) => selectWhere((x) => x.kind === 'PLOT' && plantingByPlot.get(x.id)?.varietyId === plantingByPlot.get(p.id)?.varietyId))">选中同{{ isBreeding ? '品系' : '品种' }}的{{ U }}</div>
-          <div v-if="plantingByPlot.get(menuPlot.id)?.replicateNo" class="menu-item" @click="runMenu((p) => selectWhere((x) => x.kind === 'PLOT' && plantingByPlot.get(x.id)?.replicateNo === plantingByPlot.get(p.id)?.replicateNo))">选中同一重复的小区</div>
+          <div v-if="plantingByPlot.get(menuPlot.id)?.replicateNo" class="menu-item" @click="runMenu((p) => selectWhere((x) => x.kind === 'PLOT' && plantingByPlot.get(x.id)?.replicateNo === plantingByPlot.get(p.id)?.replicateNo))">选中同一重复的小区块</div>
           <div v-if="isBreeding && lineOf(menuPlot.id) != null" class="menu-item" @click="runMenu((p) => openLine(lineOf(p.id)!))">看品系详情</div>
         </template>
       </template>
@@ -2642,7 +2642,7 @@ function runEdit(fn: (blockId: string, road: { axis: Axis; index: number } | nul
         <div v-if="trial" class="menu-item" @click="runMenu(assignReplicate)">设重复号</div>
         <div v-if="trial && selected.length >= 1" class="menu-item" @click="runMenu(() => openLayoutDialog('link'))">设对照…</div>
         <div class="menu-item" @click="runMenu(() => (numberingDialog = true))">编号</div>
-        <div class="menu-item" @click="runMenu(() => (plotDialog = true))">小区类型和尺寸</div>
+        <div class="menu-item" @click="runMenu(() => (plotDialog = true))">小区块类型和尺寸</div>
       </template>
     </div>
 
@@ -2653,14 +2653,14 @@ function runEdit(fn: (blockId: string, road: { axis: Axis; index: number } | nul
         <div v-for="k in (['PLANT', 'ROAD', 'GUARD', 'BLANK'] as CellKind[])" :key="k" class="menu-item" @click="runEdit(() => applyCellKind(k))">设成{{ CELL_KIND[k] }}</div>
         <template v-if="selectedCells.length === 1 && draft.draft.value && focusBlock?.inner && mergeAt(focusBlock.inner.merges, ...parseKey(selectedCells[0]!))">
           <div class="menu-sep" />
-          <div class="menu-item" @click="runEdit(() => { const [r, c] = parseKey(selectedCells[0]!); draft.apply(splitInner(draft.draft.value!, focus!, r, c)) })">拆开合并的小区</div>
+          <div class="menu-item" @click="runEdit(() => { const [r, c] = parseKey(selectedCells[0]!); draft.apply(splitInner(draft.draft.value!, focus!, r, c)) })">拆开合并的小区块</div>
         </template>
         <div class="menu-sep" />
         <div class="menu-item" @click="runEdit(leaveBlock)">回到整块地<kbd>Esc</kbd></div>
       </template>
       <template v-else-if="editMenu.blockId">
         <div class="menu-title">{{ selectedBlocks.length > 1 ? `选中的 ${selectedBlocks.length} 个区块` : draft.draft.value?.blocks.find((b) => b.id === editMenu!.blockId)?.name }}</div>
-        <div v-if="selectedBlocks.length === 1 && draft.draft.value?.blocks.find((b) => b.id === editMenu!.blockId)?.kind === 'PLANT'" class="menu-item" @click="runEdit((id) => enterBlock(id))">进入区块改小区</div>
+        <div v-if="selectedBlocks.length === 1 && draft.draft.value?.blocks.find((b) => b.id === editMenu!.blockId)?.kind === 'PLANT'" class="menu-item" @click="runEdit((id) => enterBlock(id))">进入区块改小区块</div>
         <div v-if="selectedBlocks.length > 1" class="menu-item" @click="runEdit(() => editPanelRef?.merge())">合并成一个区块…</div>
         <div
           v-if="selectedBlocks.length === 1 && draft.draft.value && (() => { const b = draft.draft.value!.blocks.find((x) => x.id === editMenu!.blockId); if (!b) return false; const sp = blockSpan(draft.draft.value!, b); return sp.rs * sp.cs > 1 })()"
@@ -3064,7 +3064,7 @@ function runEdit(fn: (blockId: string, road: { axis: Axis; index: number } | nul
   color: var(--ink);
 }
 
-/* 找小区 */
+/* 找小区块 */
 .search {
   position: relative;
   width: 250px;
