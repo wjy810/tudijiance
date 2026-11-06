@@ -118,13 +118,13 @@ const stats = computed(() => ({
 
 <template>
   <div class="page">
-    <PageHeader title="季和地块" eyebrow="育种">
+    <PageHeader title="季和地块" eyebrow="日常">
       <template #desc>
         一季一次种植周期，一年可以有两季（大田、夏繁或温室）。每季的地块可以重新划；种植时下拉框最前面是接着的季种过的品系和它们的子代。
         现在 {{ stats.seasons }} 季、{{ stats.lands }} 块地块、{{ stats.lines }} 个在用的品系。
       </template>
       <template v-if="auth.isTeacher" #actions>
-        <el-button @click="founderDialog = true">新建原始材料</el-button>
+        <el-button @click="founderDialog = true">新建品种</el-button>
         <el-button type="primary" :icon="Plus" @click="openSeason(null)">新建季</el-button>
       </template>
     </PageHeader>
@@ -134,7 +134,7 @@ const stats = computed(() => ({
         v-if="!loading && views.length === 0"
         art="field"
         title="还没有季"
-        desc="先建第一季（全新开始），在季里建地块、划区块，然后新建原始材料种下去。"
+        desc="先建第一季（全新开始），在季里建地块、划区块，然后新建品种种下去。"
       >
         <el-button v-if="auth.isTeacher" type="primary" :icon="Plus" @click="openSeason(null)">新建季</el-button>
       </EmptyState>

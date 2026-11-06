@@ -261,9 +261,9 @@ const lineOption = computed<EChartsCoreOption>(() => {
     </div>
 
     <div class="filter-bar panel">
-      <span class="muted">实验田</span>
-      <el-select :model-value="picker.fieldId.value" placeholder="实验田" class="w180" @update:model-value="picker.selectField">
-        <el-option v-for="f in picker.fields.value" :key="f.id" :value="f.id" :label="f.name" />
+      <span class="muted">地块</span>
+      <el-select :model-value="picker.fieldId.value" placeholder="地块" class="w180" @update:model-value="picker.selectField">
+        <el-option v-for="f in picker.fields.value" :key="f.id" :value="f.id" :label="picker.fieldLabel(f)" />
       </el-select>
       <span class="muted gap">试验</span>
       <el-select v-model="picker.trialId.value" placeholder="试验" class="w240" no-data-text="这块地还没有试验">

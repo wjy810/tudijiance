@@ -647,10 +647,10 @@ const cells = computed(() => {
       lines.push(variety?.name ?? '—')
       if (display.value.view === 'trait') {
         lines.push(traitValues.value.get(p.id)?.displayValue ?? '无数据')
-      } else if (isBreeding.value && planting?.generation) {
-        lines.push(`F${planting.generation}`)
-      } else if (planting?.replicateNo) {
-        lines.push(`重复 ${replicateLabel(planting.replicateNo)}`)
+      } else {
+        const extra = [planting?.replicateNo ? `重复 ${replicateLabel(planting.replicateNo)}` : '', planting?.generation ? `F${planting.generation}` : '']
+          .filter(Boolean).join(' · ')
+        if (extra) lines.push(extra)
       }
     }
     const badge = [variety?.controlType ? 'CK' : '', st?.status === 'ABNORMAL' ? '!' : ''].filter(Boolean).join(' ')
@@ -1214,7 +1214,7 @@ async function loadCandidates() {
   }
 }
 
-// 在别处新建了品系（新建原始材料、杂交、选株）：种植的下拉框跟着更新
+// 在别处新建了品系（新建品种、杂交、选株）：种植的下拉框跟着更新
 watch(() => breeding.graph, () => {
   if (isBreeding.value) void loadCandidates()
 })
@@ -1450,6 +1450,19 @@ const entryWholeBlock = computed(() => {
   return { name: menuBlockName(blockId) }
 })
 
+function on3dUnsupported() {
+  view3d.value = false
+  ElMessage.warning('这台电脑的显卡画不了 3D（不支持 WebGL），先用俯视图')
+}
+
+function onBreedingMore(cmd: string) {
+  const ids = selectedTrialPlots.value.map((p) => p.id)
+  if (cmd === 'generation') void setGeneration(ids)
+  else if (cmd === 'clear') void clearPlants(ids)
+  else if (cmd === 'numbering') numberingDialog.value = true
+  else if (cmd === 'kind') plotDialog.value = true
+}
+
 /** 右键菜单"种植"子菜单里每组最多列几个，更多的点"搜全部品系" */
 const MENU_LINES = 8
 
@@ -1598,14 +1611,10 @@ const VIEW_OPTIONS: { value: ViewMode; label: string }[] = [
   { value: 'trait', label: '按指标' },
 ]
 
-/** 育种的地块按品系着色，没有重复 */
+/** 季里的地块按品系着色 */
 const viewOptions = computed(() => (isBreeding.value
-  ? VIEW_OPTIONS.filter((o) => o.value !== 'replicate').map((o) => (o.value === 'variety' ? { ...o, label: '按品系' } : o))
+  ? VIEW_OPTIONS.map((o) => (o.value === 'variety' ? { ...o, label: '按品系' } : o))
   : VIEW_OPTIONS))
-
-watch(isBreeding, (b) => {
-  if (b && display.value.view === 'replicate') display.value.view = 'variety'
-})
 
 function selectByLegend(label: string) {
   if (display.value.view === 'status') {
@@ -1798,15 +1807,15 @@ function runEdit(fn: () => void) {
         <span class="chip-stat" title="最近 7 天录入的条数"><em>本周</em><b class="num">{{ ind.weekEntries }}</b><small>条</small></span>
       </div>
       <div class="spacer" />
-      <el-tooltip v-if="!isBreeding && trial && modules.isOn('record_book')" content="封面、试验设计、栽培管理、气象资料、品种评价" placement="bottom">
+      <el-tooltip v-if="trial && modules.isOn('record_book')" content="封面、试验设计、栽培管理、气象资料、品种评价" placement="bottom">
         <el-button :icon="Notebook" @click="router.push(`/trials/${trial.id}/book`)">记载本</el-button>
       </el-tooltip>
-      <el-dropdown v-if="auth.isTeacher && !isBreeding" trigger="click" @command="onTrialCommand">
+      <el-dropdown v-if="auth.isTeacher" trigger="click" @command="onTrialCommand">
         <el-button>试验<el-icon class="el-icon--right"><ArrowDown /></el-icon></el-button>
         <template #dropdown>
           <el-dropdown-menu>
-            <el-dropdown-item command="new">新建试验</el-dropdown-item>
-            <el-dropdown-item command="edit" :disabled="!trial">修改或删除当前试验</el-dropdown-item>
+            <el-dropdown-item v-if="!isBreeding" command="new">新建试验</el-dropdown-item>
+            <el-dropdown-item command="edit" :disabled="!trial">{{ isBreeding ? '试验信息：类型、麦区、重复次数' : '修改或删除当前试验' }}</el-dropdown-item>
           </el-dropdown-menu>
         </template>
       </el-dropdown>
@@ -1815,9 +1824,9 @@ function runEdit(fn: () => void) {
         <template #dropdown>
           <el-dropdown-menu>
             <el-dropdown-item v-if="auth.isTeacher" command="field">{{ isBreeding ? '修改地块信息' : '修改实验田信息' }}</el-dropdown-item>
-            <el-dropdown-item v-if="auth.isTeacher && modules.isOn('import') && !isBreeding" command="import">导入历史表格</el-dropdown-item>
+            <el-dropdown-item v-if="auth.isTeacher && modules.isOn('import')" command="import">导入历史表格</el-dropdown-item>
             <el-dropdown-item command="export">导出{{ view3d ? ' 3D 画面' : '种植图' }}（jpg）</el-dropdown-item>
-            <el-dropdown-item v-if="modules.isOn('record_book') && !isBreeding" command="book" :disabled="!trial">导出记载本（Excel）</el-dropdown-item>
+            <el-dropdown-item v-if="modules.isOn('record_book')" command="book" :disabled="!trial">导出记载本（Excel）</el-dropdown-item>
           </el-dropdown-menu>
         </template>
       </el-dropdown>
@@ -1848,6 +1857,7 @@ function runEdit(fn: () => void) {
           :auto-rotate="autoRotate"
           @open="openDetail"
           @contextmenu="onContextMenu"
+          @unsupported="on3dUnsupported"
         />
         <FieldCanvas
           v-else-if="shownLayout"
@@ -2040,7 +2050,7 @@ function runEdit(fn: () => void) {
                 <el-button :icon="Warning" @click="toggleAbnormal(selectedPlots)">{{ allAbnormal ? '取消异常' : '标记异常' }}</el-button>
               </template>
               <el-button v-if="selected.length === 1" @click="openDetail(selected[0]!)">详情</el-button>
-              <el-button v-if="selected.length > 1 && modules.isOn('analysis') && !isBreeding" :icon="PieChart" @click="analyzeSelection">做图表</el-button>
+              <el-button v-if="selected.length > 1 && modules.isOn('analysis')" :icon="PieChart" @click="analyzeSelection">做图表</el-button>
             </template>
             <template v-else-if="isBreeding">
               <el-button type="primary" @click="openPlant(selectedTrialPlots.map((p) => p.id))">种植</el-button>
@@ -2048,10 +2058,19 @@ function runEdit(fn: () => void) {
               <el-tooltip :disabled="selectedLineIds.length === 2" content="选种着两个不同品系的小区块，先选的是母本" placement="top">
                 <span><el-button :disabled="selectedLineIds.length !== 2" @click="openCross">杂交</el-button></span>
               </el-tooltip>
-              <el-button :disabled="selectedLineIds.length === 0" @click="setGeneration(selectedTrialPlots.map((p) => p.id))">世代</el-button>
-              <el-button :disabled="selectedLineIds.length === 0" @click="clearPlants(selectedTrialPlots.map((p) => p.id))">清掉</el-button>
-              <el-button @click="numberingDialog = true">编号</el-button>
-              <el-button @click="plotDialog = true">类型</el-button>
+              <el-button @click="assignReplicate">设重复</el-button>
+              <el-button @click="openLayoutDialog('link')">设对照</el-button>
+              <el-dropdown trigger="click" placement="top" @command="onBreedingMore">
+                <el-button>更多<el-icon class="el-icon--right"><ArrowDown /></el-icon></el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item command="generation" :disabled="selectedLineIds.length === 0">改世代</el-dropdown-item>
+                    <el-dropdown-item command="clear" :disabled="selectedLineIds.length === 0">清掉种的品系</el-dropdown-item>
+                    <el-dropdown-item command="numbering" divided>编号</el-dropdown-item>
+                    <el-dropdown-item command="kind">小区块类型</el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
             </template>
             <template v-else>
               <el-button type="primary" @click="openLayoutDialog('variety')">分配品种</el-button>
@@ -2106,7 +2125,7 @@ function runEdit(fn: () => void) {
               </div>
             </div>
             <div class="kv">
-              <template v-if="!isBreeding"><span>重复</span><b>{{ plantingByPlot.get(single.id)?.replicateNo ? replicateLabel(plantingByPlot.get(single.id)!.replicateNo!) : '—' }}</b></template>
+              <span>重复</span><b>{{ plantingByPlot.get(single.id)?.replicateNo ? replicateLabel(plantingByPlot.get(single.id)!.replicateNo!) : '—' }}</b>
               <span>状态</span>
               <b><i class="dot-status" :style="{ background: PLOT_STATUS[plotStatus(single)].color }" />{{ PLOT_STATUS[plotStatus(single)].label }}</b>
               <template v-if="statusByPlot.get(single.id)?.abnormalNote">
@@ -2153,7 +2172,7 @@ function runEdit(fn: () => void) {
                 <i :style="{ background: f.color }" /><span>{{ isBreeding && f.label === '未分配品种' ? '还没种' : f.label }}</span><b class="num">{{ f.count }}</b>
               </button>
             </div>
-            <div v-if="!isBreeding" class="facet-group">
+            <div class="facet-group">
               <div class="facet-title">重复</div>
               <button v-for="f in facets.replicate" :key="f.key" type="button" class="facet" title="选中这个重复的所有小区" @click="f.pick()">
                 <i :style="{ background: f.color }" /><span>{{ f.label }}</span><b class="num">{{ f.count }}</b>
@@ -2195,11 +2214,11 @@ function runEdit(fn: () => void) {
             </template>
             <div class="legend-sep" />
             <div class="legend-row"><span class="dot" />今天录过数据</div>
-            <div v-if="!isBreeding" class="legend-row"><b class="ck">CK</b>对照品种</div>
+            <div class="legend-row"><b class="ck">CK</b>对照品种</div>
             <div class="legend-row"><b class="ck alert">!</b>有异常</div>
           </section>
 
-          <section v-if="trial && mode === 'layout' && plantBlocks.length > 1 && !isBreeding" class="panel panel-pad">
+          <section v-if="trial && mode === 'layout' && plantBlocks.length > 1" class="panel panel-pad">
             <div class="panel-title">区块和重复<span class="sub">{{ plantBlocks.length }} 个区块</span></div>
             <div v-for="x in blockReplicates" :key="x.block.id" class="rep-row">
               <span>{{ x.block.name }}</span>
@@ -2212,7 +2231,7 @@ function runEdit(fn: () => void) {
             </el-button>
           </section>
 
-          <section v-if="trial && !isBreeding" class="panel panel-pad">
+          <section v-if="trial" class="panel panel-pad">
             <div class="panel-title">对照关系<span class="sub">{{ layout?.links.length ?? 0 }} 组</span></div>
             <div v-if="!layout?.links.length" class="hint">
               {{ auth.isTeacher ? '在"布置试验"里选中对照小区和要比较的小区，点"设对照"。' : '还没有设对照关系。' }}
@@ -2284,7 +2303,7 @@ function runEdit(fn: () => void) {
         <template v-if="menuPlot.kind === 'PLOT'">
           <div class="menu-sep" />
           <div v-if="plantingByPlot.get(menuPlot.id)?.varietyId" class="menu-item" @click="runMenu((p) => selectWhere((x) => x.kind === 'PLOT' && plantingByPlot.get(x.id)?.varietyId === plantingByPlot.get(p.id)?.varietyId))">选中同{{ isBreeding ? '品系' : '品种' }}的{{ U }}</div>
-          <div v-if="!isBreeding && plantingByPlot.get(menuPlot.id)?.replicateNo" class="menu-item" @click="runMenu((p) => selectWhere((x) => x.kind === 'PLOT' && plantingByPlot.get(x.id)?.replicateNo === plantingByPlot.get(p.id)?.replicateNo))">选中同一重复的小区</div>
+          <div v-if="plantingByPlot.get(menuPlot.id)?.replicateNo" class="menu-item" @click="runMenu((p) => selectWhere((x) => x.kind === 'PLOT' && plantingByPlot.get(x.id)?.replicateNo === plantingByPlot.get(p.id)?.replicateNo))">选中同一重复的小区</div>
           <div v-if="isBreeding && lineOf(menuPlot.id) != null" class="menu-item" @click="runMenu((p) => openLine(lineOf(p.id)!))">看品系详情</div>
         </template>
       </template>
@@ -2301,9 +2320,9 @@ function runEdit(fn: () => void) {
                 {{ l.name }}<span v-if="l.name !== l.code" class="muted">{{ l.code }}</span>
               </div>
             </template>
-            <div v-if="menuGroups.length === 0" class="sub-title">"全新开始"的季：搜品系或新建原始材料</div>
+            <div v-if="menuGroups.length === 0" class="sub-title">"全新开始"的季：搜品系或新建品种</div>
             <div class="menu-sep" />
-            <div class="menu-item" @click="runTargets((ids) => openPlant(ids))">搜全部品系、新建原始材料…</div>
+            <div class="menu-item" @click="runTargets((ids) => openPlant(ids))">搜全部品系、新建品种…</div>
           </div>
         </div>
         <div v-if="menuBlock && menuBlock.kind === 'PLANT'" class="menu-item has-sub">
@@ -2316,7 +2335,7 @@ function runEdit(fn: () => void) {
               </div>
             </template>
             <div class="menu-sep" />
-            <div class="menu-item" @click="runMenuBlock((b) => openPlant(plantPlotsOfBlock(b), `整块种：${menuBlockName(b)}`))">搜全部品系、新建原始材料…</div>
+            <div class="menu-item" @click="runMenuBlock((b) => openPlant(plantPlotsOfBlock(b), `整块种：${menuBlockName(b)}`))">搜全部品系、新建品种…</div>
           </div>
         </div>
         <div v-if="menuPlot && lineOf(menuPlot.id) != null" class="menu-item" @click="runTargets((ids) => openSelect(ids))">
@@ -2334,6 +2353,8 @@ function runEdit(fn: () => void) {
         </template>
         <template v-if="menuPlot">
           <div class="menu-sep" />
+          <div v-if="trial" class="menu-item" @click="runMenu(assignReplicate)">设重复号</div>
+          <div v-if="trial && selected.length >= 2" class="menu-item" @click="runMenu(() => openLayoutDialog('link'))">设对照关系</div>
           <div class="menu-item" @click="runMenu(() => (numberingDialog = true))">编号</div>
           <div class="menu-item" @click="runMenu(() => (plotDialog = true))">小区块类型</div>
         </template>
@@ -2402,7 +2423,7 @@ function runEdit(fn: () => void) {
       @saved="onEntrySaved"
     />
     <FieldFormDialog v-model="fieldDialog" :field="field" :layout-saved="detail?.layoutSaved" @saved="onFieldSaved" />
-    <TrialFormDialog v-model="trialDialog" :field-id="fieldId" :trial="editingTrial" @saved="onTrialSaved" @removed="onTrialRemoved" />
+    <TrialFormDialog v-model="trialDialog" :field-id="fieldId" :trial="editingTrial" :land="isBreeding" @saved="onTrialSaved" @removed="onTrialRemoved" />
     <AssignVarietyDialog v-if="trialId" v-model="varietyDialog" :trial-id="trialId" :plot-ids="selectedTrialPlots.map((p) => p.id)" @saved="onLayoutSaved" />
     <ControlLinkDialog
       v-if="trialId"

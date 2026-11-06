@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // 种植：选一个品系种到选中的小区块。最前面是接着的季种过的品系、它们的子代，后面是这一季已经种了的、最近种过的；
-// 也可以搜全部品系，或者新建原始材料
+// 也可以搜全部品系，或者新建品种
 import { computed, ref, watch } from 'vue'
 import { Plus, Search } from '@element-plus/icons-vue'
 
@@ -46,10 +46,10 @@ function onFounders(rows: LineRow[]) {
       <div class="chips">
         <LineChip v-for="l in hits" :key="l.id" :line="l" @click="pick(l.id)" />
       </div>
-      <div v-if="hits.length === 0" class="hint">没找到。可以新建原始材料。</div>
+      <div v-if="hits.length === 0" class="hint">没找到。可以新建品种。</div>
     </div>
     <template v-else>
-      <div v-if="candidates?.fresh" class="hint fresh">这一季是"全新开始"，没有上一季：直接搜品系，或者新建原始材料。</div>
+      <div v-if="candidates?.fresh" class="hint fresh">这一季是"全新开始"，没有上一季：直接搜品系，或者新建品种。</div>
       <div v-for="g in candidates?.groups ?? []" :key="g.key" class="group">
         <template v-if="g.lines.length">
           <div class="group-title">{{ g.title }}<span class="n">{{ g.lines.length }}</span></div>
@@ -60,7 +60,7 @@ function onFounders(rows: LineRow[]) {
       </div>
     </template>
     <template #footer>
-      <el-button :icon="Plus" @click="founderOpen = true">新建原始材料</el-button>
+      <el-button :icon="Plus" @click="founderOpen = true">新建品种</el-button>
       <el-button @click="visible = false">取消</el-button>
     </template>
     <FounderDialog v-model="founderOpen" @saved="onFounders" />

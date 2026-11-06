@@ -9,6 +9,7 @@ import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 
 import { saveFile } from '@/shared/api/http'
+import MapCompass from './MapCompass.vue'
 import guardTileUrl from '@/assets/art/guard-tile.webp'
 import roadTileUrl from '@/assets/art/road-tile.webp'
 import {
@@ -35,13 +36,17 @@ const emit = defineEmits<{
   'update:selectedPlots': [ids: number[]]
   open: [plotId: number]
   contextmenu: [target: { plotId?: number; blockId?: string }, x: number, y: number]
+  /** 显卡画不了 3D：回俯视图 */
+  unsupported: []
 }>()
 
 const wrap = ref<HTMLDivElement | null>(null)
 const labelsEl = ref<HTMLDivElement | null>(null)
 const tipEl = ref<HTMLDivElement | null>(null)
 const bandEl = ref<HTMLDivElement | null>(null)
-const compassEl = ref<HTMLDivElement | null>(null)
+const compassDeg = ref(0)
+/** 这台电脑的显卡画不了 3D */
+const failed = ref(false)
 
 let renderer: THREE.WebGLRenderer | null = null
 let scene: THREE.Scene
@@ -168,7 +173,8 @@ function build() {
   cx = s.w / 2
   cy = s.h / 2
   radius = Math.max(4, Math.hypot(s.w * m, s.h * m) / 2)
-  ex = Math.min(5, Math.max(1, radius / 7))
+  // 高度放大得太多，小区立起来像一根根柱子，看着变形：大地块最多放大 2.5 倍
+  ex = Math.min(2.5, Math.max(1, radius / 12))
   root = new THREE.Group()
 
   // 地面和整块地的底
@@ -379,9 +385,9 @@ function viewFrom(bearing: number, elevation: number) {
   viewSpherical(((90 - elevation) * Math.PI) / 180, Math.PI - (nd + (bearing * Math.PI) / 180))
 }
 
-/** 默认：从图纸下方斜着看，和俯视图的方向一样 */
+/** 默认：从图纸的东南（右下）斜着看，长条的地块也能看清两个方向 */
 function home() {
-  viewSpherical((42 * Math.PI) / 180, 0)
+  viewSpherical((48 * Math.PI) / 180, 0.55)
 }
 
 function preset(p: CameraPreset) {
@@ -446,13 +452,14 @@ function updateLabels() {
   // 小区编号：屏幕上够大的才写，最近的优先
   const focal = size.h / 2 / Math.tan((camera.fov * Math.PI) / 360)
   const camPos = camera.position
-  const shown: { idx: number; d: number }[] = []
+  const shown: { idx: number; d: number; px: number }[] = []
   insts.forEach((it, i) => {
     if (it.plotId == null) return
     const r = it.rect
     const p = world(r.x + r.w / 2, r.y + r.h / 2, PLATE + it.height)
     const d = p.distanceTo(camPos)
-    if ((Math.min(r.w, r.h) * m * focal) / d > 26) shown.push({ idx: i, d })
+    const px = (Math.min(r.w, r.h) * m * focal) / d
+    if (px > 26) shown.push({ idx: i, d, px })
   })
   shown.sort((a, b) => a.d - b.d)
   plotLabels.forEach((pl, k) => {
@@ -463,21 +470,22 @@ function updateLabels() {
       return
     }
     const it = insts[s.idx]!
-    if (pl.idx !== s.idx) {
+    // 够大时编号后面写上品种（品系）名
+    const lines = props.cells.get(it.plotId!)?.lines ?? []
+    const text = s.px > 64 && lines[1] && lines[1] !== '—' ? `${lines[0]} ${lines[1]}` : lines[0] ?? ''
+    if (pl.idx !== s.idx || pl.el.textContent !== text) {
       pl.idx = s.idx
-      pl.el.textContent = props.cells.get(it.plotId!)?.lines[0] ?? ''
+      pl.el.textContent = text
     }
     const r = it.rect
     const sel = props.selectedPlots.includes(it.plotId!)
     place(pl.el, project(world(r.x + r.w / 2, r.y + r.h / 2, PLATE + it.height + (sel ? lift() : 0) + 0.02)))
   })
-  // 指北针：屏幕上北朝哪
-  if (compassEl.value) {
-    const a = project(controls.target)
-    const b = project(controls.target.clone().add(northVec().multiplyScalar(radius * 0.3)))
-    const deg = (Math.atan2(b.x - a.x, -(b.y - a.y)) * 180) / Math.PI
-    compassEl.value.style.transform = `rotate(${deg.toFixed(1)}deg)`
-  }
+  // 指北针：屏幕上北朝哪（和俯视图一样的罗盘）
+  const a = project(controls.target)
+  const b = project(controls.target.clone().add(northVec().multiplyScalar(radius * 0.3)))
+  const deg = (Math.atan2(b.x - a.x, -(b.y - a.y)) * 180) / Math.PI
+  if (Math.abs(deg - compassDeg.value) > 0.5) compassDeg.value = deg
 }
 
 function loop(now: number) {
@@ -679,7 +687,13 @@ onMounted(() => {
   const el = wrap.value!
   size.w = Math.max(200, el.clientWidth)
   size.h = Math.max(200, el.clientHeight)
-  renderer = new THREE.WebGLRenderer({ antialias: true })
+  try {
+    renderer = new THREE.WebGLRenderer({ antialias: true })
+  } catch {
+    failed.value = true
+    emit('unsupported')
+    return
+  }
   renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1))
   renderer.setSize(size.w, size.h)
   renderer.outputColorSpace = THREE.SRGBColorSpace
@@ -778,15 +792,17 @@ watch(() => props.autoRotate, (v) => {
     <div ref="labelsEl" class="labels" />
     <div ref="bandEl" class="band" />
     <div ref="tipEl" class="tip" />
-    <button type="button" class="compass" title="正北朝上，从南往北看" aria-label="正北朝上" @click="preset('south')">
-      <div ref="compassEl" class="needle">
-        <svg viewBox="0 0 40 40" aria-hidden="true">
-          <polygon points="20,3 25,20 20,17 15,20" fill="#b0543a" />
-          <polygon points="20,37 25,20 20,23 15,20" fill="#e8dfc8" stroke="#8a7a55" stroke-width="0.6" />
-          <text x="20" y="13" text-anchor="middle" font-size="7" fill="#fff" font-weight="700">北</text>
-        </svg>
-      </div>
-    </button>
+    <MapCompass
+      v-if="!failed"
+      class="compass"
+      :north-deg="compassDeg"
+      :rotation="0"
+      :rotatable="false"
+      :size="84"
+      title="点一下：正北朝上，从南往北看"
+      @north-up="preset('south')"
+    />
+    <div v-if="failed" class="failed">这台电脑的显卡画不了 3D（不支持 WebGL），请用俯视图。</div>
     <slot />
   </div>
 </template>
@@ -890,20 +906,16 @@ watch(() => props.autoRotate, (v) => {
 .compass {
   position: absolute;
   right: 16px;
-  bottom: 130px;
+  bottom: 120px;
   z-index: 2;
-  width: 56px;
-  height: 56px;
-  padding: 6px;
-  border-radius: 50%;
-  border: 1px solid rgba(90, 70, 30, 0.2);
-  background: rgba(255, 253, 248, 0.92);
-  box-shadow: 0 4px 14px -6px rgba(60, 40, 10, 0.35);
-  cursor: pointer;
 }
 
-.needle {
-  width: 100%;
-  height: 100%;
+.failed {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--ink-2);
+  font-size: var(--fs-md);
 }
 </style>

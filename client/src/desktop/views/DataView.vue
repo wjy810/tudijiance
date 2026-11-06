@@ -198,15 +198,15 @@ async function exportExcel() {
     </div>
 
     <div class="filter-bar panel">
-      <el-select :model-value="picker.fieldId.value" placeholder="实验田" class="w160" @update:model-value="onFieldChange">
-        <el-option v-for="f in picker.fields.value" :key="f.id" :value="f.id" :label="f.name" />
+      <el-select :model-value="picker.fieldId.value" placeholder="地块" class="w160" @update:model-value="onFieldChange">
+        <el-option v-for="f in picker.fields.value" :key="f.id" :value="f.id" :label="picker.fieldLabel(f)" />
       </el-select>
       <el-select v-model="picker.trialId.value" placeholder="试验" class="w220" no-data-text="这块地还没有试验">
         <el-option v-for="t in picker.trials.value" :key="t.id" :value="t.id" :label="`${t.seasonYear} 年 · ${t.name}`" />
       </el-select>
       <el-divider direction="vertical" />
       <el-select v-model="filters.varietyId" placeholder="全部品种" clearable filterable class="w120">
-        <el-option v-for="v in catalog.comparisonVarieties" :key="v.id" :value="v.id" :label="v.name" />
+        <el-option v-for="v in catalog.varieties" :key="v.id" :value="v.id" :label="v.name" />
       </el-select>
       <el-select v-model="filters.plotId" placeholder="全部小区" clearable filterable class="w110">
         <el-option v-for="p in trialPlots" :key="p.id" :value="p.id" :label="p.code || `${p.rowNo}-${p.colNo}`" />
@@ -230,7 +230,7 @@ async function exportExcel() {
     </div>
 
     <div class="panel table-panel">
-      <el-empty v-if="!picker.trialId.value && !loading" description="先选择实验田和试验" />
+      <el-empty v-if="!picker.trialId.value && !loading" description="先选择地块" />
       <template v-else>
         <el-table v-loading="loading" :data="rows" class="table" empty-text="没有符合条件的数据">
           <el-table-column prop="observedOn" label="调查日期" width="126" class-name="num" />

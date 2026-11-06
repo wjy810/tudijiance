@@ -6,9 +6,10 @@ import type { EChartsCoreOption } from 'echarts/core'
 import { Plus } from '@element-plus/icons-vue'
 
 import {
-  deviceApi, fieldApi,
-  type Bucket, type DeviceRequest, type DeviceView, type Field, type SensorMetric, type Series,
+  deviceApi, fieldApi, seasonApi,
+  type Bucket, type DeviceRequest, type DeviceView, type Field, type Season, type SensorMetric, type Series,
 } from '@/shared/api'
+import { landLabel, seasonMap, sortLands } from '@/shared/lands'
 import { DEVICE_STATUS, DEVICE_TYPE } from '@/shared/labels'
 import { getServerUrl } from '@/shared/settings'
 import { FONT, LIGHT, axisStyle, formatNumber, tooltipStyle } from '@/shared/charts'
@@ -22,12 +23,20 @@ const fields = ref<Field[]>([])
 const loading = ref(false)
 
 const enabledMetrics = computed(() => metrics.value.filter((m) => m.enabled))
-const fieldName = (id: number | null) => fields.value.find((f) => f.id === id)?.name ?? ''
+const seasons = ref(new Map<number, Season>())
+const fieldName = (id: number | null) => {
+  const f = fields.value.find((x) => x.id === id)
+  return f ? landLabel(f, seasons.value) : ''
+}
 
 async function load() {
   loading.value = true
   try {
-    ;[devices.value, metrics.value, fields.value] = await Promise.all([deviceApi.list(), deviceApi.metrics(), fieldApi.list()])
+    const [d, m, f, views] = await Promise.all([deviceApi.list(), deviceApi.metrics(), fieldApi.list(), seasonApi.list().catch(() => [])])
+    seasons.value = seasonMap(views)
+    devices.value = d
+    metrics.value = m
+    fields.value = sortLands(f, seasons.value)
   } catch (e) {
     ElMessage.error((e as Error).message)
   } finally {
@@ -280,7 +289,7 @@ const lineOption = computed<EChartsCoreOption>(() => {
         </el-form-item>
         <el-form-item label="实验田">
           <el-select v-model="form.fieldId" clearable class="full">
-            <el-option v-for="f in fields" :key="f.id" :value="f.id" :label="f.name" />
+            <el-option v-for="f in fields" :key="f.id" :value="f.id" :label="landLabel(f, seasons)" />
           </el-select>
         </el-form-item>
         <el-form-item label="位置">

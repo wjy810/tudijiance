@@ -14,7 +14,7 @@ function line(id: number, code: string, extra: Partial<LineRow> = {}): LineRow {
     id, name: code, code, kind: 'FOUNDER', status: 'ACTIVE', pedigree: code,
     motherId: null, fatherId: null, parentId: null, parentText: '原始材料', formerNames: null,
     originSeasonId: null, homeSeasonId: 1, planted: [], childCount: 0,
-    ecotype: null, qualityType: null, breeder: null, remark: null, tagNo: null, seqNo: null,
+    ecotype: null, qualityType: null, breeder: null, remark: null, tagNo: null, seqNo: null, varietyCode: null, controlType: null,
     ...extra,
   }
 }

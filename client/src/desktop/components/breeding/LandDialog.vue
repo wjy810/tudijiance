@@ -28,7 +28,7 @@ const sources = computed(() => {
     .map((v) => ({ label: v.season.name, options: v.fields.map((f) => ({ id: f.id, name: f.name, plots: f.plotCount })) }))
   if (comparisonFields.value.length) {
     groups.push({
-      label: '原来品种比较的实验田',
+      label: '没分季的老实验田',
       options: comparisonFields.value.map((f) => ({ id: f.id, name: f.name, plots: f.rowCount * f.colCount })),
     })
   }
@@ -44,7 +44,8 @@ watch(visible, async (open) => {
   name.value = ''
   saving.value = false
   try {
-    comparisonFields.value = await fieldApi.list()
+    // 没分季的老实验田（直接用接口建的）也能照着建
+    comparisonFields.value = await fieldApi.list('comparison')
   } catch {
     comparisonFields.value = []
   }

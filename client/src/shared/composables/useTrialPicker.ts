@@ -1,7 +1,9 @@
-// 数据查看、统计页面共用的"选实验田 → 选试验"。记住上次选的，下次打开还是它
+// 数据查看、统计页面共用的"选地块 → 选试验"。记住上次选的，下次打开还是它。
+// 地块带上季名，最新一季的在前；季里的地块只有一个试验
 import { computed, ref, watch } from 'vue'
 
-import { fieldApi, trialApi, type Field, type Trial } from '@/shared/api'
+import { fieldApi, seasonApi, trialApi, type Field, type Season, type Trial } from '@/shared/api'
+import { landLabel, seasonMap, sortLands } from '@/shared/lands'
 
 const FIELD_KEY = 'tudijiance.lastField'
 const TRIAL_KEY = 'tudijiance.lastTrial'
@@ -35,6 +37,7 @@ export function rememberTrial(fieldId: number, trialId: number | null): void {
 
 export function useTrialPicker() {
   const fields = ref<Field[]>([])
+  const seasons = ref(new Map<number, Season>())
   const trials = ref<Trial[]>([])
   const fieldId = ref<number | null>(null)
   const trialId = ref<number | null>(null)
@@ -54,7 +57,9 @@ export function useTrialPicker() {
   }
 
   async function init() {
-    fields.value = await fieldApi.list()
+    const [list, views] = await Promise.all([fieldApi.list(), seasonApi.list().catch(() => [])])
+    seasons.value = seasonMap(views)
+    fields.value = sortLands(list, seasons.value)
     const last = readNumber(FIELD_KEY)
     fieldId.value = fields.value.find((f) => f.id === last)?.id ?? fields.value[0]?.id ?? null
     await loadTrials(readNumber(TRIAL_KEY))
@@ -71,5 +76,7 @@ export function useTrialPicker() {
     }
   })
 
-  return { fields, trials, fieldId, trialId, field, trial, init, selectField }
+  const fieldLabel = (f: Field) => landLabel(f, seasons.value)
+
+  return { fields, trials, fieldId, trialId, field, trial, init, selectField, fieldLabel }
 }

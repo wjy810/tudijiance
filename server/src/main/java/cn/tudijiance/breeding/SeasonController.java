@@ -33,8 +33,9 @@ public class SeasonController {
         this.lineService = lineService;
     }
 
+    /** 系统管理员登记设备时也要看地块属于哪一季 */
     @GetMapping
-    @PreAuthorize(Roles.CAN_RECORD)
+    @PreAuthorize(Roles.CAN_VIEW_SETUP)
     public List<SeasonView> list() {
         return seasonService.list();
     }

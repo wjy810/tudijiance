@@ -170,13 +170,13 @@ async function afterChange() {
 
 <template>
   <div class="page pedigree-page">
-    <PageHeader title="系谱图" eyebrow="育种">
+    <PageHeader title="系谱图" eyebrow="品种">
       <template #desc>
         按季分列，连线从父母指向子代：<span class="legend mother" />母本 <span class="legend father" />父本 <span class="legend parent" />选株。
         点一个品系看它的祖先和后代；按住 Ctrl 再点一个可以拿这两个杂交（先点的是母本）。
       </template>
       <template v-if="auth.isTeacher" #actions>
-        <el-button @click="founderDialog = true">新建原始材料</el-button>
+        <el-button @click="founderDialog = true">新建品种</el-button>
         <el-button type="primary" @click="crossDialog = true">杂交</el-button>
       </template>
     </PageHeader>
@@ -208,7 +208,7 @@ async function afterChange() {
     <div class="body">
       <div ref="scroller" v-loading="loading" class="panel scroller" @click.self="selectedId = null; secondId = null">
         <EmptyState v-if="!loading && store.lines.length === 0" art="blocks" title="还没有品系"
-                    desc="先在季和地块里建季、建地块，新建原始材料种下去；以后选株、杂交出来的子代都会画在这里。" />
+                    desc="先在季和地块里建季、建地块，新建品种种下去；以后选株、杂交出来的子代都会画在这里。" />
         <PedigreeCanvas
           v-else
           ref="canvas"

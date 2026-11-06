@@ -6,7 +6,8 @@ import { useRouter } from 'vue-router'
 import type { EChartsCoreOption } from 'echarts/core'
 import { CircleCheck, EditPen, Goods, Grid, Notebook, Sunrise, Warning } from '@element-plus/icons-vue'
 
-import { fieldApi, statsApi, type Field, type PlotStatusCode, type Screen } from '@/shared/api'
+import { fieldApi, seasonApi, statsApi, type Field, type PlotStatusCode, type Screen } from '@/shared/api'
+import { latestPerName, seasonMap } from '@/shared/lands'
 import { PLOT_STATUS } from '@/shared/labels'
 import { DARK, FONT, axisStyle, formatNumber, formatPercent, tooltipStyle } from '@/shared/charts'
 import { useAuthStore } from '@/stores/auth'
@@ -50,7 +51,9 @@ let clockTimer: number | undefined
 
 onMounted(async () => {
   if (!auth.isGuest) {
-    fields.value = await fieldApi.list().catch(() => [])
+    // 各季的同名地块连起来看（趋势是历年的），只列最新那块
+    const [list, views] = await Promise.all([fieldApi.list().catch(() => []), seasonApi.list().catch(() => [])])
+    fields.value = latestPerName(list, seasonMap(views))
   }
   await load()
   fieldId.value = fields.value.find((f) => f.name === screen.value?.fieldName)?.id ?? null
@@ -263,7 +266,7 @@ const statusOption = computed<EChartsCoreOption>(() => {
     </header>
 
     <div v-if="error" class="error">{{ error }}</div>
-    <div v-else-if="screen && !screen.fieldName" class="error">还没有实验田</div>
+    <div v-else-if="screen && !screen.fieldName" class="error">还没有地块</div>
 
     <template v-if="screen && screen.fieldName">
       <section class="tiles">

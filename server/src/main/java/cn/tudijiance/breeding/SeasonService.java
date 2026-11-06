@@ -29,7 +29,6 @@ import cn.tudijiance.field.FieldLayout.Block;
 import cn.tudijiance.field.FieldLayout.Inner;
 import cn.tudijiance.field.FieldMapper;
 import cn.tudijiance.field.FieldService;
-import cn.tudijiance.field.LayoutGeometry;
 import cn.tudijiance.field.Plot;
 import cn.tudijiance.observation.Observation;
 import cn.tudijiance.observation.ObservationMapper;
@@ -184,9 +183,8 @@ public class SeasonService {
         FieldLayout layout;
         if (req.copyFromFieldId() != null) {
             source = fieldService.get(req.copyFromFieldId());
-            FieldLayout saved = fieldService.savedLayout(source);
-            layout = withoutPlots(saved != null ? saved
-                    : LayoutGeometry.legacy(source, fieldService.plots(source.getId())));
+            // 带上格子类型（保护区、道路、空地），平面图上改过的小区类型也算
+            layout = withoutPlots(fieldService.detail(source.getId()).layout());
         } else if (req.layout() != null) {
             layout = withoutPlots(req.layout());
         } else {
@@ -202,7 +200,35 @@ public class SeasonService {
         Long fieldId = detail.field().getId();
         fieldMapper.update(null, Wrappers.<Field>lambdaUpdate().set(Field::getSeasonId, seasonId).eq(Field::getId, fieldId));
         trialService.createBreeding(fieldId, season.yearOf(), season.getName() + " · " + name);
+        if (source != null) {
+            copyCodes(source.getId(), fieldId);
+        }
         return fieldService.detail(fieldId);
+    }
+
+    /** 照着建的地块：同一个位置的小区块用原来的编号（101、102……） */
+    private void copyCodes(Long sourceId, Long fieldId) {
+        Map<String, String> codeAt = new HashMap<>();
+        fieldService.plots(sourceId).forEach(p -> {
+            if (p.getCode() != null) {
+                codeAt.put(p.getRowNo() + "," + p.getColNo(), p.getCode());
+            }
+        });
+        Map<Long, String> codes = new HashMap<>();
+        List<Plot> plots = fieldService.plots(fieldId);
+        plots.forEach(p -> {
+            String code = codeAt.get(p.getRowNo() + "," + p.getColNo());
+            if (code != null && !code.equals(p.getCode())) {
+                codes.put(p.getId(), code);
+            }
+        });
+        // 位置对不上导致编号重复时，就用新编的号（先查好再改，不在事务里抛错）
+        Set<String> seen = new java.util.HashSet<>();
+        boolean clash = plots.stream().map(p -> codes.getOrDefault(p.getId(), p.getCode()))
+                .filter(java.util.Objects::nonNull).anyMatch(c -> !seen.add(c));
+        if (!codes.isEmpty() && !clash) {
+            fieldService.updateCodes(fieldId, codes);
+        }
     }
 
     /** 删除地块：录过数据、或者有品系是从这块地块选出来的，不能删 */

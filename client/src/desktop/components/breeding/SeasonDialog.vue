@@ -102,7 +102,7 @@ async function save() {
             种植时，这些季种过的品系和它们的子代排在下拉框最前面。夏繁只带走一部分品系时，下一季大田可以同时接着去年大田和夏繁。
           </div>
         </div>
-        <div v-else class="hint">第一季或者另起炉灶：种植时直接搜索品系、新建原始材料。</div>
+        <div v-else class="hint">第一季或者另起炉灶：种植时直接搜索品系、新建品种。</div>
       </el-form-item>
       <el-form-item label="备注">
         <el-input v-model="form.remark" type="textarea" maxlength="500" />

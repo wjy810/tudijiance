@@ -6,7 +6,7 @@ import { moduleApi, type AppModule } from '@/shared/api'
 
 /** 内置模块的编码，和服务器 V9__app_module.sql 一致 */
 export type ModuleCode =
-  | 'field_map' | 'varieties' | 'traits' | 'data' | 'stats' | 'analysis' | 'record_book' | 'import' | 'screen'
+  | 'field_map' | 'breeding' | 'traits' | 'data' | 'stats' | 'analysis' | 'record_book' | 'import' | 'screen'
   | 'devices' | 'quality' | 'corrections' | 'users' | 'modules'
 
 export const useModuleStore = defineStore('modules', () => {

@@ -77,7 +77,7 @@ const selectedId = computed(() => focusIds.value.length === 1 ? focusIds.value[0
     <section v-if="layoutMode" class="panel panel-pad">
       <div class="panel-title">
         种什么
-        <el-button v-if="teacher" link type="primary" size="small" :icon="Plus" @click="founderOpen = true">新建原始材料</el-button>
+        <el-button v-if="teacher" link type="primary" size="small" :icon="Plus" @click="founderOpen = true">新建品种</el-button>
       </div>
       <el-input v-model="search" :prefix-icon="Search" size="small" placeholder="搜全部品系" clearable class="search" />
       <div v-if="search.trim()" class="chips">
@@ -85,7 +85,7 @@ const selectedId = computed(() => focusIds.value.length === 1 ? focusIds.value[0
         <div v-if="hits.length === 0" class="hint">没找到</div>
       </div>
       <template v-else>
-        <div v-if="candidates?.fresh" class="hint">"全新开始"的季：搜品系，或者新建原始材料。</div>
+        <div v-if="candidates?.fresh" class="hint">"全新开始"的季：搜品系，或者新建品种。</div>
         <el-collapse v-model="open" class="groups">
           <template v-for="g in candidates?.groups ?? []" :key="g.key">
             <el-collapse-item v-if="g.lines.length" :name="g.key">

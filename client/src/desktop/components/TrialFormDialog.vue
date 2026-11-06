@@ -4,9 +4,10 @@ import { reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 import { trialApi, type Trial, type TrialRequest, type TrialType } from '@/shared/api'
-import { TRIAL_TYPE_CHOICES, WHEAT_ZONES } from '@/shared/labels'
+import { TRIAL_TYPE, TRIAL_TYPE_CHOICES, WHEAT_ZONES } from '@/shared/labels'
 
-const props = defineProps<{ fieldId: number; trial?: Trial | null }>()
+/** land：季里的地块，试验名称、年份跟着季和地块，只改类型、麦区、重复次数，不能删 */
+const props = defineProps<{ fieldId: number; trial?: Trial | null; land?: boolean }>()
 const visible = defineModel<boolean>({ required: true })
 const emit = defineEmits<{ saved: [trial: Trial]; removed: [] }>()
 
@@ -69,18 +70,19 @@ async function remove() {
 </script>
 
 <template>
-  <el-dialog v-model="visible" :title="trial ? '修改试验' : '新建试验'" width="520px">
+  <el-dialog v-model="visible" :title="land ? '试验信息' : trial ? '修改试验' : '新建试验'" width="560px">
     <el-form label-width="88px">
-      <el-form-item label="收获年份" required>
+      <div v-if="land" class="hint land-note">这块地块这一季的试验：类型、麦区、重复次数用在记载本、统计和数据质量检查里。</div>
+      <el-form-item v-if="!land" label="收获年份" required>
         <el-input-number v-model="form.seasonYear" :min="2000" :max="2100" />
         <span class="hint inline">按收获的年份算，2025 年秋播、2026 年收获的填 2026</span>
       </el-form-item>
-      <el-form-item label="试验名称" required>
+      <el-form-item v-if="!land" label="试验名称" required>
         <el-input v-model="form.name" maxlength="100" />
       </el-form-item>
       <el-form-item label="试验类型">
         <el-radio-group v-model="form.trialType">
-          <el-radio-button v-for="(label, key) in TRIAL_TYPE_CHOICES" :key="key" :value="key as TrialType">{{ label }}</el-radio-button>
+          <el-radio-button v-for="(label, key) in (land ? TRIAL_TYPE : TRIAL_TYPE_CHOICES)" :key="key" :value="key as TrialType">{{ label }}</el-radio-button>
         </el-radio-group>
       </el-form-item>
       <el-form-item label="麦区">
@@ -97,7 +99,7 @@ async function remove() {
       </el-form-item>
     </el-form>
     <template #footer>
-      <el-button v-if="trial" type="danger" text class="left" @click="remove">删除试验</el-button>
+      <el-button v-if="trial && !land" type="danger" text class="left" @click="remove">删除试验</el-button>
       <el-button @click="visible = false">取消</el-button>
       <el-button type="primary" :loading="saving" @click="save">保存</el-button>
     </template>
@@ -115,5 +117,9 @@ async function remove() {
 
 .left {
   float: left;
+}
+
+.land-note {
+  margin: -4px 0 14px;
 }
 </style>

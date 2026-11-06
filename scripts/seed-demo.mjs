@@ -1,4 +1,4 @@
-// 演示数据：建账号、一块实验田、12 个品种、近四个年度的品种比较试验和录入数据。
+// 演示数据：建账号、12 个品种、近四个年度（每个年度一季），每季一块"东区品种试验田"地块做品种比较试验，以及录入数据。
 // 只用于本地体验和截图，不要对正式服务器运行。
 //
 // 用法（后端先用 local 配置启动）：
@@ -118,37 +118,74 @@ async function main() {
     varietyIds.push(saved.id)
   }
 
-  // 实验田：8 行 × 6 列，第 1 行和第 8 行是保护区，中间 6 行分 3 个重复
-  const detail = await api('POST', '/api/fields', {
-    name: '东区品种试验田', location: '学校农场东区', latitude: 34.79, longitude: 113.65, altitudeM: 95,
-    areaMu: 1.2, rowCount: ROWS, colCount: COLS, soilType: '壤土', irrigated: true, previousCrop: '玉米',
-    remark: null, plotLengthM: 6.67, plotWidthM: 2,
-  })
-  const fieldId = detail.field.id
-  const plotAt = (r, c) => detail.plots.find((p) => p.rowNo === r && p.colNo === c)
-  const guardIds = detail.plots.filter((p) => p.rowNo === 1 || p.rowNo === ROWS).map((p) => p.id)
-  await api('PATCH', `/api/fields/${fieldId}/plots`, { plotIds: guardIds, kind: 'GUARD' })
-  const codes = {}
-  for (const p of detail.plots) {
-    if (p.rowNo !== 1 && p.rowNo !== ROWS) {
-      codes[p.id] = String((p.rowNo - 1) * 100 + p.colNo)
-    }
-  }
-  await api('PUT', `/api/fields/${fieldId}/plot-codes`, { codes })
-
+  // 每个年度一季；第一季画好地块：一个区块 8 行 × 6 列小区块（6.67 m × 2 m），第 1 行和第 8 行是保护区，
+  // 中间 6 行分 3 个重复；以后各季照着上一季的地块建
+  let prevSeason = null
+  let prevField = null
   for (const season of SEASONS) {
-    await seedSeason(fieldId, season, plotAt, varietyIds, trait)
-    console.log(`${season.year} 年度试验已建好`)
+    const s = await seasonFor(season.year, prevSeason)
+    let detail
+    if (!prevField) {
+      detail = await api('POST', `/api/seasons/${s.id}/fields`, {
+        name: '东区品种试验田', location: '学校农场东区', layout: gridLayout(ROWS, COLS, 6.67, 2),
+      })
+      const guardIds = detail.plots.filter((p) => p.rowNo === 1 || p.rowNo === ROWS).map((p) => p.id)
+      await api('PATCH', `/api/fields/${detail.field.id}/plots`, { plotIds: guardIds, kind: 'GUARD' })
+      const codes = {}
+      for (const p of detail.plots) {
+        if (p.rowNo !== 1 && p.rowNo !== ROWS) codes[p.id] = String((p.rowNo - 1) * 100 + p.colNo)
+      }
+      await api('PUT', `/api/fields/${detail.field.id}/plot-codes`, { codes })
+      detail = await api('GET', `/api/fields/${detail.field.id}`)
+    } else {
+      detail = await api('POST', `/api/seasons/${s.id}/fields`, { name: '东区品种试验田', copyFromFieldId: prevField })
+    }
+    const fieldId = detail.field.id
+    const land = (await api('GET', '/api/seasons')).find((v) => v.season.id === s.id).fields.find((f) => f.id === fieldId)
+    const plotAt = (r, c) => detail.plots.find((p) => p.rowNo === r && p.colNo === c)
+    await seedSeason(fieldId, land.trialId, season, plotAt, varietyIds, trait)
+    console.log(`${s.name}：东区品种试验田已建好`)
+    prevSeason = s
+    prevField = fieldId
   }
   console.log('完成。老师 laoshi、学生 xuesheng、游客 youke，密码 ' + DEMO_PASSWORD)
 }
 
-async function seedSeason(fieldId, season, plotAt, varietyIds, trait) {
-  const trial = await api('POST', '/api/trials', {
-    fieldId, seasonYear: season.year, name: `${season.year - 1}—${season.year} 年度品种比较试验`,
+/** 这一年度的季：有同名的（比如育种演示数据建过）就接着用，没有就建，接着上一季 */
+async function seasonFor(year, prev) {
+  const name = `${year - 1}-${year} 年度大田`
+  const views = await api('GET', '/api/seasons')
+  const found = views.find((v) => v.season.name === name)
+  if (found) {
+    const followIds = [...new Set([...found.followIds, ...(prev ? [prev.id] : [])])]
+    await api('PUT', `/api/seasons/${found.season.id}`, {
+      name, startDate: found.season.startDate, endDate: found.season.endDate, remark: found.season.remark, followIds,
+    })
+    return found.season
+  }
+  return (await api('POST', '/api/seasons', {
+    name, startDate: `${year - 1}-10-01`, endDate: `${year}-06-10`, remark: null, followIds: prev ? [prev.id] : [],
+  })).season
+}
+
+/** 一个区块，rows × cols 个小区块，每个 len × wid 米 */
+function gridLayout(rows, cols, len, wid) {
+  return {
+    version: 1, unit: { name: '米', symbol: 'm', meters: 1 }, rows: [+(rows * len).toFixed(2)], cols: [cols * wid],
+    merges: [], nextBlockNo: 2, defaultInner: { rows, cols }, northDeg: 0,
+    blocks: [{
+      id: 'B1', r: 0, c: 0, name: '区块1', kind: 'PLANT', fit: null,
+      inner: { rows: Array(rows).fill(1), cols: Array(cols).fill(1), merges: [], plots: {} },
+    }],
+  }
+}
+
+async function seedSeason(fieldId, trialId, season, plotAt, varietyIds, trait) {
+  // 这块地块这一季做品种比较试验
+  await api('PUT', `/api/trials/${trialId}`, {
+    fieldId, seasonYear: season.year, name: '品种比较试验',
     trialType: 'COMPARISON', wheatZone: 'Q3', replicateCount: 3, remark: season.note || null,
   })
-  const trialId = trial.id
   // 每个重复占 2 行 × 6 列 = 12 个小区，品种在重复内随机排列
   const layout = [] // { plotId, v }
   for (let rep = 1; rep <= 3; rep++) {
@@ -166,8 +203,8 @@ async function seedSeason(fieldId, season, plotAt, varietyIds, trait) {
     })
   }
   for (let i = 0; i < VARIETIES.length; i++) {
-    await api('PUT', `/api/trials/${trialId}/plantings`, {
-      plotIds: layout.filter((x) => x.v === i).map((x) => x.plotId), attribute: 'VARIETY', value: varietyIds[i],
+    await api('PUT', `/api/breeding/fields/${fieldId}/plantings`, {
+      plotIds: layout.filter((x) => x.v === i).map((x) => x.plotId), lineId: varietyIds[i],
     })
   }
   // 对照关系：每个重复里，对照品种和它同一行的小区连起来

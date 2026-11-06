@@ -1,11 +1,11 @@
 <script setup lang="ts">
 // 首页（老师、学生）。从上到下按"先看清现在，再动手"排：
 //   ① 问候 + 一句话概况
-//   ② 当前实验田：生育期走到哪了、今天录了多少，右边是平面图缩略图（点开就能录）
+//   ② 当前地块（这一季的）：生育期走到哪了、今天录了多少，右边是平面图缩略图（点开就能录）
 //   ③ 今天该记什么（合并后换成 TodayTodoPanel）
 //   ④ 需要处理：异常小区、数据检查、待审核的更正申请（老师）
 //   ⑤ 最新录入：谁、什么时候、录了什么
-//   ⑥ 全部实验田（有两块以上时才显示）
+//   ⑥ 这一季的全部地块（有两块以上时才显示）
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
@@ -14,8 +14,9 @@ import {
 } from '@element-plus/icons-vue'
 
 import {
-  fieldApi, observationApi, qualityApi, statsApi, trialApi, type Field, type FieldDetail, type Screen, type Trial,
+  fieldApi, observationApi, qualityApi, seasonApi, statsApi, trialApi, type Field, type Screen, type Season, type Trial,
 } from '@/shared/api'
+import { currentSeason, sortLands, seasonMap } from '@/shared/lands'
 import { PLOT_STATUS } from '@/shared/labels'
 import { rememberTrial } from '@/shared/composables/useTrialPicker'
 import { MAIN_STAGES, stageView } from '@/shared/growthStage'
@@ -26,7 +27,6 @@ import MiniPlotMap from '@/desktop/components/MiniPlotMap.vue'
 import BlockMiniMap from '@/desktop/components/BlockMiniMap.vue'
 import blocksArt from '@/assets/art/empty-blocks.webp'
 import { fieldSize } from '@/shared/fieldLayout'
-import FieldFormDialog from '@/desktop/components/FieldFormDialog.vue'
 import EmptyState from '@/desktop/components/EmptyState.vue'
 import PageHeader from '@/desktop/components/PageHeader.vue'
 import SectionCard from '@/desktop/components/SectionCard.vue'
@@ -46,7 +46,12 @@ interface FieldCard {
 const cards = ref<FieldCard[]>([])
 const loading = ref(true)
 const loadError = ref<string | null>(null)
-const fieldDialog = ref(false)
+/** 现在是哪一季：首页只看这一季的地块 */
+const season = ref<Season | null>(null)
+
+function newLand() {
+  router.push('/breeding/seasons')
+}
 
 /** 首页上方大卡片显示的那块地 */
 const primaryId = ref<number | null>(null)
@@ -59,7 +64,11 @@ async function load() {
   loading.value = true
   loadError.value = null
   try {
-    const fields = await fieldApi.list()
+    const [list, views] = await Promise.all([fieldApi.list(), seasonApi.list().catch(() => [])])
+    season.value = currentSeason(views.map((v) => v.season))
+    const ordered = sortLands(list, seasonMap(views))
+    const inSeason = season.value ? ordered.filter((f) => f.seasonId === season.value!.id) : []
+    const fields = inSeason.length ? inSeason : ordered.slice(0, 6)
     cards.value = await Promise.all(
       fields.map(async (field) => ({ field, screen: await statsApi.screen(field.id).catch(() => null) })),
     )
@@ -178,7 +187,7 @@ const headline = computed(() => {
     return '暂时取不到今天的情况。'
   }
   if (cards.value.length === 0) {
-    return auth.isTeacher ? '先建一块实验田，设好行数和列数，就能开始记录了。' : '老师还没有建实验田。'
+    return auth.isTeacher ? '先在"季和地块"里建一季、建地块，种上品种就能开始记录了。' : '老师还没有建地块。'
   }
   if (!ind.value) {
     return `${primary.value?.field.name ?? ''}还没有今年的试验${auth.isTeacher ? '，进入平面图新建一个' : ''}。`
@@ -305,16 +314,13 @@ function timeText(at: string): string {
   return date === todayText ? `今天 ${time!.slice(0, 5)}` : `${m}月${d}日 ${time!.slice(0, 5)}`
 }
 
-// ---------- 全部实验田 ----------
+// ---------- 这一季的全部地块 ----------
 
 function progress(s: Screen | null): number {
   const i = s?.indicators
   return i && i.totalPlots > 0 ? Math.round((i.enteredToday / i.totalPlots) * 100) : 0
 }
 
-function onFieldCreated(detail: FieldDetail) {
-  router.push(`/fields/${detail.field.id}`)
-}
 </script>
 
 <template>
@@ -322,7 +328,7 @@ function onFieldCreated(detail: FieldDetail) {
     <PageHeader plain :title="`${greeting}，${name}`" :eyebrow="dateText">
       <template #desc>{{ loading ? '正在看看今天的情况……' : headline }}</template>
       <template v-if="auth.isTeacher && cards.length > 0" #actions>
-        <el-button :icon="Plus" @click="fieldDialog = true">新建实验田</el-button>
+        <el-button :icon="Plus" @click="newLand">季和地块</el-button>
       </template>
     </PageHeader>
 
@@ -351,22 +357,22 @@ function onFieldCreated(detail: FieldDetail) {
     <div v-else-if="cards.length === 0" class="panel">
       <EmptyState
         art="blocks"
-        title="还没有实验田"
-        :desc="auth.isTeacher ? '新建一块实验田：定好有几行几列区块、每块多大、里面分几行几列小区，就会自动生成小区。' : '请老师先建实验田，建好后这里会显示生育期和今天的录入情况。'"
+        title="还没有地块"
+        :desc="auth.isTeacher ? '先在“季和地块”里建一季，再在季里建地块：定好几行几列区块、每块多大、里面分几行几列小区块。' : '请老师先建地块，建好后这里会显示生育期和今天的录入情况。'"
         :size="150"
       >
-        <el-button v-if="auth.isTeacher" class="btn-wheat" :icon="Plus" @click="fieldDialog = true">新建实验田</el-button>
+        <el-button v-if="auth.isTeacher" class="btn-wheat" :icon="Plus" @click="newLand">去建季和地块</el-button>
       </EmptyState>
     </div>
 
     <template v-else-if="primary">
-      <!-- ② 当前实验田 -->
-      <section class="hero fade-up" aria-label="当前实验田">
+      <!-- ② 当前地块 -->
+      <section class="hero fade-up" aria-label="当前地块">
         <div class="hero-main">
           <div class="hero-head">
             <div class="hero-titles">
               <el-dropdown v-if="multiField" trigger="click" @command="switchPrimary">
-                <button type="button" class="hero-eyebrow switch">当前实验田<el-icon><ArrowDown /></el-icon></button>
+                <button type="button" class="hero-eyebrow switch">{{ season?.name ?? '当前地块' }}<el-icon><ArrowDown /></el-icon></button>
                 <template #dropdown>
                   <el-dropdown-menu>
                     <el-dropdown-item v-for="c in cards" :key="c.field.id" :command="c.field.id">
@@ -376,7 +382,7 @@ function onFieldCreated(detail: FieldDetail) {
                   </el-dropdown-menu>
                 </template>
               </el-dropdown>
-              <div v-else class="hero-eyebrow">当前实验田</div>
+              <div v-else class="hero-eyebrow">{{ season?.name ?? '当前地块' }}</div>
               <h3 class="hero-title">{{ primary.field.name }}</h3>
               <div class="hero-meta">
                 <span v-if="primary.screen?.trialName" class="hero-trial">{{ primary.screen.trialName }}</span>
@@ -512,7 +518,7 @@ function onFieldCreated(detail: FieldDetail) {
       </section>
 
       <!-- ⑤ 最新录入 -->
-      <SectionCard class="fade-up" title="最新录入" :sub="multiField ? '所有实验田' : primary.field.name" flush>
+      <SectionCard class="fade-up" title="最新录入" :sub="multiField ? '这一季的地块' : primary.field.name" flush>
         <template #actions>
           <el-button v-if="modules.isOn('data')" link type="primary" @click="openData(primary.field.id)">
             去数据查看<el-icon class="el-icon--right"><ArrowRight /></el-icon>
@@ -527,7 +533,7 @@ function onFieldCreated(detail: FieldDetail) {
               <th>项目</th>
               <th>小区</th>
               <th>结果</th>
-              <th v-if="multiField">实验田</th>
+              <th v-if="multiField">地块</th>
             </tr>
           </thead>
           <tbody>
@@ -546,10 +552,10 @@ function onFieldCreated(detail: FieldDetail) {
         </table>
       </SectionCard>
 
-      <!-- ⑥ 全部实验田 -->
-      <section v-if="multiField" class="block fade-up" aria-label="全部实验田">
+      <!-- ⑥ 这一季的全部地块 -->
+      <section v-if="multiField" class="block fade-up" aria-label="这一季的地块">
         <div class="block-head">
-          <h3>全部实验田</h3>
+          <h3>{{ season?.name ?? '' }}的地块</h3>
           <span class="faint">{{ cards.length }} 块 · 点卡片进入平面图</span>
         </div>
         <div class="field-grid">
@@ -581,16 +587,15 @@ function onFieldCreated(detail: FieldDetail) {
               </div>
             </div>
           </article>
-          <button v-if="auth.isTeacher" type="button" class="fcard add" @click="fieldDialog = true">
+          <button v-if="auth.isTeacher" type="button" class="fcard add" @click="newLand">
             <img :src="blocksArt" alt="" class="add-art" draggable="false">
-            <span class="add-text"><el-icon><Plus /></el-icon>新建实验田</span>
-            <span class="add-hint">区块、道路、小区一次设好</span>
+            <span class="add-text"><el-icon><Plus /></el-icon>新建地块</span>
+            <span class="add-hint">在季和地块里建，照着以前的地块或从空白开始</span>
           </button>
         </div>
       </section>
     </template>
 
-    <FieldFormDialog v-model="fieldDialog" @saved="onFieldCreated" />
   </div>
 </template>
 

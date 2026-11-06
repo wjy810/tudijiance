@@ -85,6 +85,20 @@ function blockPlots(detail) {
   return map
 }
 
+/** 季：同名的已经有了（比如品种比较的演示数据建过）就接着用，把"接着哪几季"合起来 */
+async function season(name, startDate, endDate, remark, followIds) {
+  const views = await api('GET', '/api/seasons')
+  const found = views.find((v) => v.season.name === name)
+  if (found) {
+    const ids = [...new Set([...found.followIds, ...followIds])]
+    await api('PUT', `/api/seasons/${found.season.id}`, {
+      name, startDate: found.season.startDate, endDate: found.season.endDate, remark: found.season.remark, followIds: ids,
+    })
+    return found.season
+  }
+  return (await api('POST', '/api/seasons', { name, startDate, endDate, remark, followIds })).season
+}
+
 let traits = []
 const traitId = (code) => {
   const t = traits.find((x) => x.trait.code === code)
@@ -116,6 +130,10 @@ async function recordLine(trialId, plotIds, p, dates) {
   }
 }
 
+async function trialOf(seasonId, fieldId) {
+  return (await api('GET', '/api/seasons')).find((v) => v.season.id === seasonId).fields.find((f) => f.id === fieldId).trialId
+}
+
 async function main() {
   await login('admin', ADMIN_PASSWORD)
   const users = await api('GET', '/api/users')
@@ -125,19 +143,17 @@ async function main() {
     }
   }
   await login('laoshi', DEMO_PASSWORD)
-  const seasons = await api('GET', '/api/seasons')
-  if (seasons.some((s) => s.season.name === '2024-2025 年度大田')) {
+  const lines = await api('GET', '/api/lines?keyword=25-001')
+  if (lines.length > 0) {
     console.log('育种演示数据已经有了，跳过。')
     return
   }
   traits = await api('GET', '/api/traits')
 
   // ---------- 第一季：全新开始 ----------
-  const s1 = (await api('POST', '/api/seasons', {
-    name: '2024-2025 年度大田', startDate: '2024-10-12', endDate: '2025-06-08', remark: null, followIds: [],
-  })).season
+  const s1 = await season('2024-2025 年度大田', '2024-10-12', '2025-06-08', null, [])
   const east1 = await api('POST', `/api/seasons/${s1.id}/fields`, { name: '东地', layout: layout(2, 3, 2, 3), location: '学校农场东区' })
-  const t1 = (await api('GET', '/api/seasons')).find((v) => v.season.id === s1.id).fields[0].trialId
+  const t1 = await trialOf(s1.id, east1.field.id)
   const b1 = blockPlots(east1)
 
   const founders = await api('POST', '/api/lines/founders', {
@@ -192,11 +208,9 @@ async function main() {
   console.log(`第一季：6 个原始材料，选株 ${sel.map((s) => s.code).join('、')}，杂交 ${[c1, c2, c3].map((c) => c.code).join('、')}`)
 
   // ---------- 第二季：夏繁，只带走杂交组合 ----------
-  const s2 = (await api('POST', '/api/seasons', {
-    name: '2025 夏繁', startDate: '2025-06-20', endDate: '2025-09-25', remark: '温室加代', followIds: [s1.id],
-  })).season
+  const s2 = await season('2025 夏繁', '2025-06-20', '2025-09-25', '温室加代', [s1.id])
   const green = await api('POST', `/api/seasons/${s2.id}/fields`, { name: '温室', layout: layout(1, 2, 2, 3, 4, 8) })
-  const t2 = (await api('GET', '/api/seasons')).find((v) => v.season.id === s2.id).fields[0].trialId
+  const t2 = await trialOf(s2.id, green.field.id)
   const bg = blockPlots(green)
   await plant(green.field.id, bg.B1.slice(0, 3), c1.id)
   await plant(green.field.id, bg.B1.slice(3), c2.id)
@@ -207,9 +221,7 @@ async function main() {
   await recordLine(t2, bg.B2.slice(0, 3), { height: 79, tgw: 0, yieldKg: 0 }, d2)
 
   // ---------- 第三季：接着去年大田和夏繁 ----------
-  const s3 = (await api('POST', '/api/seasons', {
-    name: '2025-2026 年度大田', startDate: '2025-10-10', endDate: '2026-06-06', remark: null, followIds: [s1.id, s2.id],
-  })).season
+  const s3 = await season('2025-2026 年度大田', '2025-10-10', '2026-06-06', null, [s1.id, s2.id])
   const east3 = await api('POST', `/api/seasons/${s3.id}/fields`, { name: '东地', copyFromFieldId: fid1 })
   const west3 = await api('POST', `/api/seasons/${s3.id}/fields`, { name: '西地', layout: layout(1, 2, 3, 3) })
   const lands3 = (await api('GET', '/api/seasons')).find((v) => v.season.id === s3.id).fields
@@ -249,11 +261,9 @@ async function main() {
   console.log(`第三季：从 ${c1.code} 选出 ${sel3.map((s) => s.code).join('、')}，杂交 ${c4.code}（${c4.pedigree}）、${c5.code}`)
 
   // ---------- 第四季：刚播种 ----------
-  const s4 = (await api('POST', '/api/seasons', {
-    name: '2026-2027 年度大田', startDate: '2026-10-08', endDate: '2027-06-05', remark: null, followIds: [s3.id],
-  })).season
+  const s4 = await season('2026-2027 年度大田', '2026-10-08', '2027-06-05', null, [s3.id])
   const east4 = await api('POST', `/api/seasons/${s4.id}/fields`, { name: '东地', copyFromFieldId: east3.field.id })
-  const t4 = (await api('GET', '/api/seasons')).find((v) => v.season.id === s4.id).fields[0].trialId
+  const t4 = await trialOf(s4.id, east4.field.id)
   const b4 = blockPlots(east4)
   await plant(east4.field.id, b4.B1.slice(0, 2), sel3[0].id)
   await plant(east4.field.id, b4.B1.slice(2, 4), sel3[1].id)

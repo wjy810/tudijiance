@@ -1,12 +1,13 @@
 <script setup lang="ts">
-// 品系库：所有品系（原始材料、杂交组合、选株后代），按名称、曾用名、编号、系谱式找；点开看详情
+// 品系库：所有品种和品系（原始材料、杂交组合、选株后代），按名称、曾用名、编号、系谱式找；点开看详情。
+// 原来的"品种"页并进了这里：原始材料就是品种，统一编号、选育单位、对照类型在详情里改
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 
 import { lineApi, type LineKind, type LineRow, type LineStatus } from '@/shared/api'
-import { LINE_KIND, LINE_STATUS } from '@/shared/labels'
+import { CONTROL_TYPE, LINE_KIND, LINE_STATUS } from '@/shared/labels'
 import { byCode, latestGeneration, naturalCompare } from '@/shared/pedigree'
 import PageHeader from '@/desktop/components/PageHeader.vue'
 import FounderDialog from '@/desktop/components/breeding/FounderDialog.vue'
@@ -85,14 +86,14 @@ const sortName = (a: LineRow, b: LineRow) => naturalCompare(a.name, b.name)
 
 <template>
   <div class="page">
-    <PageHeader title="品系库" eyebrow="育种">
+    <PageHeader title="品系库" eyebrow="品种">
       <template #desc>
-        所有品系：原始材料、杂交组合、选株后代。共 {{ counts.all }} 个，在用 {{ counts.active }} 个，淘汰 {{ counts.dropped }} 个。
-        编号建好后不变，改名后旧名留作曾用名。
+        所有品种和品系：原始材料（外引、已有的品种）、杂交组合、选株后代。共 {{ counts.all }} 个，在用 {{ counts.active }} 个，淘汰 {{ counts.dropped }} 个。
+        编号建好后不变，改名后旧名留作曾用名；标为对照的在统计时作为比较基准。
       </template>
       <template v-if="auth.isTeacher" #actions>
         <el-button @click="crossDialog = true">杂交</el-button>
-        <el-button type="primary" :icon="Plus" @click="founderDialog = true">新建原始材料</el-button>
+        <el-button type="primary" :icon="Plus" @click="founderDialog = true">新建品种</el-button>
       </template>
     </PageHeader>
 
@@ -128,6 +129,7 @@ const sortName = (a: LineRow, b: LineRow) => naturalCompare(a.name, b.name)
         <el-table-column label="名称" min-width="150" sortable :sort-method="sortName">
           <template #default="{ row }">
             <b>{{ row.name }}</b>
+            <el-tag v-if="row.controlType" size="small" type="danger" effect="plain" class="ck">{{ CONTROL_TYPE[row.controlType as keyof typeof CONTROL_TYPE] }}</el-tag>
             <div v-if="row.formerNames" class="former">曾用名：{{ row.formerNames }}</div>
           </template>
         </el-table-column>
@@ -189,6 +191,10 @@ const sortName = (a: LineRow, b: LineRow) => naturalCompare(a.name, b.name)
 
 .mono {
   font-family: var(--font-mono);
+}
+
+.ck {
+  margin-left: 6px;
 }
 
 .former {

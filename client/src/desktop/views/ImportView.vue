@@ -409,8 +409,8 @@ const orientationHelp = computed(() => settings.orientation === 'COLUMNS'
     <section v-if="step === 0" class="panel panel-pad">
       <div class="panel-title">导入到哪个试验</div>
       <div class="pick">
-        <el-select :model-value="picker.fieldId.value" placeholder="实验田" class="w200" @update:model-value="picker.selectField">
-          <el-option v-for="f in picker.fields.value" :key="f.id" :value="f.id" :label="f.name" />
+        <el-select :model-value="picker.fieldId.value" placeholder="地块" class="w200" @update:model-value="picker.selectField">
+          <el-option v-for="f in picker.fields.value" :key="f.id" :value="f.id" :label="picker.fieldLabel(f)" />
         </el-select>
         <el-select v-model="picker.trialId.value" placeholder="试验" class="w280" no-data-text="这块地还没有试验，先在平面图上新建">
           <el-option v-for="t in picker.trials.value" :key="t.id" :value="t.id" :label="`${t.seasonYear} 年 · ${t.name}`" />

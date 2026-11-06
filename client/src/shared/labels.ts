@@ -44,7 +44,7 @@ export const TRIAL_TYPE_CHOICES: Record<Exclude<TrialType, 'BREEDING'>, string> 
 
 export const TRIAL_TYPE: Record<TrialType, string> = {
   ...TRIAL_TYPE_CHOICES,
-  BREEDING: '育种地块',
+  BREEDING: '育种圃',
 }
 
 export const LINE_KIND: Record<LineKind, string> = {

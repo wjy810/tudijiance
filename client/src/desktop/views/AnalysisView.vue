@@ -7,9 +7,10 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Close, Delete, Download, DocumentAdd, Picture, Plus, Search, Select } from '@element-plus/icons-vue'
 
 import {
-  analysisApi, fieldApi, trialApi, type AnalysisAgg, type AnalysisDimension, type AnalysisResult, type Field,
+  analysisApi, fieldApi, seasonApi, trialApi, type AnalysisAgg, type AnalysisDimension, type AnalysisResult, type Field,
   type SavedChart, type TraitCategory, type TraitView, type Trial,
 } from '@/shared/api'
+import { latestPerName, seasonMap } from '@/shared/lands'
 import { saveFile } from '@/shared/api/http'
 import {
   AGG_LABEL, CHART_TYPES, DIMENSION_LABEL, PRESETS, buildOption, chartProblem, dimensionRole, emptyScope, toQuery,
@@ -52,7 +53,16 @@ const chartId = ref<number | null>(null)
 onMounted(async () => {
   try {
     await Promise.all([catalog.loadTraits(), catalog.loadVarieties()])
-    fields.value = await fieldApi.list()
+    // 各季的同名地块（各季的"东地"）连起来算一块地，只列最新那块
+    const [list, views] = await Promise.all([fieldApi.list(), seasonApi.list().catch(() => [])])
+    const fromMap = Number(route.query.fieldId)
+    const seasons = seasonMap(views)
+    fields.value = latestPerName(list, seasons)
+    // 从平面图带过来的那块地块不是最新一季的：换成同名的最新那块（范围一样，各季都算）
+    const same = list.find((f) => f.id === fromMap)
+    if (same && !fields.value.some((f) => f.id === fromMap)) {
+      fields.value = fields.value.map((f) => (f.name === same.name ? same : f))
+    }
     saved.value = await analysisApi.charts<ChartConfig>()
     const q = route.query
     const fieldId = Number(q.fieldId) || fields.value[0]?.id || null
@@ -73,7 +83,7 @@ onMounted(async () => {
 })
 
 async function loadTrials() {
-  trials.value = config.scope.fieldId ? await trialApi.list(config.scope.fieldId) : []
+  trials.value = config.scope.fieldId ? await trialApi.list(config.scope.fieldId, true) : []
 }
 
 watch(() => config.scope.fieldId, async (id, old) => {
@@ -282,7 +292,7 @@ function setChartType(t: ChartType) {
     <aside class="left panel">
       <div class="block">
         <div class="block-title">数据范围</div>
-        <el-select v-model="config.scope.fieldId" placeholder="实验田" class="full">
+        <el-select v-model="config.scope.fieldId" placeholder="地块（各季同名的一起算）" class="full">
           <el-option v-for="f in fields" :key="f.id" :value="f.id" :label="f.name" />
         </el-select>
 
@@ -295,7 +305,7 @@ function setChartType(t: ChartType) {
 
         <div class="sub-title">品种<span class="muted">{{ config.scope.varietyIds.length ? `选了 ${config.scope.varietyIds.length} 个` : '全部' }}</span></div>
         <el-select v-model="config.scope.varietyIds" multiple collapse-tags collapse-tags-tooltip filterable clearable placeholder="全部品种" class="full">
-          <el-option v-for="v in catalog.comparisonVarieties" :key="v.id" :value="v.id" :label="v.name" />
+          <el-option v-for="v in catalog.varieties" :key="v.id" :value="v.id" :label="v.name" />
         </el-select>
 
         <div class="sub-title">重复<span class="muted">{{ config.scope.replicates.length ? '' : '全部' }}</span></div>

@@ -84,8 +84,8 @@ export const authApi = {
 }
 
 export const fieldApi = {
-  /** scope：不填只列原来品种比较的实验田；breeding 只列育种的地块；all 全部 */
-  list: (scope?: 'breeding' | 'all') => data<Field[]>(http.get('/api/fields', { params: { scope } })),
+  /** scope：不填或 all 全部地块；breeding 只列季里的地块；comparison 只列没分季的老实验田 */
+  list: (scope?: 'breeding' | 'all' | 'comparison') => data<Field[]>(http.get('/api/fields', { params: { scope } })),
   detail: (id: number) => data<FieldDetail>(http.get(`/api/fields/${id}`)),
   create: (req: FieldRequest) => data<FieldDetail>(http.post('/api/fields', req)),
   update: (id: number, req: FieldRequest) => data<FieldDetail>(http.put(`/api/fields/${id}`, req)),
@@ -104,7 +104,9 @@ export const varietyApi = {
 }
 
 export const trialApi = {
-  list: (fieldId?: number) => data<Trial[]>(http.get('/api/trials', { params: { fieldId } })),
+  /** across：同名地块各季的试验都列出来（自助分析选年份用） */
+  list: (fieldId?: number, across = false) =>
+    data<Trial[]>(http.get('/api/trials', { params: { fieldId, across: across || undefined } })),
   create: (req: TrialRequest) => data<Trial>(http.post('/api/trials', req)),
   update: (id: number, req: TrialRequest) => data<Trial>(http.put(`/api/trials/${id}`, req)),
   remove: (id: number) => data<void>(http.delete(`/api/trials/${id}`)),

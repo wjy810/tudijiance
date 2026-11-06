@@ -853,6 +853,10 @@ export interface LineRow {
   remark: string | null
   tagNo: string | null
   seqNo: number | null
+  /** 统一编号（标准允许实名或密码编号），和品系编号不是一回事 */
+  varietyCode: string | null
+  /** 对照类型：统计时作为比较基准 */
+  controlType: ControlType | null
 }
 
 export interface LineGraph {
@@ -912,6 +916,8 @@ export interface LineUpdateRequest {
   ecotype: Ecotype | null
   qualityType: QualityType | null
   remark: string | null
+  varietyCode: string | null
+  controlType: ControlType | null
 }
 
 export interface PlantingRow {

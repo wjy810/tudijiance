@@ -7,7 +7,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Download, Edit, Location, Plus } from '@element-plus/icons-vue'
 
 import { lineApi, type LineDetail, type LineRow, type LineStatus, type PlantingRow } from '@/shared/api'
-import { LINE_KIND, LINE_STATUS, ECOTYPE, QUALITY_TYPE, TRAIT_CATEGORY } from '@/shared/labels'
+import { CONTROL_TYPE, LINE_KIND, LINE_STATUS, ECOTYPE, QUALITY_TYPE, TRAIT_CATEGORY } from '@/shared/labels'
 import { ancestors, childrenMap, descendants, lineLabel } from '@/shared/pedigree'
 import PedigreeCanvas from '@/desktop/components/breeding/PedigreeCanvas.vue'
 import LineEditDialog from '@/desktop/components/breeding/LineEditDialog.vue'
@@ -235,6 +235,8 @@ function onCrossSaved(r: { line: LineRow }) {
             <span v-if="line.ecotype">{{ ECOTYPE[line.ecotype] }}</span>
             <span v-if="line.qualityType">{{ QUALITY_TYPE[line.qualityType] }}</span>
             <span v-if="line.breeder">来源：{{ line.breeder }}</span>
+            <span v-if="line.varietyCode">统一编号：{{ line.varietyCode }}</span>
+            <el-tag v-if="line.controlType" size="small" type="danger" effect="plain">{{ CONTROL_TYPE[line.controlType] }}</el-tag>
             <span v-if="line.remark">{{ line.remark }}</span>
           </div>
         </div>

@@ -33,7 +33,6 @@ const router = createRouter({
           path: 'home', name: 'home-dashboard', component: () => import('@/desktop/views/HomeView.vue'),
           meta: { roles: RECORDERS },
         },
-        { path: 'fields', redirect: '/home' },
         {
           path: 'fields/:id', name: 'field-map', component: () => import('@/desktop/views/FieldMapView.vue'),
           meta: { roles: RECORDERS },
@@ -78,10 +77,10 @@ const router = createRouter({
           path: 'analysis', name: 'analysis', component: () => import('@/desktop/views/AnalysisView.vue'),
           meta: { roles: RECORDERS, module: 'analysis' },
         },
-        {
-          path: 'varieties', name: 'varieties', component: () => import('@/desktop/views/VarietiesView.vue'),
-          meta: { roles: RECORDERS },
-        },
+        // 品种并进了品系库
+        { path: 'varieties', redirect: '/breeding/lines' },
+        // 原来的"实验田"入口
+        { path: 'fields', redirect: '/breeding/seasons' },
         {
           path: 'import', name: 'import', component: () => import('@/desktop/views/ImportView.vue'),
           meta: { roles: ['TEACHER'], module: 'import' },

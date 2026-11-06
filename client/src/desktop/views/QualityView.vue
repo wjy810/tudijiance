@@ -147,9 +147,9 @@ const checkedText = computed(() => (report.value ? report.value.checkedAt.slice(
     </PageHeader>
 
     <div class="filter-bar panel">
-      <span class="filter-label">实验田</span>
-      <el-select v-model="picker.fieldId.value" placeholder="选择实验田" style="width: 200px">
-        <el-option v-for="f in picker.fields.value" :key="f.id" :value="f.id" :label="f.name" />
+      <span class="filter-label">地块</span>
+      <el-select v-model="picker.fieldId.value" placeholder="选择地块" style="width: 200px">
+        <el-option v-for="f in picker.fields.value" :key="f.id" :value="f.id" :label="picker.fieldLabel(f)" />
       </el-select>
       <span class="filter-label">试验</span>
       <el-select v-model="picker.trialId.value" placeholder="还没有试验" style="width: 280px" :disabled="picker.trials.value.length === 0">

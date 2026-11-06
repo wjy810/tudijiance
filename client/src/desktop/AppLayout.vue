@@ -9,7 +9,8 @@ import {
   DocumentChecked, EditPen, Link as LinkIcon, Lock, Menu, Monitor, PieChart, Search, SwitchButton, Tickets, TopRight, Upload, User,
 } from '@element-plus/icons-vue'
 
-import { authApi, fieldApi, type Field, type Role } from '@/shared/api'
+import { authApi, fieldApi, seasonApi, type Field, type Role, type Season } from '@/shared/api'
+import { currentSeason, landLabel, seasonMap, sortLands } from '@/shared/lands'
 import { ROLE } from '@/shared/labels'
 import { useAuthStore } from '@/stores/auth'
 import { useModuleStore } from '@/stores/modules'
@@ -42,35 +43,39 @@ const RECORDERS: Role[] = ['TEACHER', 'STUDENT']
 
 const GROUPS: { title: string; items: MenuItem[] }[] = [
   {
-    title: '育种',
-    items: [
-      { path: '/breeding/seasons', label: '季和地块', icon: Calendar, roles: RECORDERS, module: 'breeding' },
-      { path: '/breeding/lines', label: '品系库', icon: Notebook, roles: RECORDERS, module: 'breeding' },
-      { path: '/breeding/graph', label: '系谱图', icon: Share, roles: RECORDERS, module: 'breeding' },
-    ],
-  },
-  {
-    title: '品种比较',
+    title: '日常',
     items: [
       { path: '/home', label: '首页', icon: HomeFilled, roles: RECORDERS },
+      { path: '/breeding/seasons', label: '季和地块', icon: Calendar, roles: RECORDERS, module: 'breeding' },
       { path: '/data', label: '数据查看', icon: Document, roles: RECORDERS, module: 'data' },
-      { path: '/stats', label: '统计分析', icon: DataAnalysis, roles: RECORDERS, module: 'stats' },
-      { path: '/analysis', label: '自助分析', icon: PieChart, roles: RECORDERS, module: 'analysis' },
       { path: '/quality', label: '数据质量', icon: DocumentChecked, roles: RECORDERS, module: 'quality' },
-      { path: '/varieties', label: '品种', icon: Collection, roles: RECORDERS },
-      { path: '/import', label: '导入历史表格', icon: Upload, roles: ['TEACHER'], module: 'import' },
-      { path: '/screen', label: '数据大屏', icon: Monitor, roles: ['SYS_ADMIN', 'TEACHER', 'STUDENT'], module: 'screen' },
-    ],
-  },
-  {
-    title: '共用',
-    items: [
       {
         path: '/corrections', label: '更正申请', icon: EditPen, roles: RECORDERS, module: 'corrections',
         // 老师：待审核的；学生：自己还没处理的
         badge: () => corrections.summary?.pending,
       },
+    ],
+  },
+  {
+    title: '品种',
+    items: [
+      { path: '/breeding/lines', label: '品系库', icon: Notebook, roles: RECORDERS, module: 'breeding' },
+      { path: '/breeding/graph', label: '系谱图', icon: Share, roles: RECORDERS, module: 'breeding' },
+    ],
+  },
+  {
+    title: '统计',
+    items: [
+      { path: '/stats', label: '统计分析', icon: DataAnalysis, roles: RECORDERS, module: 'stats' },
+      { path: '/analysis', label: '自助分析', icon: PieChart, roles: RECORDERS, module: 'analysis' },
+      { path: '/screen', label: '数据大屏', icon: Monitor, roles: ['SYS_ADMIN', 'TEACHER', 'STUDENT'], module: 'screen' },
+    ],
+  },
+  {
+    title: '资料',
+    items: [
       { path: '/traits', label: '录入项目', icon: Tickets, roles: RECORDERS },
+      { path: '/import', label: '导入历史表格', icon: Upload, roles: ['TEACHER'], module: 'import' },
     ],
   },
   {
@@ -100,10 +105,10 @@ const groups = computed(() => {
   return list.filter((g) => g.items.length > 0)
 })
 
-// 平面图是从首页点进去的，菜单仍然高亮"首页"；育种的地块高亮"季和地块"
+// 平面图高亮"季和地块"，记载本高亮"首页"
 const activeMenu = computed(() => {
-  if (route.path.startsWith('/fields/') && currentLand.value) return '/breeding/seasons'
-  if (route.path.startsWith('/fields') || route.path.startsWith('/trials')) return '/home'
+  if (route.path.startsWith('/fields')) return '/breeding/seasons'
+  if (route.path.startsWith('/trials')) return '/home'
   if (route.path.startsWith('/breeding/')) {
     return route.path.startsWith('/breeding/lines') ? '/breeding/lines' : '/' + route.path.split('/').slice(1, 3).join('/')
   }
@@ -124,23 +129,32 @@ watch(collapsed, (v) => localStorage.setItem(COLLAPSE_KEY, v ? '1' : '0'))
 
 // ---------- 实验田（顶栏切换、快速跳转用） ----------
 const allFields = ref<Field[]>([])
-/** 原来品种比较的实验田（顶栏切换用） */
-const fields = computed(() => allFields.value.filter((f) => !f.seasonId))
-/** 育种的地块 */
-const lands = computed(() => allFields.value.filter((f) => !!f.seasonId))
+const seasons = ref(new Map<number, Season>())
+/** 全部地块，最新一季的在前 */
+const fields = computed(() => sortLands(allFields.value, seasons.value))
+const fieldLabel = (f: Field) => landLabel(f, seasons.value)
+/** 顶栏切换：现在这一季的地块 */
+const seasonNow = computed(() => currentSeason([...seasons.value.values()]))
+const switchFields = computed(() => {
+  const now = seasonNow.value
+  const list = now ? fields.value.filter((f) => f.seasonId === now.id) : fields.value
+  return list.length ? list : fields.value.slice(0, 12)
+})
 
 async function loadFields() {
   if (!auth.canRecord) return
   try {
-    allFields.value = await fieldApi.list('all')
+    const [list, views] = await Promise.all([fieldApi.list('all'), seasonApi.list().catch(() => [])])
+    seasons.value = seasonMap(views)
+    allFields.value = list
   } catch {
-    // 顶栏的实验田列表取不到不影响页面本身
+    // 顶栏的地块列表取不到不影响页面本身
   }
 }
 
-/** 正在看的是育种的地块 */
+/** 正在看的地块 */
 const currentLand = computed(() =>
-  (route.path.startsWith('/fields/') ? lands.value.find((f) => f.id === Number(route.params.id)) ?? null : null))
+  (route.path.startsWith('/fields/') ? allFields.value.find((f) => f.id === Number(route.params.id)) ?? null : null))
 
 /** 当前实验田：在平面图里就是正在看的那块，否则是上次打开的那块 */
 const currentField = computed(() => {
@@ -153,17 +167,13 @@ const currentField = computed(() => {
 })
 
 function openField(id: number) {
-  router.push(`/fields/${id}`)
+  router.push(id > 0 ? `/fields/${id}` : '/breeding/seasons')
 }
 
 // ---------- 面包屑 ----------
 const crumbs = computed<{ label: string; to?: string }[]>(() => {
-  if (route.path.startsWith('/fields/') && currentLand.value) {
-    return [{ label: '季和地块', to: '/breeding/seasons' }, { label: currentLand.value.name }]
-  }
   if (route.path.startsWith('/fields/')) {
-    const f = fields.value.find((x) => x.id === Number(route.params.id))
-    return [{ label: '首页', to: '/home' }, { label: f?.name ?? '实验田平面图' }]
+    return [{ label: '季和地块', to: '/breeding/seasons' }, { label: currentLand.value ? fieldLabel(currentLand.value) : '平面图' }]
   }
   if (route.path.startsWith('/breeding/lines/')) {
     return [{ label: '育种' }, { label: '品系库', to: '/breeding/lines' }, { label: '品系详情' }]
@@ -192,20 +202,11 @@ const paletteItems = computed<PaletteItem[]>(() => [
   }))),
   ...fields.value.map((f) => ({
     id: 'field:' + f.id,
-    group: '实验田平面图',
-    label: f.name,
-    desc: `${f.rowCount} 行 × ${f.colCount} 列${f.location ? ' · ' + f.location : ''}`,
+    group: '地块平面图',
+    label: fieldLabel(f),
+    desc: f.location ?? '',
     icon: Grid,
-    keywords: '平面图 录入',
-    run: () => openField(f.id),
-  })),
-  ...lands.value.map((f) => ({
-    id: 'land:' + f.id,
-    group: '育种地块',
-    label: f.name,
-    desc: '育种地块',
-    icon: Calendar,
-    keywords: '育种 地块 平面图 种植',
+    keywords: '平面图 录入 种植 地块 实验田',
     run: () => openField(f.id),
   })),
   { id: 'act:password', group: '账号', label: '修改密码', icon: Lock, run: () => openPassword() },
@@ -375,7 +376,7 @@ async function savePassword() {
         <div class="topbar-right">
           <button type="button" class="search-trigger" @click="openPalette">
             <el-icon><Search /></el-icon>
-            <span class="st-text">搜索页面、实验田</span>
+            <span class="st-text">搜索页面、地块</span>
             <span class="st-keys"><kbd>Ctrl</kbd><kbd>K</kbd></span>
           </button>
 
@@ -387,23 +388,26 @@ async function savePassword() {
             @command="openField"
             @visible-change="(v: boolean) => v && loadFields()"
           >
-            <button type="button" class="field-switch" title="打开实验田平面图">
+            <button type="button" class="field-switch" title="打开地块平面图">
               <span class="fs-icon"><el-icon><Grid /></el-icon></span>
               <span class="fs-text">
-                <span class="fs-caption">平面图</span>
+                <span class="fs-caption">{{ currentField.seasonId ? seasons.get(currentField.seasonId)?.name ?? '平面图' : '平面图' }}</span>
                 <span class="fs-name">{{ currentField.name }}</span>
               </span>
               <el-icon class="fs-arrow"><ArrowDown /></el-icon>
             </button>
             <template #dropdown>
-              <div class="field-menu-head">打开哪块实验田的平面图</div>
+              <div class="field-menu-head">{{ seasonNow ? `${seasonNow.name}的地块` : '打开哪块地块的平面图' }}</div>
               <el-dropdown-menu>
-                <el-dropdown-item v-for="f in fields" :key="f.id" :command="f.id">
+                <el-dropdown-item v-for="f in switchFields" :key="f.id" :command="f.id">
                   <span class="fm-item">
                     <span class="fm-name">{{ f.name }}</span>
-                    <span class="fm-meta">{{ f.rowCount }} 行 × {{ f.colCount }} 列{{ f.location ? ' · ' + f.location : '' }}</span>
+                    <span class="fm-meta">{{ f.seasonId ? seasons.get(f.seasonId)?.name ?? '' : '' }}{{ f.location ? ' · ' + f.location : '' }}</span>
                   </span>
                   <el-icon v-if="f.id === currentField.id" class="fm-check"><Check /></el-icon>
+                </el-dropdown-item>
+                <el-dropdown-item divided :command="-1">
+                  <span class="fm-item"><span class="fm-name">别的季、新建地块…</span></span>
                 </el-dropdown-item>
               </el-dropdown-menu>
             </template>
