@@ -226,24 +226,36 @@ function build() {
   root.add(plotMesh)
   applyInstances()
 
-  // 对照关系：小区之间拱起来的虚线
+  // 对照：对照小区描红框，正在看的一组里比较的小区描虚线框（不画连线）
+  const frame = (i: number, color: string, dashed: boolean) => {
+    const r = insts[i]!.rect
+    const y = PLATE + insts[i]!.height + 0.04
+    const g = Math.min(r.w, r.h) * 0.06
+    const pts = [
+      world(r.x + g, r.y + g, y), world(r.x + r.w - g, r.y + g, y), world(r.x + r.w - g, r.y + r.h - g, y),
+      world(r.x + g, r.y + r.h - g, y), world(r.x + g, r.y + g, y),
+    ]
+    const geo = track(new THREE.BufferGeometry().setFromPoints(pts))
+    const mat = dashed
+      ? track(new THREE.LineDashedMaterial({ color, dashSize: 0.3, gapSize: 0.2 }))
+      : track(new THREE.LineBasicMaterial({ color }))
+    const line = new THREE.Line(geo, mat)
+    if (dashed) line.computeLineDistances()
+    root?.add(line)
+  }
+  const ck = new Set<number>()
+  const cmp = new Set<number>()
   for (const link of props.links) {
-    for (const seg of link.segments) {
-      const a = instByPlot.get(seg.from)
-      const b = instByPlot.get(seg.to)
-      if (a == null || b == null) continue
-      const ra = insts[a]!.rect
-      const rb = insts[b]!.rect
-      const pa = world(ra.x + ra.w / 2, ra.y + ra.h / 2, PLATE + insts[a]!.height + 0.05)
-      const pb = world(rb.x + rb.w / 2, rb.y + rb.h / 2, PLATE + insts[b]!.height + 0.05)
-      const mid = pa.clone().add(pb).multiplyScalar(0.5)
-      mid.y += Math.max(0.6 * ex, pa.distanceTo(pb) * 0.25)
-      const curve = new THREE.QuadraticBezierCurve3(pa, mid, pb)
-      const lineGeo = track(new THREE.BufferGeometry().setFromPoints(curve.getPoints(32)))
-      const line = new THREE.Line(lineGeo, track(new THREE.LineDashedMaterial({ color: '#c0562f', dashSize: 0.4, gapSize: 0.25 })))
-      line.computeLineDistances()
-      root.add(line)
-    }
+    link.controlPlotIds.forEach((id) => ck.add(id))
+    if (link.active) link.comparePlotIds.forEach((id) => cmp.add(id))
+  }
+  for (const id of ck) {
+    const i = instByPlot.get(id)
+    if (i != null) frame(i, '#c0562f', false)
+  }
+  for (const id of cmp) {
+    const i = instByPlot.get(id)
+    if (i != null && !ck.has(id)) frame(i, '#8a6118', true)
   }
 
   // 传感器：一根杆子顶上一个球

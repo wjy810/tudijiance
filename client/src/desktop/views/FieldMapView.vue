@@ -744,7 +744,10 @@ const cells = computed(() => {
         if (extra) lines.push(extra)
       }
     }
-    const badge = [variety?.controlType ? 'CK' : '', st?.status === 'ABNORMAL' ? '!' : ''].filter(Boolean).join(' ')
+    const pct = comparePct.value.get(p.id)
+    const badge = [
+      variety?.controlType || controlPlotIds.value.has(p.id) ? 'CK' : '', pct != null ? pctText(pct) : '', st?.status === 'ABNORMAL' ? '!' : '',
+    ].filter(Boolean).join(' ')
     const place = placeById.value.get(p.id) ?? null
     const tip = [
       place ? `${U.value} ${code} · ${place}` : `${U.value} ${code}`,
@@ -794,18 +797,20 @@ function togglePinnedLink(id: number) {
   }
 }
 
-// 平时不画对照虚线。只有单击了一个有对照关系的小区，或者在右侧点了某一组时，才画出这一组。
-// 框选、多选小区（准备录入）时不画，免得虚线挡住小区
-const visibleLinks = computed(() => {
+/**
+ * 现在看的是哪一组对照：右侧点了某一组；或者只选了一个小区，它在哪一组里（优先它是被比较的那一组）
+ */
+const activeLink = computed(() => {
   const links = layout.value?.links ?? []
   if (pinnedLink.value !== null) {
-    return links.filter((link) => link.id === pinnedLink.value)
+    return links.find((link) => link.id === pinnedLink.value) ?? null
   }
   if (selected.value.length !== 1) {
-    return []
+    return null
   }
-  const focus = selected.value[0]
-  return links.filter((link) => link.plots.some((p) => p.plotId === focus))
+  const id = selected.value[0]
+  return links.find((link) => link.plots.some((p) => p.plotId === id && !p.control))
+    ?? links.find((link) => link.plots.some((p) => p.plotId === id)) ?? null
 })
 
 watch(selected, (ids) => {
@@ -814,22 +819,106 @@ watch(selected, (ids) => {
   }
 })
 
+/** 对照小区正好是某个区块的全部试验小区：这个区块是对照组 */
+function controlBlocksOf(controls: number[]): string[] {
+  const l = fieldLayout.value
+  if (!l) {
+    return []
+  }
+  const set = new Set(controls)
+  return l.blocks.filter((b) => {
+    const ids = Object.values(b.inner?.plots ?? {}).filter((id) => plotById.value.get(id)?.kind === 'PLOT')
+    return ids.length > 0 && ids.every((id) => set.has(id))
+  }).map((b) => b.id)
+}
+
+/** 平面图上不画连线：对照描红边（整个区块是对照组时整块描边），点开的一组再把比较的小区描出来 */
 const gridLinks = computed<CanvasLink[]>(() =>
-  visibleLinks.value.map((link) => {
-    const controls = link.plots.filter((p) => p.control).map((p) => plotById.value.get(p.plotId)).filter((p): p is Plot => !!p)
-    // 每个比较的小区连到离它最近的对照小区
-    const segments = link.plots.filter((p) => !p.control).flatMap((lp) => {
-      const p = plotById.value.get(lp.plotId)
-      if (!p || controls.length === 0) {
-        return []
-      }
-      const nearest = controls.reduce((best, c) =>
-        Math.hypot(c.rowNo - p.rowNo, c.colNo - p.colNo) < Math.hypot(best.rowNo - p.rowNo, best.colNo - p.colNo) ? c : best)
-      return [{ from: nearest.id, to: p.id }]
-    })
-    return { id: link.id, label: link.label, segments, controlPlotIds: controls.map((c) => c.id) }
+  (layout.value?.links ?? []).map((link) => {
+    const controls = link.plots.filter((p) => p.control).map((p) => p.plotId)
+    return {
+      id: link.id,
+      label: link.label,
+      controlPlotIds: controls,
+      comparePlotIds: link.plots.filter((p) => !p.control).map((p) => p.plotId),
+      controlBlockIds: controlBlocksOf(controls),
+      active: activeLink.value?.id === link.id,
+    }
   }),
 )
+
+/** 当对照的小区（任何一组里） */
+const controlPlotIds = computed(() => new Set((layout.value?.links ?? []).flatMap((l) => l.plots.filter((p) => p.control).map((p) => p.plotId))))
+
+// ---------- 和对照比 ----------
+
+const compareTraitId = ref<number | null>(null)
+const compareValues = ref(new Map<number, PlotValue>())
+const compareTrait = computed(() => catalog.traitById.get(compareTraitId.value ?? -1)?.trait ?? null)
+
+async function loadCompareValues() {
+  if (!activeLink.value || !trialId.value) {
+    return
+  }
+  if (!compareTraitId.value) {
+    compareTraitId.value = (display.value.view === 'trait' ? display.value.traitId : null)
+      ?? catalog.statTraits.find((t) => t.trait.code === 'yield_per_mu')?.trait.id
+      ?? catalog.statTraits[0]?.trait.id ?? null
+  }
+  if (!compareTraitId.value) {
+    return
+  }
+  try {
+    const list = await observationApi.traitValues(trialId.value, compareTraitId.value)
+    compareValues.value = new Map(list.map((v) => [v.plotId, v]))
+  } catch (e) {
+    compareValues.value = new Map()
+    ElMessage.error((e as Error).message)
+  }
+}
+
+watch([() => activeLink.value?.id, compareTraitId, trialId], loadCompareValues)
+
+const roundTo = (v: number) => Math.round(v * 100) / 100
+
+/** 点开的一组对照：对照的平均值，每个比较的小区比对照高多少（按百分比从高到低） */
+const comparison = computed(() => {
+  const link = activeLink.value
+  if (!link) {
+    return null
+  }
+  const vals = compareValues.value
+  const controls = link.plots.filter((p) => p.control)
+  const ck = controls.map((p) => vals.get(p.plotId)?.value).filter((v): v is number => v != null)
+  const mean = ck.length ? ck.reduce((a, b) => a + b, 0) / ck.length : null
+  const rows = link.plots.filter((p) => !p.control).map((lp) => {
+    const v = vals.get(lp.plotId)
+    const pct = v && mean ? ((v.value - mean) / Math.abs(mean)) * 100 : null
+    const planting = plantingByPlot.value.get(lp.plotId)
+    return {
+      plotId: lp.plotId,
+      code: plotCode(lp.plotId),
+      name: planting?.varietyId ? catalog.varietyById.get(planting.varietyId)?.name ?? '' : '',
+      display: v ? String(roundTo(v.value)) : '没数据',
+      pct,
+    }
+  }).sort((a, b) => (b.pct ?? -Infinity) - (a.pct ?? -Infinity))
+  const blocks = controlBlocksOf(controls.map((p) => p.plotId))
+  const blockName = blocks.length === 1 ? fieldLayout.value?.blocks.find((b) => b.id === blocks[0])?.name ?? '' : ''
+  return {
+    link, rows, mean: mean == null ? null : roundTo(mean), withData: ck.length, controls: controls.length, blockName,
+    better: rows.filter((r) => r.pct != null && r.pct > 0).length,
+  }
+})
+
+const comparePct = computed(() => new Map((comparison.value?.rows ?? []).filter((r) => r.pct != null).map((r) => [r.plotId, r.pct!])))
+
+function pctText(v: number): string {
+  return `${v > 0 ? '+' : ''}${Math.round(v * 10) / 10}%`
+}
+
+const compareShowAll = ref(false)
+watch(() => activeLink.value?.id, () => { compareShowAll.value = false })
 
 // 传感器（第二期）：登记时填的是第几行第几列，画在那个小区的中间
 const DEVICE_COLORS: Record<string, string> = { ONLINE: '#2f9e44', OFFLINE: '#868e96', NEVER: '#f08c00' }
@@ -1187,10 +1276,6 @@ function openLayoutDialog(which: 'variety' | 'link') {
     ElMessage.warning('请选择试验小区（保护区、走道不分配品种）')
     return
   }
-  if (which === 'link' && selectedTrialPlots.value.length < 2) {
-    ElMessage.warning('设对照至少要选 2 个小区：对照小区和要比较的小区')
-    return
-  }
   if (which === 'variety') {
     varietyDialog.value = true
   } else {
@@ -1285,6 +1370,26 @@ async function removeLink(id: number, label: string) {
     onLayoutSaved(await trialApi.deleteLink(trialId.value!, id))
   } catch (e) {
     ElMessage.error((e as Error).message)
+  }
+}
+
+/** 对照是哪些：整个区块写区块名，否则写小区编号 */
+function linkControlText(l: { plots: { plotId: number; control: boolean }[] }): string {
+  const ids = l.plots.filter((p) => p.control).map((p) => p.plotId)
+  const blocks = controlBlocksOf(ids)
+  if (blocks.length > 0) {
+    const names = blocks.map((id) => fieldLayout.value?.blocks.find((b) => b.id === id)?.name ?? '')
+    return `${names.join('、')}（${ids.length} 个）`
+  }
+  return linkPlotsText(ids)
+}
+
+async function onLinkSaved(l: Layout) {
+  onLayoutSaved(l)
+  const last = l.links[l.links.length - 1]
+  if (last) {
+    selected.value = []
+    pinnedLink.value = last.id
   }
 }
 
@@ -2345,26 +2450,68 @@ function runEdit(fn: () => void) {
           </section>
 
           <section v-if="trial" class="panel panel-pad">
-            <div class="panel-title">对照关系<span class="sub">{{ layout?.links.length ?? 0 }} 组</span></div>
+            <div class="panel-title">对照<span class="sub">{{ layout?.links.length ?? 0 }} 组</span></div>
             <div v-if="!layout?.links.length" class="hint">
-              {{ auth.isTeacher ? '在"布置试验"里选中对照小区和要比较的小区，点"设对照"。' : '还没有设对照关系。' }}
+              {{ auth.isTeacher
+                ? `在"布置试验"里选中对照的${U}（或点区块名称牌选整个区块），点"设对照"。`
+                : '还没有设对照。' }}
             </div>
             <div
               v-for="l in layout?.links ?? []"
               :key="l.id"
               class="link-row"
-              :class="{ active: pinnedLink === l.id }"
+              :class="{ active: activeLink?.id === l.id }"
               @click="togglePinnedLink(l.id)"
             >
               <div>
-                <div class="link-label">{{ l.label }}</div>
+                <div class="link-label"><i class="ck-dot" />{{ l.label }}</div>
                 <div class="hint">
-                  对照 {{ linkPlotsText(l.plots.filter((p) => p.control).map((p) => p.plotId)) }} ·
-                  比较 {{ linkPlotsText(l.plots.filter((p) => !p.control).map((p) => p.plotId)) }}
+                  对照 {{ linkControlText(l) }} · 和 {{ l.plots.filter((p) => !p.control).length }} 个{{ U }}比
                 </div>
               </div>
               <el-button v-if="auth.isTeacher && mode === 'layout'" link type="danger" size="small" @click.stop="removeLink(l.id, l.label)">删除</el-button>
             </div>
+            <div v-if="layout?.links.length && !activeLink" class="hint">点一组看各{{ U }}比对照高多少。</div>
+          </section>
+
+          <section v-if="trial && comparison" class="panel panel-pad compare">
+            <div class="panel-title">和对照比<span class="sub">{{ comparison.link.label }}</span></div>
+            <el-select v-model="compareTraitId" size="small" filterable placeholder="选项目" class="compare-trait">
+              <el-option-group v-for="g in metricGroups" :key="g.label" :label="g.label">
+                <el-option
+                  v-for="t in g.items" :key="t.trait.id" :value="t.trait.id"
+                  :label="t.trait.unit && t.trait.unit !== '级' ? `${t.trait.name}（${t.trait.unit}）` : t.trait.name"
+                />
+              </el-option-group>
+            </el-select>
+            <div class="ck-mean">
+              <span class="ck-tag">CK</span>
+              <span>{{ comparison.blockName ? `${comparison.blockName}平均` : comparison.controls > 1 ? '对照平均' : '对照' }}</span>
+              <b class="num">{{ comparison.mean ?? '没数据' }}</b>
+              <span class="faint">{{ compareTrait?.unit && compareTrait.unit !== '级' ? compareTrait.unit : '' }}</span>
+              <span v-if="comparison.controls > 1" class="faint">（{{ comparison.withData }}/{{ comparison.controls }} 个有数据）</span>
+            </div>
+            <div v-if="comparison.mean != null" class="hint">{{ comparison.rows.length }} 个里 {{ comparison.better }} 个比对照高</div>
+            <div class="cmp-list">
+              <button
+                v-for="r in (compareShowAll ? comparison.rows : comparison.rows.slice(0, 10))" :key="r.plotId" type="button" class="cmp-row"
+                @click="selected = [r.plotId]"
+              >
+                <span class="cmp-code num">{{ r.code }}</span>
+                <span class="cmp-name">{{ r.name }}</span>
+                <span class="cmp-val num">{{ r.display }}</span>
+                <span class="cmp-bar">
+                  <i
+                    v-if="r.pct != null" :class="r.pct >= 0 ? 'up' : 'down'"
+                    :style="{ width: `${Math.min(50, Math.abs(r.pct) * 2.5)}%`, [r.pct >= 0 ? 'left' : 'right']: '50%' }"
+                  />
+                </span>
+                <span class="cmp-pct num" :class="r.pct == null ? 'faint' : r.pct >= 0 ? 'up' : 'down'">{{ r.pct == null ? '—' : pctText(r.pct) }}</span>
+              </button>
+            </div>
+            <el-button v-if="comparison.rows.length > 10" link type="primary" size="small" @click="compareShowAll = !compareShowAll">
+              {{ compareShowAll ? '收起' : `全部 ${comparison.rows.length} 个` }}
+            </el-button>
           </section>
 
           <section v-if="!isBreeding" class="panel panel-pad tips">
@@ -2467,7 +2614,7 @@ function runEdit(fn: () => void) {
         <template v-if="menuPlot">
           <div class="menu-sep" />
           <div v-if="trial" class="menu-item" @click="runMenu(assignReplicate)">设重复号</div>
-          <div v-if="trial && selected.length >= 2" class="menu-item" @click="runMenu(() => openLayoutDialog('link'))">设对照关系</div>
+          <div v-if="trial && selected.length >= 1" class="menu-item" @click="runMenu(() => openLayoutDialog('link'))">设对照…</div>
           <div class="menu-item" @click="runMenu(() => (numberingDialog = true))">编号</div>
           <div class="menu-item" @click="runMenu(() => (plotDialog = true))">小区块类型</div>
         </template>
@@ -2476,7 +2623,7 @@ function runEdit(fn: () => void) {
         <div class="menu-sep" />
         <div v-if="trial" class="menu-item" @click="runMenu(() => openLayoutDialog('variety'))">分配品种</div>
         <div v-if="trial" class="menu-item" @click="runMenu(assignReplicate)">设重复号</div>
-        <div v-if="trial && selected.length >= 2" class="menu-item" @click="runMenu(() => openLayoutDialog('link'))">设对照关系</div>
+        <div v-if="trial && selected.length >= 1" class="menu-item" @click="runMenu(() => openLayoutDialog('link'))">设对照…</div>
         <div class="menu-item" @click="runMenu(() => (numberingDialog = true))">编号</div>
         <div class="menu-item" @click="runMenu(() => (plotDialog = true))">小区类型和尺寸</div>
       </template>
@@ -2560,8 +2707,12 @@ function runEdit(fn: () => void) {
       v-model="linkDialog"
       :trial-id="trialId"
       :plots="selectedTrialPlots"
-      :variety-of="(id: number) => plantingByPlot.get(id)?.varietyId ?? null"
-      @saved="onLayoutSaved"
+      :all-plots="plots"
+      :layout="fieldLayout"
+      :unit="U"
+      :name-of="(id: number) => catalog.varietyById.get(plantingByPlot.get(id)?.varietyId ?? -1)?.name ?? '—'"
+      :is-ck="(id: number) => !!catalog.varietyById.get(plantingByPlot.get(id)?.varietyId ?? -1)?.controlType"
+      @saved="onLinkSaved"
     />
     <NumberingDialog v-model="numberingDialog" :field-id="fieldId" :plots="selectedPlots" @saved="onPlotsSaved" />
     <PlotSettingsDialog v-model="plotDialog" :field-id="fieldId" :plots="selectedPlots" :layout-saved="detail?.layoutSaved" @saved="onPlotsSaved" />
@@ -3521,8 +3672,136 @@ button.legend-row:hover {
 }
 
 .link-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-weight: 600;
   font-size: 13px;
+}
+
+.link-row.active {
+  box-shadow: inset 3px 0 0 #c0562f;
+}
+
+.ck-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  border: 2px solid #c0562f;
+  background: #fbe3d8;
+  flex-shrink: 0;
+}
+
+.compare-trait {
+  width: 100%;
+  margin: 2px 0 10px;
+}
+
+.ck-mean {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #fbefe7;
+  font-size: 12.5px;
+  color: #6f3a22;
+}
+
+.ck-mean b {
+  font-size: 18px;
+  color: #8f3a1c;
+}
+
+.ck-tag {
+  align-self: center;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: #c0562f;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.compare .hint {
+  margin: 6px 0 4px;
+}
+
+.cmp-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0 -6px;
+}
+
+.cmp-row {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) auto 34px 50px;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 6px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cmp-row:hover {
+  background: var(--surface-3);
+}
+
+.cmp-code {
+  color: var(--ink-3);
+}
+
+.cmp-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--ink);
+}
+
+.cmp-val {
+  color: var(--ink-2);
+}
+
+/* 小条：中间是对照，往右比对照高，往左比对照低 */
+.cmp-bar {
+  position: relative;
+  height: 8px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, transparent calc(50% - 0.5px), var(--ink-4) calc(50% - 0.5px), var(--ink-4) calc(50% + 0.5px), transparent calc(50% + 0.5px)), var(--surface-3);
+}
+
+.cmp-bar i {
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+  border-radius: 3px;
+}
+
+.cmp-bar i.up {
+  background: #3f8f5a;
+}
+
+.cmp-bar i.down {
+  background: #c0562f;
+}
+
+.cmp-pct {
+  text-align: right;
+  font-weight: 600;
+}
+
+.cmp-pct.up {
+  color: #2f7a48;
+}
+
+.cmp-pct.down {
+  color: #b0462a;
 }
 
 .tips ul {

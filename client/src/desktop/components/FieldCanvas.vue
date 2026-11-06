@@ -4,7 +4,7 @@
 // 为了快，这里不用 Vue 模板画图形，而是直接用 Konva 画，分三层：
 //   world   区块、小区的底色和格子（布局、颜色变了才重画）
 //   label   文字、名称牌、标尺、传感器（缩放后按屏幕大小重排）
-//   overlay 选中、鼠标所在、对照虚线、拖动时的影子、测距
+//   overlay 选中、鼠标所在、对照的红框、拖动时的影子、测距
 // 缩放、平移只改这三层的变换；鼠标移动不触发 Vue 重新渲染。图形都不监听事件，点到哪个格子自己按坐标算。
 //
 //   focus 为空时看整块地；为区块 id 时只看这个区块（"进入区块"）
@@ -43,11 +43,16 @@ export interface CanvasDevice {
   color: string
 }
 
+/** 一组对照：对照小区描红边（整个区块是对照组时整块描边、挂"对照组"），正在看的一组再把比较的小区描出来 */
 export interface CanvasLink {
   id: number
   label: string
-  segments: { from: number; to: number }[]
   controlPlotIds: number[]
+  comparePlotIds: number[]
+  /** 对照小区正好是这些区块的全部小区 */
+  controlBlockIds: string[]
+  /** 正在看的一组 */
+  active: boolean
 }
 
 export type CanvasTool = 'select' | 'pan' | 'measure' | 'road'
@@ -319,6 +324,9 @@ let texts: TextItem[] = []
 let badges: { node: Konva.Text; rect: Rect }[] = []
 let markers: { node: Konva.Circle; rect: Rect }[] = []
 let tags: { node: Konva.Label; item: BlockItem }[] = []
+/** 对照区块右上角的"对照组" */
+let ckTags: { node: Konva.Label; rect: Rect }[] = []
+const CK = '#c0562f'
 
 function rebuildModel() {
   const fb = focusBlock()
@@ -482,6 +490,7 @@ function buildWorld() {
   rulerGroup = new Konva.Group(shape)
   devGroup = new Konva.Group(shape)
   labelLayer.add(rulerGroup, devGroup)
+  ckTags = []
   drawSelection()
   drawLinks()
   refreshLabels()
@@ -572,6 +581,7 @@ function refreshLabels() {
   }
   drawRulers()
   drawDevices()
+  placeCkTags()
   labelLayer.batchDraw()
   // 选中框、对照虚线的粗细跟屏幕走，不用重画
 }
@@ -685,32 +695,67 @@ function drawSelection() {
 function drawLinks() {
   if (!stage) return
   linkGroup.destroyChildren()
-  const rings = new Map<number, boolean>()
+  for (const t of ckTags) t.node.destroy()
+  ckTags = []
+  const ckBlocks = new Map<string, boolean>()
+  const ckPlots = new Map<number, boolean>()
+  const compared = new Set<number>()
   for (const l of props.links) {
-    for (const s of l.segments) rings.set(s.to, rings.get(s.to) ?? false)
-    for (const id of l.controlPlotIds) rings.set(id, true)
+    for (const id of l.controlBlockIds) ckBlocks.set(id, (ckBlocks.get(id) ?? false) || l.active)
+    for (const id of l.controlPlotIds) ckPlots.set(id, (ckPlots.get(id) ?? false) || l.active)
+    if (l.active) for (const id of l.comparePlotIds) compared.add(id)
   }
-  for (const [id, control] of rings) {
+  // 对照区块：整块描边，右上角挂"对照组"
+  const inCkBlock = new Set<number>()
+  for (const s of blockItems) {
+    const active = ckBlocks.get(s.block.id)
+    if (active == null) continue
+    for (const c of s.cells) if (c.plotId != null) inCkBlock.add(c.plotId)
+    linkGroup.add(new Konva.Rect({
+      ...shape, ...box(s.rect), stroke: CK, strokeWidth: active ? 4 : 3, fill: active ? 'rgba(192, 86, 47, 0.08)' : undefined,
+      strokeScaleEnabled: false,
+    }))
+    const tag = new Konva.Label({ ...shape, visible: false })
+    tag.add(new Konva.Tag({ ...shape, fill: CK, cornerRadius: 5 }))
+    tag.add(new Konva.Text({ ...shape, text: '对照组', fontSize: 11.5, fontStyle: 'bold', padding: 4, fill: '#ffffff', fontFamily: FONT }))
+    labelLayer.add(tag)
+    ckTags.push({ node: tag, rect: s.rect })
+  }
+  // 单个的对照小区：红边
+  for (const [id, active] of ckPlots) {
+    if (inCkBlock.has(id)) continue
     const c = cellByPlot.get(id)
     if (!c) continue
-    const r = inset(c.rect, 0.06)
+    const r = inset(c.rect, 0.05)
     linkGroup.add(new Konva.Rect({
-      ...shape, ...box(r), stroke: '#c0562f', strokeWidth: control ? 2.5 : 1.5, dash: control ? undefined : [5, 4],
+      ...shape, ...box(r), stroke: CK, strokeWidth: active ? 3 : 2, fill: active ? 'rgba(192, 86, 47, 0.10)' : undefined,
       strokeScaleEnabled: false, cornerRadius: Math.min(r.w, r.h) * 0.06,
     }))
   }
-  for (const link of props.links) {
-    for (const seg of link.segments) {
-      const a = cellByPlot.get(seg.from)?.rect
-      const b = cellByPlot.get(seg.to)?.rect
-      if (!a || !b) continue
-      linkGroup.add(new Konva.Line({
-        ...shape, points: [a.x + a.w / 2, a.y + a.h / 2, b.x + b.w / 2, b.y + b.h / 2], stroke: '#c0562f', strokeWidth: 2,
-        dash: [8, 6], lineCap: 'round', strokeScaleEnabled: false,
-      }))
-    }
+  // 正在看的一组里和对照比的小区：虚线框
+  for (const id of compared) {
+    const c = cellByPlot.get(id)
+    if (!c) continue
+    const r = inset(c.rect, 0.07)
+    linkGroup.add(new Konva.Rect({
+      ...shape, ...box(r), stroke: '#8a6118', strokeWidth: 1.5, dash: [5, 4], strokeScaleEnabled: false,
+      cornerRadius: Math.min(r.w, r.h) * 0.06,
+    }))
   }
+  placeCkTags()
   overlayLayer.batchDraw()
+  labelLayer.batchDraw()
+}
+
+function placeCkTags() {
+  const sc = view.scale
+  for (const t of ckTags) {
+    const r = t.rect
+    t.node.setAttrs({
+      visible: r.w * sc > 70 && r.h * sc > 30, x: r.x + r.w - px(4), y: r.y + px(4), offsetX: t.node.width(),
+      scaleX: px(1), scaleY: px(1), rotation: -props.rotation,
+    })
+  }
 }
 
 // ---------- 点到了什么 ----------

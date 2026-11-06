@@ -36,9 +36,12 @@ public final class TrialDtos {
 
     public enum Attribute { VARIETY, REPLICATE }
 
-    /** 新建对照关系。controlPlotIds 为空时，自动把种了对照品种的小区当作对照。 */
+    /**
+     * 新建对照关系。controlPlotIds 为空时，自动把种了对照品种的小区当作对照。
+     * 可以是一个（几个）小区当对照，也可以是整个区块的小区当对照组，和地块里其他所有小区比，所以小区数不设小上限
+     */
     public record LinkRequest(
-            @NotEmpty @Size(min = 2, max = 50) List<Long> plotIds,
+            @NotEmpty @Size(min = 2, max = 3000) List<Long> plotIds,
             List<Long> controlPlotIds,
             @Size(max = 50) String label) {
     }
