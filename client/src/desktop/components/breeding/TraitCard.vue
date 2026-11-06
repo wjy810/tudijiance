@@ -75,7 +75,7 @@ const pctText = (v: number) => `${v > 0 ? '+' : ''}${v}%`
         {{ c.change.pct >= 0 ? '↑' : '↓' }} {{ Math.abs(c.change.pct) }}%
       </span>
     </div>
-    <div v-else class="now none">这一季没录</div>
+    <div v-else class="now none">{{ c.seasons.length ? '这一季没录' : '还没种过，下面是选出时量的这一株' }}</div>
 
     <!-- 数值：横轴上每个位置一个点，竖线是平均，三角是对比的品系、菱形是选出时的单株 -->
     <div v-if="c.kind === 'number' && axis && c.current" class="strip" :title="`${fmt(axis.min)} 到 ${fmt(axis.max)}`">

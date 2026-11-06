@@ -88,7 +88,7 @@ watch(autoLabel, (v) => {
 watch(visible, (open) => {
   if (!open) return
   labelTouched.value = false
-  if (selectedBlock.value) {
+  if (selectedBlock.value && blocks.value.length > 1) {
     // 选的是整个区块：这个区块当对照组，和地块里别的都比
     mode.value = 'block'
     controlBlock.value = selectedBlock.value.id
@@ -146,7 +146,10 @@ async function save() {
           <small>一个或几个{{ unit }}是对照，别的和它比</small>
         </span>
       </button>
-      <button type="button" class="mode" :class="{ on: mode === 'block' }" :disabled="blocks.length === 0" @click="mode = 'block'">
+      <button
+        type="button" class="mode" :class="{ on: mode === 'block' }" :disabled="blocks.length < 2"
+        :title="blocks.length < 2 ? '这块地块只有一个区块，没有别的区块可以和它比' : ''" @click="mode = 'block'"
+      >
         <i class="pic block"><b class="ck" /><b /><b /><b /></i>
         <span>
           <strong>整个区块当对照组</strong>

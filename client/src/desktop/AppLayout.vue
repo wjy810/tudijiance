@@ -176,7 +176,7 @@ const crumbs = computed<{ label: string; to?: string }[]>(() => {
     return [{ label: '季和地块', to: '/breeding/seasons' }, { label: currentLand.value ? fieldLabel(currentLand.value) : '平面图' }]
   }
   if (route.path.startsWith('/breeding/lines/')) {
-    return [{ label: '育种' }, { label: '品系库', to: '/breeding/lines' }, { label: '品系详情' }]
+    return [{ label: '品种' }, { label: '品系库', to: '/breeding/lines' }, { label: '品系详情' }]
   }
   if (route.path.startsWith('/trials/')) {
     return [{ label: '首页', to: '/home' }, { label: '试验记载本' }]
