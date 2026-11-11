@@ -24,13 +24,14 @@ import { useCatalogStore } from '@/stores/catalog'
 import { useModuleStore } from '@/stores/modules'
 import { useBreedingStore } from '@/stores/breeding'
 import FieldCanvas, {
-  type CanvasCell, type CanvasDevice, type CanvasLink, type CanvasTool, type RoadAction, type TrackResize,
+  type CanvasCell, type CanvasDevice, type CanvasLink, type CanvasTool, type TrackResize,
 } from '@/desktop/components/FieldCanvas.vue'
 import {
-  BLOCK_KIND, CELL_KIND, addRoad, addRoadProblem, anchors, blockSpan, checkLayout, defaultRoadWidth, fieldSize, fmt, innerCells,
-  keyOf, mergeAt, moveBlockFit, moveCells, parseKey, plotPlace, plotPlaces, removeRoad, removedPlots, roadOfBlock, roadToBlocks,
-  round, setBlockKind, setCellKinds, setInnerTrackPair, setTrackPair, swapBlocks, splitBlock, splitInner, trackToRoad,
-  trackToRoadProblem, type Axis, type BlockKind, type CellKind, type FieldLayout,
+  BLOCK_KIND, CELL_KIND, addBlock, anchors, boundsOf, checkLayout, conflicts, defaultRoadWidth, drawRoad, duplicateBlocks, fieldSize, fmt,
+  innerCells, keyOf, mergeAt, moveBlocks, moveCells, parseKey, plantBlocks as plantBlocksOf, plotPlace, plotPlaces, removeBlocks, removeRoad,
+  removedPlots,
+  round, setBlockKind, setBlockRect, setCellKinds, setFieldSize, setInnerTrackPair, splitInner,
+  type Axis, type BlockKind, type CellKind, type FieldLayout, type Rect,
 } from '@/shared/fieldLayout'
 import { useLayoutDraft } from '@/desktop/components/layoutDraft'
 import LayoutEditPanel from '@/desktop/components/LayoutEditPanel.vue'
@@ -237,9 +238,11 @@ watch(mode, (m, old) => {
   track.value = null
   if (m === 'edit') {
     draft.begin()
+    // 画道路、摆区块留间隔默认按已有道路的宽
+    if (draft.draft.value) roadWidth.value = defaultRoadWidth(draft.draft.value)
   } else if (old === 'edit') {
     draft.end()
-    if (tool.value === 'road') tool.value = 'select'
+    if (tool.value === 'road' || tool.value === 'block') tool.value = 'select'
   }
 })
 
@@ -255,105 +258,108 @@ watch([focus, selectedBlocks], () => {
 watch(focus, (f) => {
   selectedCells.value = []
   track.value = null
-  if (f && tool.value === 'road') tool.value = 'select'
+  if (f && (tool.value === 'road' || tool.value === 'block')) tool.value = 'select'
 })
 
-/** 点了标尺：编辑时选中那一行（列）的区块或小区块，并显示它的大小 */
+/** 点了区块里标尺上的行号、列号：编辑时选中那一行（列）的小区块，并显示它的大小 */
 function onTrack(axis: 'row' | 'col', index: number) {
   if (mode.value !== 'edit') {
     return
   }
   const l = draft.draft.value
-  if (!l) {
+  const b = l?.blocks.find((x) => x.id === focus.value)
+  if (!b?.inner) {
     return
   }
   track.value = { axis, index }
-  if (focusBlock.value) {
-    const b = l.blocks.find((x) => x.id === focus.value)
-    if (!b?.inner) {
-      return
-    }
-    selectedCells.value = anchors(b.inner.rows.length, b.inner.cols.length, b.inner.merges)
-      .filter((sp) => (axis === 'row' ? index >= sp.r && index < sp.r + sp.rs : index >= sp.c && index < sp.c + sp.cs))
-      .map((sp) => `${sp.r},${sp.c}`)
-  } else {
-    selectedBlocks.value = []
-  }
+  selectedCells.value = anchors(b.inner.rows.length, b.inner.cols.length, b.inner.merges)
+    .filter((sp) => (axis === 'row' ? index >= sp.r && index < sp.r + sp.rs : index >= sp.c && index < sp.c + sp.cs))
+    .map((sp) => `${sp.r},${sp.c}`)
 }
 
-function onMoveFit(id: string, x: number, y: number) {
-  const l = draft.draft.value
-  if (l) {
-    draft.apply(moveBlockFit(l, id, x, y))
-  }
-}
-
-/** 拖分界线改行高列宽 */
+/** 进了区块以后拖小区块之间的线 */
 function onResizeTrack(r: TrackResize) {
   const l = draft.draft.value
-  if (!l) {
-    return
-  }
-  if (r.scope === 'field') {
-    draft.apply(setTrackPair(l, r.axis, r.index, r.a, r.b))
-  } else if (focus.value && r.b != null) {
+  if (l && focus.value) {
     draft.apply(setInnerTrackPair(l, focus.value, r.axis, r.index, r.a, r.b))
   }
 }
 
-// ---------- 道路 ----------
+// ---------- 区块、道路随便摆 ----------
 
-/** 道路工具加的道路多宽（单位同布局）；点开道路工具时按已有道路的宽 */
+/** 画的道路多宽（单位同布局）；拖区块时离别的区块正好这么远会自动贴住。进编辑地块时按已有道路的宽 */
 const roadWidth = ref(1)
 
-/** 道路工具点了区块之间的线或道路 */
-function onRoad(r: RoadAction) {
+/** 把区块拖到别处；按着 Alt 松手是复制一份过去 */
+function onMoveBlocks(ids: string[], dx: number, dy: number, copy: boolean) {
   const l = draft.draft.value
   if (!l) return
-  if (r.action === 'add') {
-    const problem = addRoadProblem(l, r.axis, r.index)
-    if (problem) {
-      ElMessage.warning(problem)
-      return
-    }
-    draft.apply(addRoad(l, r.axis, r.index, roadWidth.value))
-  } else {
-    draft.apply(removeRoad(l, r.axis, r.index))
-  }
-  selectedBlocks.value = []
-  track.value = null
-}
-
-/** 在区块的上下左右加一条道路（右键菜单） */
-function roadBeside(blockId: string, side: 'top' | 'bottom' | 'left' | 'right') {
-  const l = draft.draft.value
-  const b = l?.blocks.find((x) => x.id === blockId)
-  if (!l || !b) return
-  const sp = blockSpan(l, b)
-  const axis: Axis = side === 'top' || side === 'bottom' ? 'row' : 'col'
-  const index = side === 'top' ? sp.r : side === 'bottom' ? sp.r + sp.rs : side === 'left' ? sp.c : sp.c + sp.cs
-  onRoad({ action: 'add', axis, index })
-}
-
-/** 区块所在的这一行（列）改成道路：里面的小区块会去掉，先问 */
-async function trackOfBlockToRoad(blockId: string, axis: Axis) {
-  const l = draft.draft.value
-  const b = l?.blocks.find((x) => x.id === blockId)
-  if (!l || !b) return
-  const sp = blockSpan(l, b)
-  const index = axis === 'row' ? sp.r : sp.c
-  const problem = trackToRoadProblem(l, axis, index)
-  if (problem) {
-    ElMessage.warning(problem)
+  if (copy) {
+    const res = duplicateBlocks(l, ids, dx, dy)
+    if (res.ids.length === 0) return
+    draft.apply(res.layout)
+    selectedBlocks.value = res.ids
     return
   }
-  const next = trackToRoad(l, axis, index)
+  draft.apply(moveBlocks(l, ids, dx, dy))
+}
+
+function onResizeBlock(id: string, rect: Rect) {
+  const l = draft.draft.value
+  if (l) draft.apply(setBlockRect(l, id, rect))
+}
+
+function onResizeField(w: number, h: number) {
+  const l = draft.draft.value
+  if (l) draft.apply(setFieldSize(l, w, h))
+}
+
+/** 道路工具画了一条：压到区块时切开、把后面的往后挪 */
+function onDrawRoad(rect: Rect, axis: Axis) {
+  const l = draft.draft.value
+  if (!l) return
+  const res = drawRoad(l, rect, axis)
+  if (!res.id) {
+    ElMessage.warning(res.problem ?? '这里画不了道路')
+    return
+  }
+  draft.apply(res.layout)
+  selectedBlocks.value = [res.id]
+  track.value = null
+  if (res.cut > 0 || res.moved > 0) {
+    const parts = []
+    if (res.cut > 0) parts.push(`切开了 ${res.cut} 个区块`)
+    if (res.moved > 0) parts.push(`后面的往${axis === 'row' ? '下' : '右'}挪了 ${fmt(axis === 'row' ? rect.h : rect.w, l.unit)}`)
+    ElMessage.success(`加了一条道路：${parts.join('，')}，小区块大小都没变。不对的话按 Ctrl Z`)
+  }
+}
+
+/** 区块工具拖出了一个方框 */
+function onDrawBlock(rect: Rect) {
+  const l = draft.draft.value
+  if (!l) return
+  const res = addBlock(l, rect, 'PLANT')
+  if (!res.id) {
+    ElMessage.warning('建不了：太小了，或者区块、道路已经太多')
+    return
+  }
+  draft.apply(res.layout)
+  selectedBlocks.value = [res.id]
+  tool.value = 'select'
+}
+
+/** 删掉选中的区块、道路；里面有小区块时先问 */
+async function removeSelectedBlocks() {
+  const l = draft.draft.value
+  if (!l || selectedBlocks.value.length === 0) return
+  const next = removeBlocks(l, selectedBlocks.value)
   const gone = removedPlots(l, next)
   if (gone.length > 0) {
     try {
       await ElMessageBox.confirm(
-        `第 ${index + 1} ${axis === 'row' ? '行' : '列'}改成道路，会去掉里面 ${gone.length} 个${U.value}。已经种了、录了数据的保存时不能去掉。`,
-        '改成道路', { type: 'warning', confirmButtonText: '改成道路', cancelButtonText: '取消' },
+        `删掉选中的 ${selectedBlocks.value.length} 个，会去掉里面 ${gone.length} 个已有的${U.value}`
+          + `（${gone.slice(0, 8).map(plotCode).join('、')}${gone.length > 8 ? ' 等' : ''}）。已经种了、录了数据的保存时不能去掉。`,
+        '删除区块', { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
       )
     } catch {
       return
@@ -363,40 +369,52 @@ async function trackOfBlockToRoad(blockId: string, axis: Axis) {
   selectedBlocks.value = []
 }
 
-/** 右键的区块在不在一条整条道路上 */
-const editMenuRoad = computed(() => {
+/** 把选中的复制一份，放在右边隔一个路宽的地方（右边放不下就放下面）；复制出来的是新的小区块 */
+function duplicateSelectedBlocks(ids = selectedBlocks.value) {
   const l = draft.draft.value
-  const id = editMenu.value?.blockId
-  return l && id ? roadOfBlock(l, id) : null
-})
+  const box = l ? boundsOf(l.blocks.filter((b) => ids.includes(b.id))) : null
+  if (!l || !box) return
+  const others = l.blocks.filter((b) => !ids.includes(b.id))
+  const free = (dx: number, dy: number) => !others.some((b) => b.x < box.x + dx + box.w - 1e-3 && b.x + b.w > box.x + dx + 1e-3
+    && b.y < box.y + dy + box.h - 1e-3 && b.y + b.h > box.y + dy + 1e-3)
+  const right = box.w + roadWidth.value
+  const down = box.h + roadWidth.value
+  const [dx, dy] = free(right, 0) ? [right, 0] : free(0, down) ? [0, down] : [right, 0]
+  const res = duplicateBlocks(l, ids, dx, dy)
+  if (res.ids.length === 0) return
+  draft.apply(res.layout)
+  selectedBlocks.value = res.ids
+}
 
+/** Ctrl C 记下的区块，Ctrl V 再复制出来 */
+let copiedBlocks: string[] = []
+
+/** 方向键一点点挪：一次 0.1 个单位，按住 Shift 一次 1 个单位 */
+function nudgeBlocks(dx: number, dy: number, big: boolean) {
+  const l = draft.draft.value
+  if (!l || selectedBlocks.value.length === 0) return false
+  const step = big ? 1 : 0.1
+  draft.apply(moveBlocks(l, selectedBlocks.value, dx * step, dy * step))
+  return true
+}
+
+/** 现在叠在一起的有几处（叠着不能保存） */
+const clashCount = computed(() => (mode.value === 'edit' && draft.draft.value ? conflicts(draft.draft.value).length : 0))
+
+/** 右键的那个区块 */
 const editMenuBlock = computed(() => {
   const id = editMenu.value?.blockId
   return id ? draft.draft.value?.blocks.find((b) => b.id === id) ?? null : null
 })
 
-/** 右键的区块四边能不能加道路：不能时是原因（比如旁边已经是道路） */
-const roadSideProblems = computed(() => {
+/** 删掉一条道路；close 为 true 时把后面的收回来合拢 */
+function removeRoadById(id: string, close: boolean) {
   const l = draft.draft.value
-  const b = editMenuBlock.value
-  if (!l || !b) return { top: null, bottom: null, left: null, right: null }
-  const sp = blockSpan(l, b)
-  return {
-    top: addRoadProblem(l, 'row', sp.r),
-    bottom: addRoadProblem(l, 'row', sp.r + sp.rs),
-    left: addRoadProblem(l, 'col', sp.c),
-    right: addRoadProblem(l, 'col', sp.c + sp.cs),
-  } as Record<'top' | 'bottom' | 'left' | 'right', string | null>
-})
-
-function roadToBlocksAt(r: { axis: Axis; index: number }) {
-  const l = draft.draft.value
-  if (l) draft.apply(roadToBlocks(l, r.axis, r.index))
+  if (!l) return
+  const res = removeRoad(l, id, close)
+  if (close && !res.closed) ElMessage.info('后面的东西收回来会和别的叠在一起，所以只删了路，没有合拢')
+  draft.apply(res.layout)
   selectedBlocks.value = []
-}
-
-function removeRoadAt(r: { axis: Axis; index: number }) {
-  onRoad({ action: 'remove', ...r })
 }
 
 /** 拖选中的格子：小区块跟着挪，原来那里的小区块换过来 */
@@ -414,19 +432,6 @@ function onMoveCells(blockId: string, keys: string[], dr: number, dc: number) {
     const [r, c] = parseKey(k)
     return keyOf(r + dr, c + dc)
   })
-}
-
-/** 把区块拖到另一个区块上：交换位置 */
-function onSwapBlocks(a: string, b: string) {
-  const l = draft.draft.value
-  if (!l) {
-    return
-  }
-  const next = swapBlocks(l, a, b)
-  if (next !== l) {
-    draft.apply(next)
-    selectedBlocks.value = [a]
-  }
 }
 
 function plotCode(id: number): string {
@@ -544,9 +549,6 @@ watch(mode, (m) => {
 const zoom = ref(100)
 const tool = ref<CanvasTool>('select')
 
-watch(tool, (t) => {
-  if (t === 'road' && draft.draft.value) roadWidth.value = defaultRoadWidth(draft.draft.value)
-})
 const canvasRef = ref<InstanceType<typeof FieldCanvas> | null>(null)
 
 function zoomBy(factor: number) {
@@ -556,8 +558,12 @@ function zoomBy(factor: number) {
 
 const NO_LINKS: CanvasLink[] = []
 const NO_DEVICES: CanvasDevice[] = []
-/** 画布上浮着的工具条占的地方：上面模式切换，下面操作条 */
-const CANVAS_INSETS = { top: 58, right: 16, bottom: 66, left: 16 }
+/** 画布上浮着的工具条占的地方：上面模式切换（画道路、画区块时下面还有一行说明），下面操作条 */
+const canvasInsets = computed(() => ({
+  top: mode.value === 'edit' && !focus.value && (tool.value === 'road' || tool.value === 'block') ? 104 : 58,
+  // 编辑地块时下面多让一点：地块的右下角不要压在工具条底下，好拖它改地块大小
+  right: 16, bottom: mode.value === 'edit' ? 88 : 66, left: 16,
+}))
 
 // ---------- 视角和方位 ----------
 
@@ -1039,6 +1045,18 @@ function onKey(e: KeyboardEvent) {
       saveLayout()
       return
     }
+    // 整块地上：复制选中的区块
+    if (!focus.value && selectedBlocks.value.length > 0 && (k === 'd' || k === 'c')) {
+      e.preventDefault()
+      if (k === 'd') duplicateSelectedBlocks()
+      else copiedBlocks = [...selectedBlocks.value]
+      return
+    }
+    if (!focus.value && k === 'v' && copiedBlocks.length > 0) {
+      e.preventDefault()
+      duplicateSelectedBlocks(copiedBlocks.filter((id) => draft.draft.value?.blocks.some((b) => b.id === id)))
+      return
+    }
   }
   if (ctrl && e.key.toLowerCase() === 'a') {
     e.preventDefault()
@@ -1059,6 +1077,19 @@ function onKey(e: KeyboardEvent) {
   if (arrows[e.key] && mode.value !== 'edit') {
     if (stepSelection(...arrows[e.key]!)) e.preventDefault()
     return
+  }
+  // 编辑地块：方向键一点点挪选中的区块，Delete 删掉
+  if (mode.value === 'edit' && !focus.value) {
+    if (arrows[e.key]) {
+      const [dy, dx] = arrows[e.key]!
+      if (nudgeBlocks(dx, dy, e.shiftKey)) e.preventDefault()
+      return
+    }
+    if ((e.key === 'Delete' || e.key === 'Backspace') && selectedBlocks.value.length > 0) {
+      e.preventDefault()
+      void removeSelectedBlocks()
+      return
+    }
   }
   if (e.key === 'Enter' && mode.value === 'record' && selected.value.length > 0 && auth.canRecord && trial.value) {
     e.preventDefault()
@@ -1095,6 +1126,8 @@ function onKey(e: KeyboardEvent) {
     tool.value = tool.value === 'pan' ? 'select' : 'pan'
   } else if (k === 'r' && mode.value === 'edit' && !focus.value) {
     tool.value = tool.value === 'road' ? 'select' : 'road'
+  } else if (k === 'b' && mode.value === 'edit' && !focus.value) {
+    tool.value = tool.value === 'block' ? 'select' : 'block'
   } else if (k === 'v') {
     tool.value = 'select'
   } else if (e.key === ']') {
@@ -1325,9 +1358,8 @@ async function assignReplicate() {
 }
 
 /** 种植区块按从上到下、从左到右的顺序 */
-const plantBlocks = computed(() => (fieldLayout.value?.blocks ?? [])
-  .filter((b) => b.kind === 'PLANT' && b.inner && Object.keys(b.inner.plots).length > 0)
-  .sort((a, b) => a.r - b.r || a.c - b.c))
+const plantBlocks = computed(() => (fieldLayout.value ? plantBlocksOf(fieldLayout.value) : [])
+  .filter((b) => Object.keys(b.inner!.plots).length > 0))
 
 /** 每个区块现在的重复号（都一样时显示，不一样时为空） */
 const blockReplicates = computed(() => plantBlocks.value.map((b) => {
@@ -1958,8 +1990,13 @@ const SHORTCUTS: { keys: string; text: string }[] = [
   { keys: 'F', text: '适应窗口（3D 里回到默认视角）' },
   { keys: 'N', text: '图纸朝上和正北朝上切换' },
   { keys: 'V / H / M', text: '选择 / 拖动画面 / 测距' },
-  { keys: 'R', text: '编辑地块：道路工具（点区块之间的线加道路，点道路删掉）' },
-  { keys: 'Shift + 拖线', text: '编辑地块：两边一起变，地块总大小不变（平时地块跟着变；Alt 也行）' },
+  { keys: 'R', text: '编辑地块：画道路（按住拖出一条；在区块的边、小区块之间的线上点一下，加一条通到头的）' },
+  { keys: 'B', text: '编辑地块：画区块（按住拖出一个方框）' },
+  { keys: '拖动', text: '编辑地块：按住区块、道路直接挪；选中后拖四周的小方块改大小；靠近别的边自动贴住' },
+  { keys: 'Ctrl / Shift / Alt + 拖', text: '编辑地块：不贴边 / 只横着或竖着挪 / 松手时复制一份' },
+  { keys: 'Delete', text: '编辑地块：删掉选中的区块、道路' },
+  { keys: 'Ctrl D / Ctrl C、Ctrl V', text: '编辑地块：复制选中的区块' },
+  { keys: '方向键', text: '编辑地块：选中的一点点挪（按住 Shift 挪得多）' },
   { keys: '空格 + 拖动', text: '拖动画面（滚轮缩放）' },
   { keys: 'Ctrl / Shift + 点', text: '加选；拖动框选' },
   { keys: 'Ctrl Z / Ctrl Y / Ctrl S', text: '编辑地块：撤销 / 重做 / 保存' },
@@ -1989,12 +2026,11 @@ function applyBlockKind(kind: BlockKind) {
   draft.apply(next)
 }
 
-/** 先记下右键的是哪个区块（和它在哪条道路上），再关菜单、执行；关了菜单以后 editMenu 就是空的 */
-function runEdit(fn: (blockId: string, road: { axis: Axis; index: number } | null) => void) {
+/** 先记下右键的是哪个区块，再关菜单、执行；关了菜单以后 editMenu 就是空的 */
+function runEdit(fn: (blockId: string) => void) {
   const blockId = editMenu.value?.blockId ?? ''
-  const road = editMenuRoad.value
   editMenu.value = null
-  fn(blockId, road)
+  fn(blockId)
 }
 </script>
 
@@ -2094,17 +2130,19 @@ function runEdit(fn: (blockId: string, road: { axis: Axis; index: number } | nul
           :pick="mode === 'edit' ? (focus ? 'cell' : 'block') : 'plot'"
           :rulers="mode === 'edit'"
           :editable="mode === 'edit'"
-          :insets="CANVAS_INSETS"
+          :insets="canvasInsets"
           @zoom="(z: number) => (zoom = z)"
           @contextmenu="onContextMenu"
           @open="openDetail"
           @enter="enterBlock"
           @track="onTrack"
-          @move-fit="onMoveFit"
           @resize-track="onResizeTrack"
-          @road="onRoad"
           @move-cells="onMoveCells"
-          @swap-blocks="onSwapBlocks"
+          @move-blocks="onMoveBlocks"
+          @resize-block="onResizeBlock"
+          @resize-field="onResizeField"
+          @draw-road="onDrawRoad"
+          @draw-block="onDrawBlock"
         />
 
         <template v-if="shownLayout">
@@ -2126,7 +2164,7 @@ function runEdit(fn: (blockId: string, road: { axis: Axis; index: number } | nul
               <button role="tab" :class="{ on: mode === 'layout' }" :title="isBreeding ? '种植、选株、杂交、编号（2）' : '分配品种、设重复、设对照、编号（2）'" @click="modeModel = 'layout'">
                 <el-icon><Grid /></el-icon>布置试验
               </button>
-              <button role="tab" :class="{ on: mode === 'edit' }" title="区块和小区块的大小、合并、类型（3）" @click="modeModel = 'edit'">
+              <button role="tab" :class="{ on: mode === 'edit' }" title="摆区块、画道路，改大小、合并、拆开（3）" @click="modeModel = 'edit'">
                 <el-icon><Crop /></el-icon>编辑地块
               </button>
             </div>
@@ -2176,7 +2214,11 @@ function runEdit(fn: (blockId: string, road: { axis: Axis; index: number } | nul
                 class="road-w"
               />
               <span>{{ shownLayout.unit.symbol }}</span>
-              <span class="road-tip">点区块之间的线加道路，点道路删掉。别的区块不变小，地块跟着变大。Esc 退出</span>
+              <span class="road-tip">按住拖出一条路，或在区块的边、小区块之间的线上点一下。Esc 退出</span>
+            </div>
+            <div v-if="mode === 'edit' && tool === 'block' && !focus && shownLayout" class="road-bar">
+              <i class="block-icon" />
+              <span class="road-tip">按住拖出一个方框，就是一个新的种植区块。Esc 退出</span>
             </div>
           </div>
 
@@ -2242,9 +2284,13 @@ function runEdit(fn: (blockId: string, road: { axis: Axis; index: number } | nul
                 <button class="tool" :class="{ on: tool === 'measure' }" title="测距（M）：点两下量距离" aria-label="测距" @click="tool = tool === 'measure' ? 'select' : 'measure'"><el-icon><Odometer /></el-icon></button>
                 <button
                   v-if="mode === 'edit'" class="tool road-tool" :class="{ on: tool === 'road' }" :disabled="!!focus"
-                  title="道路（R）：点区块之间的线加道路，点道路删掉；别的区块不变小，地块跟着变大"
-                  aria-label="道路" @click="tool = tool === 'road' ? 'select' : 'road'"
+                  title="画道路（R）：按住拖出一条；在区块的边、小区块之间的线上点一下，加一条通到头的"
+                  aria-label="画道路" @click="tool = tool === 'road' ? 'select' : 'road'"
                 ><i class="road-icon" /></button>
+                <button
+                  v-if="mode === 'edit'" class="tool road-tool" :class="{ on: tool === 'block' }" :disabled="!!focus"
+                  title="画区块（B）：按住拖出一个方框" aria-label="画区块" @click="tool = tool === 'block' ? 'select' : 'block'"
+                ><i class="block-icon" /></button>
                 <span class="tool-sep" />
               </template>
               <button class="tool" title="缩小" aria-label="缩小" @click="zoomBy(1 / 1.25)"><el-icon><ZoomOut /></el-icon></button>
@@ -2270,6 +2316,7 @@ function runEdit(fn: (blockId: string, road: { axis: Axis; index: number } | nul
               有改动未保存
               <em v-if="draft.removed.value.length" class="gone">去掉 {{ draft.removed.value.length }} 个小区块</em>
               <em v-if="draft.added.value" class="new">新建 {{ draft.added.value }} 个</em>
+              <em v-if="clashCount" class="gone">{{ clashCount }} 处叠在一起</em>
             </template>
             <template v-else>和保存的布局一样</template>
           </span>
@@ -2340,6 +2387,7 @@ function runEdit(fn: (blockId: string, road: { axis: Axis; index: number } | nul
           v-model:selected-blocks="selectedBlocks"
           v-model:selected-cells="selectedCells"
           v-model:track="track"
+          v-model:road-width="roadWidth"
           :layout="draft.draft.value"
           :focus="focus"
           :rotation="rotation"
@@ -2347,6 +2395,8 @@ function runEdit(fn: (blockId: string, road: { axis: Axis; index: number } | nul
           @apply="draft.apply"
           @enter="enterBlock"
           @leave="leaveBlock"
+          @remove="removeSelectedBlocks"
+          @duplicate="duplicateSelectedBlocks()"
         />
 
         <!-- 选了一个小区块：它的情况和最近数据 -->
@@ -2659,34 +2709,22 @@ function runEdit(fn: (blockId: string, road: { axis: Axis; index: number } | nul
         <div class="menu-item" @click="runEdit(leaveBlock)">回到整块地<kbd>Esc</kbd></div>
       </template>
       <template v-else-if="editMenu.blockId">
-        <div class="menu-title">{{ selectedBlocks.length > 1 ? `选中的 ${selectedBlocks.length} 个区块` : draft.draft.value?.blocks.find((b) => b.id === editMenu!.blockId)?.name }}</div>
-        <div v-if="selectedBlocks.length === 1 && draft.draft.value?.blocks.find((b) => b.id === editMenu!.blockId)?.kind === 'PLANT'" class="menu-item" @click="runEdit((id) => enterBlock(id))">进入区块改小区块</div>
+        <div class="menu-title">{{ selectedBlocks.length > 1 ? `选中的 ${selectedBlocks.length} 个` : editMenuBlock?.name }}</div>
+        <div v-if="selectedBlocks.length === 1 && editMenuBlock?.kind === 'PLANT'" class="menu-item" @click="runEdit((id) => enterBlock(id))">进去改小区块</div>
         <div v-if="selectedBlocks.length > 1" class="menu-item" @click="runEdit(() => editPanelRef?.merge())">合并成一个区块…</div>
-        <div
-          v-if="selectedBlocks.length === 1 && draft.draft.value && (() => { const b = draft.draft.value!.blocks.find((x) => x.id === editMenu!.blockId); if (!b) return false; const sp = blockSpan(draft.draft.value!, b); return sp.rs * sp.cs > 1 })()"
-          class="menu-item" @click="runEdit((id) => draft.apply(splitBlock(draft.draft.value!, id)))"
-        >
-          拆开
-        </div>
-        <template v-if="selectedBlocks.length <= 1 && editMenuRoad">
-          <div class="menu-sep" />
-          <div class="menu-item" @click="runEdit((_, road) => road && removeRoadAt(road))">删掉这条道路<span class="menu-note">地块变小</span></div>
-          <div class="menu-item" @click="runEdit((_, road) => road && roadToBlocksAt(road))">这条道路改成区块</div>
+        <div class="menu-item" @click="runEdit(() => duplicateSelectedBlocks())">复制一份<kbd>Ctrl D</kbd></div>
+        <template v-if="selectedBlocks.length === 1 && editMenuBlock && editMenuBlock.kind !== 'ROAD'">
+          <div class="menu-item" @click="runEdit(() => editPanelRef?.openSplit())">拆成几块…</div>
+          <div class="menu-item" @click="runEdit(() => editPanelRef?.openArray())">照着排一片…</div>
         </template>
-        <template v-else-if="selectedBlocks.length <= 1 && editMenuBlock && editMenuBlock.kind !== 'ROAD'">
+        <template v-if="selectedBlocks.length === 1 && editMenuBlock?.kind === 'ROAD'">
           <div class="menu-sep" />
-          <div class="menu-sub">加道路<span class="menu-note">别的区块不变小</span></div>
-          <div class="menu-row">
-            <button type="button" :disabled="!!roadSideProblems.top" :title="roadSideProblems.top ?? ''" @click="runEdit((id) => roadBeside(id, 'top'))">上面</button>
-            <button type="button" :disabled="!!roadSideProblems.bottom" :title="roadSideProblems.bottom ?? ''" @click="runEdit((id) => roadBeside(id, 'bottom'))">下面</button>
-            <button type="button" :disabled="!!roadSideProblems.left" :title="roadSideProblems.left ?? ''" @click="runEdit((id) => roadBeside(id, 'left'))">左边</button>
-            <button type="button" :disabled="!!roadSideProblems.right" :title="roadSideProblems.right ?? ''" @click="runEdit((id) => roadBeside(id, 'right'))">右边</button>
-          </div>
-          <div class="menu-item" @click="runEdit((id) => trackOfBlockToRoad(id, 'row'))">这一行改成道路</div>
-          <div class="menu-item" @click="runEdit((id) => trackOfBlockToRoad(id, 'col'))">这一列改成道路</div>
+          <div class="menu-item" @click="runEdit((id) => removeRoadById(id, true))">删掉这条道路并合拢<span class="menu-note">后面的收回来</span></div>
         </template>
         <div class="menu-sep" />
         <div v-for="k in (['PLANT', 'ROAD', 'GUARD', 'BLANK'] as BlockKind[])" :key="k" class="menu-item" @click="runEdit(() => applyBlockKind(k))">设成{{ BLOCK_KIND[k] }}</div>
+        <div class="menu-sep" />
+        <div class="menu-item danger" @click="runEdit(() => removeSelectedBlocks())">删除<kbd>Delete</kbd></div>
       </template>
     </div>
 
@@ -2924,6 +2962,12 @@ function runEdit(fn: (blockId: string, road: { axis: Axis; index: number } | nul
   z-index: 3;
   display: flex;
   gap: 8px;
+  /* 这一圈只是用来排位置的：空着的地方不挡鼠标，下面的地图照样能点、能拖 */
+  pointer-events: none;
+}
+
+.ov > * {
+  pointer-events: auto;
 }
 
 .ov-tl {
@@ -4022,6 +4066,27 @@ kbd {
   border-color: #fff;
 }
 
+/* 区块工具：一个分了格子的方块 */
+.block-icon {
+  display: inline-block;
+  width: 15px;
+  height: 13px;
+  border-radius: 2px;
+  background:
+    linear-gradient(#8a7a55, #8a7a55) center / 1px 100% no-repeat,
+    linear-gradient(#8a7a55, #8a7a55) center / 100% 1px no-repeat,
+    #e7dcc2;
+  border: 1px solid #8a7a55;
+}
+
+.tool.on .block-icon {
+  border-color: #fff;
+}
+
+.menu-item.danger {
+  color: var(--clay);
+}
+
 .road-bar {
   display: flex;
   align-items: center;
@@ -4034,6 +4099,14 @@ kbd {
   font-size: 13px;
   color: var(--ink-2);
   max-width: 640px;
+}
+
+.road-bar > span {
+  white-space: nowrap;
+}
+
+.road-bar .block-icon {
+  flex-shrink: 0;
 }
 
 .road-w {

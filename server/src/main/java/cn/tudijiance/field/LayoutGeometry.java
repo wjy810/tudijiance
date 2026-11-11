@@ -11,25 +11,28 @@ import java.util.Set;
 
 import cn.tudijiance.common.ApiException;
 import cn.tudijiance.field.FieldLayout.Block;
-import cn.tudijiance.field.FieldLayout.Fit;
 import cn.tudijiance.field.FieldLayout.Inner;
 import cn.tudijiance.field.FieldLayout.InnerSize;
 import cn.tudijiance.field.FieldLayout.Span;
 import cn.tudijiance.field.FieldLayout.Unit;
 
 /**
- * 区块布局的检查和计算：每个小区块的实际大小、在"拉平的网格"里的行号列号。
+ * 地块布局的检查和计算：每个小区块的实际大小、在"拉平的网格"里的行号列号。
  *
- * 拉平的网格是给手机端、大屏、导入这些还按"第几行第几列"处理小区块的地方用的：
- * 每一行区块占的行数 = 这一行里各区块小区块行数的最大值（道路、空地占 0 行），列同理；
- * 小区块的行号 = 它所在区块之前各行区块占的行数 + 它在区块里的行号。
+ * 拉平的网格是给手机端、大屏、导入这些还按"第几行第几列"处理小区块的地方用的。区块是随便摆的，
+ * 所以先按种植区块左上角的位置排出"第几排、第几列区块"：上边一样高的算一排，左边对齐的算一列；
+ * 每一排区块占的行数 = 这一排里各区块小区块行数的最大值，列同理（一个区块跨了几排时，行数不够就补在它跨到的最后一排）；
+ * 小区块的行号 = 它所在区块之前各排占的行数 + 它在区块里的行号。区块不叠在一起时，行号列号不会重复。
  */
 public final class LayoutGeometry {
 
-    public static final int MAX_BLOCK_TRACKS = 50;
+    public static final int MAX_BLOCKS = 400;
     public static final int MAX_INNER_TRACKS = 60;
     public static final int MAX_PLOTS = 3000;
-    private static final double EPS = 1e-6;
+    public static final double MAX_FIELD = 100000;
+    public static final double MIN_SIZE = 0.01;
+    /** 两个矩形挨着还是叠着：差这么一点不算叠（位置只记到小数点后 4 位） */
+    public static final double TOL = 1e-3;
     private static final Set<String> KINDS = Set.of(FieldLayout.PLANT, FieldLayout.ROAD, FieldLayout.GUARD, FieldLayout.BLANK);
 
     private LayoutGeometry() {
@@ -56,6 +59,9 @@ public final class LayoutGeometry {
         if (l == null) {
             throw ApiException.badRequest("没有布局");
         }
+        if (l.version() == null || l.version() != FieldLayout.VERSION) {
+            throw ApiException.badRequest("布局的格式是旧的，请把电脑端、手机端升级到最新版再改地块");
+        }
         Unit u = l.unit();
         if (u == null || u.meters() == null || !(u.meters() > 0) || u.meters() > 1000) {
             throw ApiException.badRequest("长度单位不对：1 个单位要在 0 到 1000 米之间");
@@ -63,24 +69,17 @@ public final class LayoutGeometry {
         if (blank(u.name()) || u.name().length() > 10 || (u.symbol() != null && u.symbol().length() > 10)) {
             throw ApiException.badRequest("长度单位的名称要填，不超过 10 个字");
         }
-        tracks(l.rows(), MAX_BLOCK_TRACKS, "区块的行");
-        tracks(l.cols(), MAX_BLOCK_TRACKS, "区块的列");
-        List<Span> merges = l.merges() == null ? List.of() : l.merges();
-        List<Span> anchors = anchors(l.rows().size(), l.cols().size(), merges, "区块");
-        if (l.blocks() == null || l.blocks().size() != anchors.size()) {
-            throw ApiException.badRequest("区块和网格对不上");
+        if (l.w() == null || l.h() == null || !(l.w() > 0) || !(l.h() > 0) || l.w() > MAX_FIELD || l.h() > MAX_FIELD) {
+            throw ApiException.badRequest("地块大小不对");
         }
-        Set<String> anchorKeys = new HashSet<>();
-        anchors.forEach(a -> anchorKeys.add(a.r() + "," + a.c()));
+        if (l.blocks() == null || l.blocks().size() > MAX_BLOCKS) {
+            throw ApiException.badRequest("区块、道路加起来最多 " + MAX_BLOCKS + " 个");
+        }
         Set<String> ids = new HashSet<>();
-        Set<String> seen = new HashSet<>();
         int plotCount = 0;
         for (Block b : l.blocks()) {
             if (blank(b.id()) || b.id().length() > 32 || !ids.add(b.id())) {
                 throw ApiException.badRequest("区块编号重复或为空");
-            }
-            if (!anchorKeys.contains(b.r() + "," + b.c()) || !seen.add(b.r() + "," + b.c())) {
-                throw ApiException.badRequest("区块位置不对：" + b.id());
             }
             if (b.name() != null && b.name().length() > 30) {
                 throw ApiException.badRequest("区块名称不能超过 30 个字");
@@ -88,13 +87,12 @@ public final class LayoutGeometry {
             if (!KINDS.contains(b.kind())) {
                 throw ApiException.badRequest("区块类型不对：" + b.kind());
             }
-            Fit slot = slot(l, spanOf(merges, b.r(), b.c()));
-            Fit fit = b.fit();
-            if (fit != null) {
-                if (!(fit.w() > 0) || !(fit.h() > 0) || fit.x() < -EPS || fit.y() < -EPS
-                        || fit.x() + fit.w() > slot.w() * (1 + EPS) + EPS || fit.y() + fit.h() > slot.h() * (1 + EPS) + EPS) {
-                    throw ApiException.badRequest("区块" + label(b) + "的大小或位置超出了原来的范围");
-                }
+            if (b.x() == null || b.y() == null || b.w() == null || b.h() == null
+                    || !(b.w() >= MIN_SIZE - 1e-9) || !(b.h() >= MIN_SIZE - 1e-9)) {
+                throw ApiException.badRequest("区块" + label(b) + "的位置或大小不对");
+            }
+            if (b.x() < -TOL || b.y() < -TOL || b.x() + b.w() > l.w() + TOL || b.y() + b.h() > l.h() + TOL) {
+                throw ApiException.badRequest("区块" + label(b) + "超出了地块");
             }
             if (FieldLayout.PLANT.equals(b.kind())) {
                 Inner in = b.inner();
@@ -129,10 +127,29 @@ public final class LayoutGeometry {
         if (plotCount > MAX_PLOTS) {
             throw ApiException.badRequest("小区块太多了：一块实验田最多 " + MAX_PLOTS + " 个小区块");
         }
+        // 区块之间不能叠在一起；道路和道路可以交叉
+        List<Block> blocks = l.blocks();
+        for (int i = 0; i < blocks.size(); i++) {
+            for (int j = i + 1; j < blocks.size(); j++) {
+                Block a = blocks.get(i);
+                Block b = blocks.get(j);
+                if (FieldLayout.ROAD.equals(a.kind()) && FieldLayout.ROAD.equals(b.kind())) {
+                    continue;
+                }
+                if (overlaps(a, b)) {
+                    throw ApiException.badRequest(label(a) + "和" + label(b) + "叠在一起了，挪开或者改小一个再保存");
+                }
+            }
+        }
         InnerSize d = l.defaultInner();
         if (d != null && (d.rows() < 1 || d.cols() < 1 || d.rows() > MAX_INNER_TRACKS || d.cols() > MAX_INNER_TRACKS)) {
             throw ApiException.badRequest("默认的小区块行列数不对");
         }
+    }
+
+    static boolean overlaps(Block a, Block b) {
+        return Math.min(a.x() + a.w(), b.x() + b.w()) - Math.max(a.x(), b.x()) > TOL
+                && Math.min(a.y() + a.h(), b.y() + b.h()) - Math.max(a.y(), b.y()) > TOL;
     }
 
     private static String label(Block b) {
@@ -184,15 +201,6 @@ public final class LayoutGeometry {
         return out;
     }
 
-    static Span spanOf(List<Span> merges, int r, int c) {
-        for (Span m : merges) {
-            if (m.r() == r && m.c() == c) {
-                return m;
-            }
-        }
-        return new Span(r, c, 1, 1);
-    }
-
     private static double sum(List<Double> a, int from, int to) {
         double s = 0;
         for (int i = from; i < to; i++) {
@@ -201,48 +209,85 @@ public final class LayoutGeometry {
         return s;
     }
 
-    /** 区块的槽位（单位同 unit） */
-    static Fit slot(FieldLayout l, Span s) {
-        return new Fit(sum(l.cols(), 0, s.c()), sum(l.rows(), 0, s.r()),
-                sum(l.cols(), s.c(), s.c() + s.cs()), sum(l.rows(), s.r(), s.r() + s.rs()));
-    }
-
     // ---------- 计算小区块 ----------
 
-    /** 所有小区块（种植区块里的格子），按区块、再按区块里的行列排序 */
-    public static Flat flatten(FieldLayout l) {
-        List<Span> merges = l.merges() == null ? List.of() : l.merges();
-        int nr = l.rows().size();
-        int nc = l.cols().size();
-        int[] rowTracks = new int[nr];
-        int[] colTracks = new int[nc];
-        List<Block> plant = l.blocks().stream().filter(b -> FieldLayout.PLANT.equals(b.kind()))
-                .sorted(Comparator.comparingInt(Block::r).thenComparingInt(Block::c)).toList();
-        // 先按没合并的方向算，再给跨多行（列）的区块补够
-        for (Block b : plant) {
-            Span s = spanOf(merges, b.r(), b.c());
-            if (s.rs() == 1) {
-                rowTracks[b.r()] = Math.max(rowTracks[b.r()], b.inner().rows().size());
+    /** 差不多一样的位置算一个，从小到大 */
+    private static List<Double> cluster(List<Double> values) {
+        List<Double> out = new ArrayList<>();
+        values.stream().sorted().forEach(v -> {
+            if (out.isEmpty() || v - out.get(out.size() - 1) > TOL) {
+                out.add(v);
             }
-            if (s.cs() == 1) {
-                colTracks[b.c()] = Math.max(colTracks[b.c()], b.inner().cols().size());
+        });
+        return out;
+    }
+
+    /** 位置 v 落在第几条上（starts 是 cluster 出来的） */
+    private static int trackOf(List<Double> starts, double v) {
+        int at = 0;
+        for (int i = 0; i < starts.size(); i++) {
+            if (starts.get(i) <= v + TOL) {
+                at = i;
             }
         }
+        return at;
+    }
+
+    /** 从 from 到 to 这一段盖住了哪几条（至少盖住 first 这一条）：返回最后一条的序号 */
+    private static int lastCovered(List<Double> starts, int first, double end) {
+        int last = first;
+        for (int i = first + 1; i < starts.size(); i++) {
+            // 留出 3 倍的余量：挨着的下一个区块最多和这个区块叠 TOL，它那一条的起点又可能比它自己靠前 TOL
+            if (starts.get(i) < end - 3 * TOL) {
+                last = i;
+            }
+        }
+        return last;
+    }
+
+    /** 所有小区块（种植区块里的格子），按区块（从上到下、从左到右）、再按区块里的行列排序 */
+    public static Flat flatten(FieldLayout l) {
+        List<Block> plant = l.blocks().stream().filter(b -> FieldLayout.PLANT.equals(b.kind())).toList();
+        List<Double> ys = cluster(plant.stream().map(Block::y).toList());
+        List<Double> xs = cluster(plant.stream().map(Block::x).toList());
+        int nr = ys.size();
+        int nc = xs.size();
+        int[] rowTracks = new int[nr];
+        int[] colTracks = new int[nc];
+        record Placed(Block block, int r, int r2, int c, int c2) {
+        }
+        List<Placed> placed = new ArrayList<>();
         for (Block b : plant) {
-            Span s = spanOf(merges, b.r(), b.c());
+            int r = trackOf(ys, b.y());
+            int c = trackOf(xs, b.x());
+            placed.add(new Placed(b, r, lastCovered(ys, r, b.y() + b.h()), c, lastCovered(xs, c, b.x() + b.w())));
+        }
+        placed.sort(Comparator.comparingInt(Placed::r).thenComparingInt(Placed::c));
+        // 先按只占一排（列）的区块算，再给跨几排（列）的区块补够
+        for (Placed p : placed) {
+            if (p.r2() == p.r()) {
+                rowTracks[p.r()] = Math.max(rowTracks[p.r()], p.block().inner().rows().size());
+            }
+            if (p.c2() == p.c()) {
+                colTracks[p.c()] = Math.max(colTracks[p.c()], p.block().inner().cols().size());
+            }
+        }
+        for (Placed p : placed) {
             int haveR = 0;
-            for (int r = s.r(); r < s.r() + s.rs(); r++) {
+            for (int r = p.r(); r <= p.r2(); r++) {
                 haveR += rowTracks[r];
             }
-            if (haveR < b.inner().rows().size()) {
-                rowTracks[s.r() + s.rs() - 1] += b.inner().rows().size() - haveR;
+            int needR = p.block().inner().rows().size();
+            if (haveR < needR) {
+                rowTracks[p.r2()] += needR - haveR;
             }
             int haveC = 0;
-            for (int c = s.c(); c < s.c() + s.cs(); c++) {
+            for (int c = p.c(); c <= p.c2(); c++) {
                 haveC += colTracks[c];
             }
-            if (haveC < b.inner().cols().size()) {
-                colTracks[s.c() + s.cs() - 1] += b.inner().cols().size() - haveC;
+            int needC = p.block().inner().cols().size();
+            if (haveC < needC) {
+                colTracks[p.c2()] += needC - haveC;
             }
         }
         int[] rowStart = new int[nr + 1];
@@ -256,19 +301,17 @@ public final class LayoutGeometry {
 
         double meters = l.unit().meters();
         List<Leaf> leaves = new ArrayList<>();
-        for (Block b : plant) {
-            Fit slot = slot(l, spanOf(merges, b.r(), b.c()));
-            double bw = b.fit() == null ? slot.w() : b.fit().w();
-            double bh = b.fit() == null ? slot.h() : b.fit().h();
+        for (Placed p : placed) {
+            Block b = p.block();
             Inner in = b.inner();
             double rowSum = sum(in.rows(), 0, in.rows().size());
             double colSum = sum(in.cols(), 0, in.cols().size());
             Map<String, Long> ids = in.plots() == null ? Map.of() : in.plots();
             for (Span cell : anchors(in.rows().size(), in.cols().size(), in.merges() == null ? List.of() : in.merges(), "")) {
-                double w = sum(in.cols(), cell.c(), cell.c() + cell.cs()) / colSum * bw * meters;
-                double h = sum(in.rows(), cell.r(), cell.r() + cell.rs()) / rowSum * bh * meters;
+                double w = sum(in.cols(), cell.c(), cell.c() + cell.cs()) / colSum * b.w() * meters;
+                double h = sum(in.rows(), cell.r(), cell.r() + cell.rs()) / rowSum * b.h() * meters;
                 leaves.add(new Leaf(b, cell, ids.get(cell.r() + "," + cell.c()), w, h,
-                        rowStart[b.r()] + cell.r() + 1, colStart[b.c()] + cell.c() + 1));
+                        rowStart[p.r()] + cell.r() + 1, colStart[p.c()] + cell.c() + 1));
             }
         }
         return new Flat(leaves, Math.max(1, rowStart[nr]), Math.max(1, colStart[nc]));
@@ -303,8 +346,9 @@ public final class LayoutGeometry {
         }
         double h = round(innerRows.stream().mapToDouble(Double::doubleValue).sum());
         double w = round(innerCols.stream().mapToDouble(Double::doubleValue).sum());
-        Block b = new Block("B1", 0, 0, "区块1", FieldLayout.PLANT, null, new Inner(innerRows, innerCols, List.of(), ids, null));
-        return new FieldLayout(1, new Unit("米", "m", 1.0), List.of(h), List.of(w), List.of(), List.of(b), 2,
+        Block b = new Block("B1", "区块1", FieldLayout.PLANT, 0.0, 0.0, w, h,
+                new Inner(innerRows, innerCols, List.of(), ids, null));
+        return new FieldLayout(FieldLayout.VERSION, new Unit("米", "m", 1.0), w, h, List.of(b), 2,
                 new InnerSize(rows, cols), 0.0);
     }
 

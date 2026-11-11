@@ -61,11 +61,11 @@ class BreedingIntegrationTest {
     private static Map<String, Object> layout() {
         Map<String, Object> inner = Map.of("rows", List.of(1, 1), "cols", List.of(1, 1), "merges", List.of());
         return new HashMap<>(Map.of(
-                "version", 1, "unit", Map.of("name", "米", "symbol", "m", "meters", 1.0),
-                "rows", List.of(20), "cols", List.of(6, 6), "merges", List.of(),
+                "version", 2, "unit", Map.of("name", "米", "symbol", "m", "meters", 1.0),
+                "w", 12, "h", 20,
                 "blocks", List.of(
-                        Map.of("id", "B1", "r", 0, "c", 0, "name", "区块1", "kind", "PLANT", "inner", inner),
-                        Map.of("id", "B2", "r", 0, "c", 1, "name", "区块2", "kind", "PLANT", "inner", inner)),
+                        Map.of("id", "B1", "x", 0, "y", 0, "w", 6, "h", 20, "name", "区块1", "kind", "PLANT", "inner", inner),
+                        Map.of("id", "B2", "x", 6, "y", 0, "w", 6, "h", 20, "name", "区块2", "kind", "PLANT", "inner", inner)),
                 "nextBlockNo", 3, "defaultInner", Map.of("rows", 2, "cols", 2)));
     }
 

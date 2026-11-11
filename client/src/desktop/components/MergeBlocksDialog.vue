@@ -1,10 +1,10 @@
 <script setup lang="ts">
-// 合并几个区块：选好的区块围成一个矩形，合并成一个区块。可以保留原来的小区块（能拼起来时），
+// 合并几个区块：选好的区块合并成一个，占它们的外框（夹在中间的道路一起选上就并进来）。可以保留原来的小区块（能拼起来时），
 // 也可以重新分成几行几列——原来的小区块按位置留下，落不进新格子的去掉
 import { computed, reactive, watch } from 'vue'
 
 import {
-  BLOCK_KIND, MAX_INNER_TRACKS, blockSpan, mergeBlocks, plotSpots, regridInner, removedPlots, renameBlock, setBlockKind,
+  BLOCK_KIND, MAX_INNER_TRACKS, boundsOf, mergeBlocks, plotSize, plotSpots, regridInner, removedPlots, renameBlock, setBlockKind,
   type BlockKind, type FieldLayout,
 } from '@/shared/fieldLayout'
 
@@ -18,27 +18,20 @@ const emit = defineEmits<{ apply: [layout: FieldLayout, anchorId: string] }>()
 
 const KINDS: BlockKind[] = ['PLANT', 'ROAD', 'GUARD', 'BLANK']
 
-/** 选中的区块围成的矩形，以及合并的结果（还没改类型、行列） */
+/** 选中的区块合并的结果（还没改类型、行列） */
 const base = computed(() => {
-  const blocks = props.blockIds.map((id) => props.layout.blocks.find((b) => b.id === id)).filter((b) => !!b)
-  if (blocks.length < 2) return null
-  const spans = blocks.map((b) => blockSpan(props.layout, b))
-  const a = { r: Math.min(...spans.map((s) => s.r)), c: Math.min(...spans.map((s) => s.c)) }
-  const z = { r: Math.max(...spans.map((s) => s.r + s.rs - 1)), c: Math.max(...spans.map((s) => s.c + s.cs - 1)) }
-  const res = mergeBlocks(props.layout, a, z)
-  const anchor = res.layout.blocks.find((b) => b.r === a.r && b.c === a.c) ?? null
-  // 矩形里没选的区块也会并进来
-  const inside = props.layout.blocks.filter((b) => {
-    const s = blockSpan(props.layout, b)
-    return s.r >= a.r && s.c >= a.c && s.r + s.rs - 1 <= z.r && s.c + s.cs - 1 <= z.c
-  })
-  const extra = inside.filter((b) => !props.blockIds.includes(b.id))
+  const inside = props.blockIds.map((id) => props.layout.blocks.find((b) => b.id === id)).filter((b) => !!b)
+  if (inside.length < 2) return null
+  const res = mergeBlocks(props.layout, props.blockIds)
+  const anchor = res.anchorId ? res.layout.blocks.find((b) => b.id === res.anchorId) ?? null : null
   // 合并前各个区块里的小区块在哪：重新分小区块时按位置放进新格子
   const spots = plotSpots(props.layout, inside.map((b) => b.id))
-  return { res, anchor, extra, inside, count: inside.length, spots }
+  return { res, anchor, inside, count: inside.length, spots, box: boundsOf(inside)! }
 })
 
 const form = reactive({ name: '', kind: 'PLANT' as BlockKind, mode: 'keep' as 'keep' | 'regrid', rows: 2, cols: 3 })
+
+const median = (a: number[]) => [...a].sort((x, y) => x - y)[Math.floor(a.length / 2)]!
 
 watch(visible, (open) => {
   const b = base.value
@@ -46,17 +39,12 @@ watch(visible, (open) => {
   form.name = b.anchor.name
   form.kind = b.anchor.kind
   form.mode = b.res.joined && b.anchor.inner ? 'keep' : 'regrid'
-  // 重新分时默认把各区块的小区块行列加起来：并排的区块列数相加，上下的行数相加，原来的小区块正好都有地方放
+  // 重新分时默认按原来小区块的大小分：合并后多宽多长，除以原来每个小区块的宽和长，原来的小区块差不多都有地方放
   const d = props.layout.defaultInner ?? { rows: 2, cols: 3 }
-  const plant = b.inside.filter((x) => x.kind === 'PLANT' && x.inner)
-  const byRow = new Map<number, number>()
-  const byCol = new Map<number, number>()
-  for (const x of plant) {
-    byRow.set(x.r, (byRow.get(x.r) ?? 0) + x.inner!.cols.length)
-    byCol.set(x.c, (byCol.get(x.c) ?? 0) + x.inner!.rows.length)
-  }
-  form.rows = Math.min(MAX_INNER_TRACKS, Math.max(1, ...byCol.values(), plant.length ? 1 : d.rows))
-  form.cols = Math.min(MAX_INNER_TRACKS, Math.max(1, ...byRow.values(), plant.length ? 1 : d.cols))
+  const sizes = b.inside.filter((x) => x.kind === 'PLANT').map((x) => plotSize(props.layout, x)).filter((v) => !!v)
+  const fit = (total: number, one: number) => Math.min(MAX_INNER_TRACKS, Math.max(1, Math.round(total / one)))
+  form.rows = sizes.length ? fit(b.box.h, median(sizes.map((v) => v.h))) : d.rows
+  form.cols = sizes.length ? fit(b.box.w, median(sizes.map((v) => v.w))) : d.cols
   if (b.res.joined && b.anchor.inner) {
     form.rows = b.anchor.inner.rows.length
     form.cols = b.anchor.inner.cols.length
@@ -101,12 +89,10 @@ function apply() {
 
 <template>
   <el-dialog v-model="visible" title="合并成一个区块" width="560px" append-to-body>
+    <div v-if="base && base.res.problem" class="warn">合并不了：{{ base.res.problem }}。</div>
     <template v-if="base && base.anchor && result">
       <div class="summary">
-        把 <b>{{ base.count }}</b> 个区块合并成一个。
-        <template v-if="base.extra.length">
-          选中的区块围成的矩形里还有 <b>{{ base.extra.map((b) => b.name).join('、') }}</b>，也会并进来。
-        </template>
+        把选中的 <b>{{ base.count }}</b> 个合并成一个区块，占它们围成的整片地方（夹在中间的道路、空当一起并进来）。
       </div>
 
       <el-form label-width="76px" class="form">
@@ -128,7 +114,7 @@ function apply() {
                 <span v-if="base.res.joined && base.anchor.inner" class="muted">
                   （{{ base.anchor.inner.rows.length }} 行 × {{ base.anchor.inner.cols.length }} 列）
                 </span>
-                <span v-else class="muted">（行列对不上，拼不起来）</span>
+                <span v-else class="muted">（没有排整齐，或者行列对不上，拼不起来）</span>
               </el-radio>
               <el-radio value="regrid">重新分</el-radio>
             </el-radio-group>

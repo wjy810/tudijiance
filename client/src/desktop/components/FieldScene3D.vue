@@ -13,7 +13,7 @@ import MapCompass from './MapCompass.vue'
 import guardTileUrl from '@/assets/art/guard-tile.webp'
 import roadTileUrl from '@/assets/art/road-tile.webp'
 import {
-  CELL_KIND, blockRect, blockSlot, fieldSize, innerCells, type CellKind, type FieldLayout, type Rect,
+  CELL_KIND, blockRect, fieldSize, innerCells, type CellKind, type FieldLayout, type Rect,
 } from '@/shared/fieldLayout'
 import type { CanvasCell, CanvasDevice, CanvasLink } from './FieldCanvas.vue'
 
@@ -188,15 +188,13 @@ function build() {
 
   insts = []
   instByPlot.clear()
+  let roadNo = 0
   for (const b of l.blocks) {
-    const slot = blockSlot(l, b)
     const rect = blockRect(l, b)
-    if (b.fit) {
-      // 特殊区块：槽位里其余部分是道路
-      root.add(slab(slot, 0.02, 0, 'ROAD'))
-    }
     if (b.kind !== 'PLANT') {
-      root.add(slab(rect, b.kind === 'GUARD' ? 0.3 * ex : 0.02, 0, b.kind))
+      // 道路可以交叉：每条高一点点，交叉的地方两个面不会闪
+      const low = b.kind === 'ROAD' ? 0.02 + (roadNo++ % 40) * 0.0008 : 0.02
+      root.add(slab(rect, b.kind === 'GUARD' ? 0.3 * ex : low, 0, b.kind))
       continue
     }
     root.add(slab(rect, PLATE, 0, 'PLATE'))

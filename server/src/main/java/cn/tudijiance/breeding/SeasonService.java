@@ -3,7 +3,6 @@ package cn.tudijiance.breeding;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -303,11 +302,9 @@ public class SeasonService {
     static FieldLayout withoutPlots(FieldLayout l) {
         List<Block> blocks = l.blocks().stream().map(b -> {
             Inner in = b.inner();
-            return in == null ? b : new Block(b.id(), b.r(), b.c(), b.name(), b.kind(), b.fit(),
-                    new Inner(in.rows(), in.cols(), in.merges(), Map.of(), in.kinds()));
-        }).sorted(Comparator.comparingInt(Block::r).thenComparingInt(Block::c)).toList();
-        return new FieldLayout(l.version(), l.unit(), l.rows(), l.cols(), l.merges(), blocks, l.nextBlockNo(),
-                l.defaultInner(), l.northDeg());
+            return in == null ? b : b.withInner(new Inner(in.rows(), in.cols(), in.merges(), Map.of(), in.kinds()));
+        }).toList();
+        return l.withBlocks(blocks);
     }
 
     private static boolean blank(String s) {

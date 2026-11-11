@@ -1,9 +1,12 @@
-// 实验田的区块布局：实验田 → 区块 → 小区块两层网格。和服务器 FieldLayout.java 的字段一致。
+// 地块布局：地块 → 区块 → 小区块。和服务器 FieldLayout.java 的字段一致。
 //
-//   区块网格  rows（每行区块的高）× cols（每列区块的宽），单位见 unit，可以合并（merges）
-//   区块      PLANT 种植区块里再分小区块网格（inner）；ROAD 道路、GUARD 保护区、BLANK 空地没有小区块
-//   特殊区块  fit 比原来的位置（槽位）小时，槽位里其余部分是道路，区块可以在槽位里移动
+//   地块      一个矩形（w × h，单位见 unit）。区块、道路都是摆在里面的矩形，位置和大小随便改
+//   区块      x、y 是左上角在地块里的位置，w、h 是大小。PLANT 种植区块里再分小区块网格（inner）；
+//             ROAD 道路、GUARD 保护区、BLANK 空地没有小区块。没被盖住的地方就是空着的地
 //   小区块网格  inner.rows / inner.cols 是相对大小，按区块实际大小分；可以合并；inner.plots 记格子对应的小区块 id
+//
+// 区块之间不能叠在一起，道路和道路可以交叉。画一条道路穿过区块时，区块在最近的小区块分界线处切开，
+// 后面的往后挪一个路宽（小区块大小不变，地块跟着变大）。
 //
 // 这里都是纯函数：每个操作返回新的布局，不改原来的，方便撤销和测试。
 
@@ -45,20 +48,22 @@ export interface Inner {
 
 export interface LayoutBlock {
   id: string
-  r: number
-  c: number
   name: string
   kind: BlockKind
-  fit: Rect | null
+  /** 左上角在地块里的位置和大小（单位同布局） */
+  x: number
+  y: number
+  w: number
+  h: number
   inner: Inner | null
 }
 
 export interface FieldLayout {
-  version: 1
+  version: 2
   unit: Unit
-  rows: number[]
-  cols: number[]
-  merges: Span[]
+  /** 地块的大小 */
+  w: number
+  h: number
   blocks: LayoutBlock[]
   nextBlockNo: number
   defaultInner: { rows: number; cols: number } | null
@@ -94,10 +99,16 @@ export const UNIT_PRESETS: Unit[] = [
   { name: '英尺', symbol: 'ft', meters: 0.3048 },
 ]
 
-export const MAX_BLOCK_TRACKS = 50
+export const MAX_BLOCKS = 400
 export const MAX_INNER_TRACKS = 60
 export const MAX_PLOTS = 3000
+/** 地块最大多少（单位同布局） */
+export const MAX_FIELD = 100000
+/** 区块、道路最小多大 */
+export const MIN_SIZE = 0.01
 const EPS = 1e-6
+/** 两个矩形挨着还是叠着：差这么一点不算叠（位置只记到小数点后 4 位，三等分时会有零头） */
+export const TOL = 1e-3
 
 // ---------- 小工具 ----------
 
@@ -115,6 +126,7 @@ export const sum = (a: number[], from = 0, to = a.length) => {
 }
 
 export const round = (v: number, d = 3) => Math.round(v * 10 ** d) / 10 ** d
+const r4 = (v: number) => round(v, 4)
 const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), Math.max(lo, hi))
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T
 
@@ -174,7 +186,7 @@ const containsSpan = (outer: Span, s: Span) =>
 // ---------- 几何 ----------
 
 export function fieldSize(l: FieldLayout): { w: number; h: number } {
-  return { w: sum(l.cols), h: sum(l.rows) }
+  return { w: l.w, h: l.h }
 }
 
 /** 网格里一个范围的矩形 */
@@ -182,19 +194,36 @@ export function trackRect(rows: number[], cols: number[], s: Span): Rect {
   return { x: sum(cols, 0, s.c), y: sum(rows, 0, s.r), w: sum(cols, s.c, s.c + s.cs), h: sum(rows, s.r, s.r + s.rs) }
 }
 
-export function blockSpan(l: FieldLayout, b: LayoutBlock): Span {
-  return spanOf(l.merges, b.r, b.c)
+/** 区块占的地方 */
+export function blockRect(_l: FieldLayout, b: LayoutBlock): Rect {
+  return { x: b.x, y: b.y, w: b.w, h: b.h }
 }
 
-/** 区块的槽位（原来的位置） */
-export function blockSlot(l: FieldLayout, b: LayoutBlock): Rect {
-  return trackRect(l.rows, l.cols, blockSpan(l, b))
+/** 两个矩形是不是叠在一起（只是挨着不算） */
+export function overlaps(a: Rect, b: Rect, tol = TOL): boolean {
+  return Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x) > tol && Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y) > tol
 }
 
-/** 区块实际占的地方：特殊区块按 fit，否则就是槽位 */
-export function blockRect(l: FieldLayout, b: LayoutBlock): Rect {
-  const s = blockSlot(l, b)
-  return b.fit ? { x: s.x + b.fit.x, y: s.y + b.fit.y, w: b.fit.w, h: b.fit.h } : s
+/** 几个矩形的外框 */
+export function boundsOf(rects: Rect[]): Rect | null {
+  if (rects.length === 0) return null
+  const x = Math.min(...rects.map((r) => r.x))
+  const y = Math.min(...rects.map((r) => r.y))
+  return { x, y, w: Math.max(...rects.map((r) => r.x + r.w)) - x, h: Math.max(...rects.map((r) => r.y + r.h)) - y }
+}
+
+/** 叠在一起的区块（两两一对）。道路和道路可以交叉，不算 */
+export function conflicts(l: FieldLayout): [string, string][] {
+  const out: [string, string][] = []
+  for (let i = 0; i < l.blocks.length; i++) {
+    for (let j = i + 1; j < l.blocks.length; j++) {
+      const a = l.blocks[i]!
+      const b = l.blocks[j]!
+      if (a.kind === 'ROAD' && b.kind === 'ROAD') continue
+      if (overlaps(a, b)) out.push([a.id, b.id])
+    }
+  }
+  return out
 }
 
 export interface CellGeom {
@@ -281,6 +310,86 @@ export function plotPlaces(l: FieldLayout | null | undefined): Map<number, strin
   return out
 }
 
+/** 种植区块，从上到下、从左到右（手机端、列表按这个顺序排） */
+export function plantBlocks(l: FieldLayout): LayoutBlock[] {
+  return l.blocks.filter((b) => b.kind === 'PLANT' && b.inner).sort((a, b) => (Math.abs(a.y - b.y) > TOL ? a.y - b.y : a.x - b.x))
+}
+
+/** 画的先后：道路垫在下面，区块画在上面 */
+export function drawOrder(l: FieldLayout): LayoutBlock[] {
+  return [...l.blocks.filter((b) => b.kind === 'ROAD'), ...l.blocks.filter((b) => b.kind !== 'ROAD')]
+}
+
+/** 每个小区块多大：各行各列一样大时才有 */
+export function plotSize(l: FieldLayout, b: LayoutBlock): { w: number; h: number } | null {
+  if (!b.inner) return null
+  const even = (a: number[]) => a.every((v) => Math.abs(v - a[0]!) <= Math.abs(a[0]!) * 1e-6)
+  if (!even(b.inner.rows) || !even(b.inner.cols)) return null
+  return { w: b.w / b.inner.cols.length, h: b.h / b.inner.rows.length }
+}
+
+const median = (a: number[]) => {
+  const s = [...a].sort((x, y) => x - y)
+  const m = Math.floor(s.length / 2)
+  return s.length % 2 ? s[m]! : (s[m - 1]! + s[m]!) / 2
+}
+
+/** 这块地里小区块一般多大（各区块取中间值）；还没有种植区块时 null */
+export function typicalPlot(l: FieldLayout): { w: number; h: number } | null {
+  const sizes = l.blocks.filter((b) => b.kind === 'PLANT').map((b) => plotSize(l, b)).filter((s): s is { w: number; h: number } => !!s)
+  if (sizes.length === 0) return null
+  return { w: median(sizes.map((s) => s.w)), h: median(sizes.map((s) => s.h)) }
+}
+
+// ---------- 整理 ----------
+
+/** 所有区块、道路占的范围 */
+export function contentBounds(l: FieldLayout): Rect | null {
+  return boundsOf(l.blocks)
+}
+
+/**
+ * 改完以后整理一下（直接改传进来的布局）：位置和大小只记 4 位小数；有东西挪到了地块左边、上边外面时，
+ * 所有东西一起往右、往下挪回来（地块往那边变大）；右边、下边超出时地块跟着变大
+ */
+function settle(l: FieldLayout): FieldLayout {
+  const b = contentBounds(l)
+  const dx = b && b.x < -EPS ? -b.x : 0
+  const dy = b && b.y < -EPS ? -b.y : 0
+  for (const x of l.blocks) {
+    x.x = r4(x.x + dx)
+    x.y = r4(x.y + dy)
+    x.w = r4(x.w)
+    x.h = r4(x.h)
+  }
+  l.w = r4(Math.max(l.w + dx, ...l.blocks.map((x) => x.x + x.w)))
+  l.h = r4(Math.max(l.h + dy, ...l.blocks.map((x) => x.y + x.h)))
+  return l
+}
+
+/** 改地块大小：不能比里面的东西小 */
+export function setFieldSize(layout: FieldLayout, w: number, h: number): FieldLayout {
+  const b = contentBounds(layout)
+  const nw = r4(clamp(w, b ? b.x + b.w : MIN_SIZE, MAX_FIELD))
+  const nh = r4(clamp(h, b ? b.y + b.h : MIN_SIZE, MAX_FIELD))
+  if (Math.abs(nw - layout.w) < EPS && Math.abs(nh - layout.h) < EPS) return layout
+  return { ...layout, w: nw, h: nh }
+}
+
+/** 地块收紧到正好放下里面的东西，四周留 margin */
+export function fitField(layout: FieldLayout, margin = 0): FieldLayout {
+  const b = contentBounds(layout)
+  if (!b) return layout
+  const l = clone(layout)
+  for (const x of l.blocks) {
+    x.x = r4(x.x - b.x + margin)
+    x.y = r4(x.y - b.y + margin)
+  }
+  l.w = r4(b.w + margin * 2)
+  l.h = r4(b.h + margin * 2)
+  return JSON.stringify(l) === JSON.stringify(layout) ? layout : l
+}
+
 // ---------- 新建 ----------
 
 export interface CreateOptions {
@@ -306,60 +415,33 @@ function evenInner(rows: number, cols: number): Inner {
 }
 
 /**
- * 初始化：几行几列区块、每块多宽多高、里面几行几列小区块，区块之间可以留横向、纵向道路。
- * 地块大小就是区块加道路加起来，以后加区块、加道路地块跟着变大
+ * 初始化：几行几列区块、每块多宽多高、里面几行几列小区块，区块之间可以留横向、纵向道路（每条道路通到头）。
+ * 地块大小就是区块加道路加起来，以后再随便改
  */
 export function createLayout(o: CreateOptions): FieldLayout {
-  const rowRoad = o.rowRoadW ?? o.roadW
-  const colRoad = o.colRoadW ?? o.roadW
-  const rows: number[] = []
-  const cols: number[] = []
-  const roadRow: boolean[] = []
-  const roadCol: boolean[] = []
-  for (let i = 0; i < o.blockRows; i++) {
-    if (rowRoad > 0 && i > 0) {
-      rows.push(rowRoad)
-      roadRow.push(true)
-    }
-    rows.push(o.blockH)
-    roadRow.push(false)
-  }
-  for (let j = 0; j < o.blockCols; j++) {
-    if (colRoad > 0 && j > 0) {
-      cols.push(colRoad)
-      roadCol.push(true)
-    }
-    cols.push(o.blockW)
-    roadCol.push(false)
-  }
-  const merges: Span[] = []
+  const rowRoad = Math.max(0, o.rowRoadW ?? o.roadW)
+  const colRoad = Math.max(0, o.colRoadW ?? o.roadW)
+  const w = r4(o.blockCols * o.blockW + (o.blockCols - 1) * colRoad)
+  const h = r4(o.blockRows * o.blockH + (o.blockRows - 1) * rowRoad)
   const blocks: LayoutBlock[] = []
   let no = 1
-  let roadNo = 1
-  // 没有横向道路时，纵向道路上下连成一条
-  const wholeColumn = !roadRow.some(Boolean) && rows.length > 1
-  for (let r = 0; r < rows.length; r++) {
-    if (roadRow[r]) {
-      // 横向道路整行合并成一条
-      if (cols.length > 1) merges.push({ r, c: 0, rs: 1, cs: cols.length })
-      blocks.push({ id: `R${roadNo++}`, r, c: 0, name: '道路', kind: 'ROAD', fit: null, inner: null })
-      continue
-    }
-    for (let c = 0; c < cols.length; c++) {
-      if (roadCol[c]) {
-        if (wholeColumn && r > 0) continue
-        if (wholeColumn) merges.push({ r: 0, c, rs: rows.length, cs: 1 })
-        blocks.push({ id: `R${roadNo++}`, r, c, name: '道路', kind: 'ROAD', fit: null, inner: null })
-      } else {
-        blocks.push({
-          id: `B${no}`, r, c, name: `区块${no}`, kind: 'PLANT', fit: null, inner: evenInner(o.innerRows, o.innerCols),
-        })
-        no++
-      }
+  for (let i = 0; i < o.blockRows; i++) {
+    for (let j = 0; j < o.blockCols; j++) {
+      blocks.push({
+        id: `B${no}`, name: `区块${no}`, kind: 'PLANT', x: r4(j * (o.blockW + colRoad)), y: r4(i * (o.blockH + rowRoad)),
+        w: o.blockW, h: o.blockH, inner: evenInner(o.innerRows, o.innerCols),
+      })
+      no++
     }
   }
+  let roadNo = 1
+  const road = (x: number, y: number, rw: number, rh: number) => {
+    blocks.push({ id: `R${roadNo++}`, name: '道路', kind: 'ROAD', x: r4(x), y: r4(y), w: r4(rw), h: r4(rh), inner: null })
+  }
+  if (rowRoad > 0) for (let i = 1; i < o.blockRows; i++) road(0, i * o.blockH + (i - 1) * rowRoad, w, rowRoad)
+  if (colRoad > 0) for (let j = 1; j < o.blockCols; j++) road(j * o.blockW + (j - 1) * colRoad, 0, colRoad, h)
   return {
-    version: 1, unit: { ...o.unit }, rows, cols, merges, blocks, nextBlockNo: Math.max(no, roadNo),
+    version: 2, unit: { ...o.unit }, w, h, blocks, nextBlockNo: Math.max(no, roadNo),
     defaultInner: { rows: o.innerRows, cols: o.innerCols }, northDeg: 0,
   }
 }
@@ -374,148 +456,231 @@ function nextPlantName(l: FieldLayout): string {
   return `区块${max + 1}`
 }
 
-function newBlock(l: FieldLayout, r: number, c: number, kind: BlockKind = 'PLANT'): LayoutBlock {
+function nextId(l: FieldLayout): string {
   let n = l.nextBlockNo++
   while (l.blocks.some((b) => b.id === `B${n}`)) n = l.nextBlockNo++
-  const d = l.defaultInner ?? { rows: 1, cols: 1 }
+  return `B${n}`
+}
+
+/** 一个 w × h 的新种植区块里分几行几列：按这块地里小区块一般的大小算，还没有种植区块时用"新区块默认" */
+export function innerCountFor(l: FieldLayout, w: number, h: number): { rows: number; cols: number } {
+  const plot = typicalPlot(l)
+  if (plot) {
+    return { rows: clamp(Math.round(h / plot.h), 1, MAX_INNER_TRACKS), cols: clamp(Math.round(w / plot.w), 1, MAX_INNER_TRACKS) }
+  }
+  return l.defaultInner ?? { rows: 1, cols: 1 }
+}
+
+function innerFor(l: FieldLayout, w: number, h: number): Inner {
+  const n = innerCountFor(l, w, h)
+  return evenInner(n.rows, n.cols)
+}
+
+function newBlock(l: FieldLayout, rect: Rect, kind: BlockKind): LayoutBlock {
   return {
-    id: `B${n}`, r, c, name: kind === 'PLANT' ? nextPlantName(l) : BLOCK_KIND[kind], kind, fit: null,
-    inner: kind === 'PLANT' ? evenInner(d.rows, d.cols) : null,
+    id: nextId(l), name: kind === 'PLANT' ? nextPlantName(l) : BLOCK_KIND[kind], kind,
+    x: rect.x, y: rect.y, w: rect.w, h: rect.h, inner: kind === 'PLANT' ? innerFor(l, rect.w, rect.h) : null,
   }
 }
 
-// ---------- 区块网格 ----------
+// ---------- 摆放：加、挪、改大小、删、复制 ----------
 
-export type Axis = 'row' | 'col'
-
-/** 槽位变了以后修正特殊区块：超出就收小，正好填满就恢复成普通区块 */
-function reconcileFits(l: FieldLayout) {
-  for (const b of l.blocks) {
-    if (!b.fit) continue
-    const s = blockSlot(l, b)
-    const w = Math.min(b.fit.w, s.w)
-    const h = Math.min(b.fit.h, s.h)
-    if (Math.abs(w - s.w) < EPS && Math.abs(h - s.h) < EPS) {
-      b.fit = null
-    } else {
-      b.fit = { w, h, x: clamp(b.fit.x, 0, s.w - w), y: clamp(b.fit.y, 0, s.h - h) }
-    }
-  }
-}
-
-/** 改一行区块的高或一列区块的宽 */
-export function setTrackSize(layout: FieldLayout, axis: Axis, index: number, size: number): FieldLayout {
+function mapBlocks(layout: FieldLayout, ids: string[], fn: (b: LayoutBlock, l: FieldLayout) => void): FieldLayout {
   const l = clone(layout)
-  const tracks = axis === 'row' ? l.rows : l.cols
-  if (index < 0 || index >= tracks.length || !(size > 0)) return layout
-  tracks[index] = round(size, 4)
-  reconcileFits(l)
+  const set = new Set(ids)
+  for (const b of l.blocks) if (set.has(b.id)) fn(b, l)
   return l
+}
+
+const validRect = (r: Rect) => [r.x, r.y, r.w, r.h].every(Number.isFinite) && r.w >= MIN_SIZE - EPS && r.h >= MIN_SIZE - EPS
+
+/** 在 rect 这里加一个区块（道路、保护区、空地也是） */
+export function addBlock(layout: FieldLayout, rect: Rect, kind: BlockKind = 'PLANT'): { layout: FieldLayout; id: string | null } {
+  if (!validRect(rect) || layout.blocks.length >= MAX_BLOCKS) return { layout, id: null }
+  const l = clone(layout)
+  const b = newBlock(l, rect, kind)
+  l.blocks.push(b)
+  return { layout: settle(l), id: b.id }
+}
+
+/** 把选中的区块一起挪 dx、dy */
+export function moveBlocks(layout: FieldLayout, ids: string[], dx: number, dy: number): FieldLayout {
+  if ((Math.abs(dx) < EPS && Math.abs(dy) < EPS) || !ids.some((id) => layout.blocks.some((b) => b.id === id))) return layout
+  return settle(mapBlocks(layout, ids, (b) => {
+    b.x += dx
+    b.y += dy
+  }))
+}
+
+/** 改一个区块的位置和大小；里面的小区块按比例跟着变 */
+export function setBlockRect(layout: FieldLayout, id: string, rect: Rect): FieldLayout {
+  const b = layout.blocks.find((x) => x.id === id)
+  if (!b || !validRect(rect)) return layout
+  if (Math.abs(b.x - rect.x) < EPS && Math.abs(b.y - rect.y) < EPS && Math.abs(b.w - rect.w) < EPS && Math.abs(b.h - rect.h) < EPS) return layout
+  return settle(mapBlocks(layout, [id], (x) => Object.assign(x, { x: rect.x, y: rect.y, w: rect.w, h: rect.h })))
+}
+
+/** 删掉区块（里面的小区块一起去掉）；地块大小不变 */
+export function removeBlocks(layout: FieldLayout, ids: string[]): FieldLayout {
+  const set = new Set(ids)
+  if (!layout.blocks.some((b) => set.has(b.id))) return layout
+  const l = clone(layout)
+  l.blocks = l.blocks.filter((b) => !set.has(b.id))
+  return l
+}
+
+/** 复制出来的区块：一样大、一样的行列和格子类型，小区块是新的 */
+function copyOf(l: FieldLayout, b: LayoutBlock, dx: number, dy: number): LayoutBlock {
+  const inner = b.inner ? { ...clone(b.inner), plots: {} } : null
+  return { ...clone(b), id: nextId(l), name: b.kind === 'PLANT' ? nextPlantName(l) : b.name, x: b.x + dx, y: b.y + dy, inner }
+}
+
+/** 把选中的区块复制一份，放在偏移 dx、dy 的地方；返回新区块的 id */
+export function duplicateBlocks(layout: FieldLayout, ids: string[], dx: number, dy: number): { layout: FieldLayout; ids: string[] } {
+  const src = layout.blocks.filter((b) => ids.includes(b.id))
+  if (src.length === 0 || layout.blocks.length + src.length > MAX_BLOCKS) return { layout, ids: [] }
+  const l = clone(layout)
+  const made: LayoutBlock[] = []
+  for (const b of src) {
+    const c = copyOf(l, b, dx, dy)
+    l.blocks.push(c)
+    made.push(c)
+  }
+  settle(l)
+  return { layout: l, ids: made.map((b) => b.id) }
 }
 
 /**
- * 拖动区块之间的分界线：第 index 行（列）改成 a，下一行（列）改成 b，总大小不变。
- * b 为 null 表示拖的是地块最外边，只改这一行（列），地块跟着变大变小
+ * 照着一个区块排一片：横着 cols 个、竖着 rows 个（算上它自己），间隔 gapX、gapY。返回新区块的 id
  */
-export function setTrackPair(layout: FieldLayout, axis: Axis, index: number, a: number, b: number | null): FieldLayout {
-  const tracks = axis === 'row' ? layout.rows : layout.cols
-  if (index < 0 || index >= tracks.length || !(a > 0)) return layout
-  if (b != null && (index + 1 >= tracks.length || !(b > 0))) return layout
+export function arrayBlocks(
+  layout: FieldLayout, id: string, cols: number, rows: number, gapX: number, gapY: number,
+): { layout: FieldLayout; ids: string[] } {
+  const src = layout.blocks.find((b) => b.id === id)
+  const nc = Math.max(1, Math.round(cols))
+  const nr = Math.max(1, Math.round(rows))
+  if (!src || nc * nr < 2 || layout.blocks.length + nc * nr - 1 > MAX_BLOCKS) return { layout, ids: [] }
   const l = clone(layout)
-  const t = axis === 'row' ? l.rows : l.cols
-  t[index] = round(a, 4)
-  if (b != null) t[index + 1] = round(b, 4)
-  reconcileFits(l)
-  return l
-}
-
-/** 在第 index 行（列）前面插入一行（列）区块；index 等于行数时加在最后 */
-export function insertTrack(layout: FieldLayout, axis: Axis, index: number, size?: number): FieldLayout {
-  const l = clone(layout)
-  const tracks = axis === 'row' ? l.rows : l.cols
-  if (tracks.length >= MAX_BLOCK_TRACKS) return layout
-  const near = tracks[Math.min(index, tracks.length - 1)] ?? 1
-  tracks.splice(index, 0, size ?? near)
-  const pos = (s: { r: number; c: number }) => (axis === 'row' ? s.r : s.c)
-  for (const m of l.merges) {
-    if (pos(m) >= index) {
-      if (axis === 'row') m.r++
-      else m.c++
-    } else if (pos(m) + (axis === 'row' ? m.rs : m.cs) > index) {
-      // 插在合并区域中间：合并区域跟着变大
-      if (axis === 'row') m.rs++
-      else m.cs++
+  const made: string[] = []
+  for (let i = 0; i < nr; i++) {
+    for (let j = 0; j < nc; j++) {
+      if (i === 0 && j === 0) continue
+      const c = copyOf(l, src, j * (src.w + gapX), i * (src.h + gapY))
+      l.blocks.push(c)
+      made.push(c.id)
     }
   }
-  for (const b of l.blocks) {
-    if (pos(b) >= index) {
-      if (axis === 'row') b.r++
-      else b.c++
-    }
-  }
-  // 新的一行（列）里没被合并区域盖住的格子，各建一个区块
-  const other = axis === 'row' ? l.cols.length : l.rows.length
-  for (let k = 0; k < other; k++) {
-    const r = axis === 'row' ? index : k
-    const c = axis === 'row' ? k : index
-    if (!mergeAt(l.merges, r, c)) l.blocks.push(newBlock(l, r, c))
-  }
-  reconcileFits(l)
-  return l
+  settle(l)
+  return { layout: l, ids: made }
 }
 
-/** 删掉第 index 行（列）区块；整个在这一行里的区块（和里面的小区块）一起删掉，跨行合并的区块变小 */
-export function removeTrack(layout: FieldLayout, axis: Axis, index: number): FieldLayout {
-  const tracks = axis === 'row' ? layout.rows : layout.cols
-  if (tracks.length <= 1 || index < 0 || index >= tracks.length) return layout
-  const l = clone(layout)
-  ;(axis === 'row' ? l.rows : l.cols).splice(index, 1)
-  const start = (s: Span) => (axis === 'row' ? s.r : s.c)
-  const len = (s: Span) => (axis === 'row' ? s.rs : s.cs)
-  const blocks: LayoutBlock[] = []
-  for (const b of l.blocks) {
-    const s = spanOf(layout.merges, b.r, b.c)
-    if (start(s) === index && len(s) === 1) continue
-    if (start(s) > index) {
-      if (axis === 'row') b.r--
-      else b.c--
-    }
-    blocks.push(b)
-  }
-  const merges: Span[] = []
-  for (const m of l.merges) {
-    const s = { ...m }
-    if (start(m) > index) {
-      if (axis === 'row') s.r--
-      else s.c--
-    } else if (start(m) + len(m) > index) {
-      if (len(m) === 1) continue
-      if (axis === 'row') s.rs--
-      else s.cs--
-    }
-    if (s.rs * s.cs >= 2) merges.push(s)
-  }
-  l.blocks = blocks
-  l.merges = merges
-  reconcileFits(l)
-  return l
+export type Align = 'left' | 'hcenter' | 'right' | 'top' | 'vcenter' | 'bottom'
+
+/** 对齐：选了几个时向它们的外框对齐，只选一个时向地块对齐 */
+export function alignBlocks(layout: FieldLayout, ids: string[], align: Align): FieldLayout {
+  const sel = layout.blocks.filter((b) => ids.includes(b.id))
+  if (sel.length === 0) return layout
+  const box = sel.length > 1 ? boundsOf(sel)! : { x: 0, y: 0, w: layout.w, h: layout.h }
+  const next = mapBlocks(layout, ids, (b) => {
+    if (align === 'left') b.x = box.x
+    else if (align === 'right') b.x = box.x + box.w - b.w
+    else if (align === 'hcenter') b.x = box.x + (box.w - b.w) / 2
+    else if (align === 'top') b.y = box.y
+    else if (align === 'bottom') b.y = box.y + box.h - b.h
+    else b.y = box.y + (box.h - b.h) / 2
+  })
+  settle(next)
+  return JSON.stringify(next) === JSON.stringify(layout) ? layout : next
 }
 
-/** 区块网格改成 rows 行 cols 列：多了在后面加，少了从后面删 */
-export function resizeBlockGrid(layout: FieldLayout, rows: number, cols: number): FieldLayout {
-  let l = layout
-  while (l.rows.length < rows) l = insertTrack(l, 'row', l.rows.length)
-  while (l.rows.length > rows && l.rows.length > 1) l = removeTrack(l, 'row', l.rows.length - 1)
-  while (l.cols.length < cols) l = insertTrack(l, 'col', l.cols.length)
-  while (l.cols.length > cols && l.cols.length > 1) l = removeTrack(l, 'col', l.cols.length - 1)
-  return l
+/**
+ * 排开：按现在的先后顺序沿横向（col）或纵向（row）排。给了 gap 时从第一个开始一个挨一个、中间隔 gap；
+ * 不给时第一个和最后一个不动，中间的间隔匀开
+ */
+export function distributeBlocks(layout: FieldLayout, ids: string[], axis: Axis, gap?: number): FieldLayout {
+  const sel = layout.blocks.filter((b) => ids.includes(b.id))
+  if (sel.length < 2) return layout
+  const pos = (b: Rect) => (axis === 'col' ? b.x : b.y)
+  const len = (b: Rect) => (axis === 'col' ? b.w : b.h)
+  const order = [...sel].sort((a, b) => pos(a) - pos(b))
+  let g = gap
+  if (g == null) {
+    if (order.length < 3) return layout
+    const last = order[order.length - 1]!
+    g = (pos(last) + len(last) - pos(order[0]!) - order.reduce((n, b) => n + len(b), 0)) / (order.length - 1)
+  }
+  const at = new Map<string, number>()
+  let cur = pos(order[0]!)
+  for (const b of order) {
+    at.set(b.id, cur)
+    cur += len(b) + g
+  }
+  const next = mapBlocks(layout, ids, (b) => {
+    if (axis === 'col') b.x = at.get(b.id)!
+    else b.y = at.get(b.id)!
+  })
+  settle(next)
+  return JSON.stringify(next) === JSON.stringify(layout) ? layout : next
 }
 
-// ---------- 合并、拆分区块 ----------
+// ---------- 区块属性 ----------
 
-function blockAt(l: FieldLayout, r: number, c: number): LayoutBlock | undefined {
-  const m = mergeAt(l.merges, r, c)
-  return l.blocks.find((b) => (m ? b.r === m.r && b.c === m.c : b.r === r && b.c === c))
+export function renameBlock(layout: FieldLayout, id: string, name: string): FieldLayout {
+  return mapBlocks(layout, [id], (b) => { b.name = name.trim().slice(0, 30) || b.name })
+}
+
+/** 改区块类型。改成道路、保护区、空地时，里面的小区块去掉；改回种植区块时按小区块一般的大小分 */
+export function setBlockKind(layout: FieldLayout, ids: string[], kind: BlockKind): FieldLayout {
+  if (!layout.blocks.some((b) => ids.includes(b.id) && b.kind !== kind)) return layout
+  return mapBlocks(layout, ids, (b, l) => {
+    if (b.kind === kind) return
+    if (kind === 'PLANT') {
+      // 先算行列再改类型：不把自己算进"一般多大"里
+      b.inner = innerFor({ ...l, blocks: l.blocks.filter((x) => x !== b) }, b.w, b.h)
+      if (b.name === BLOCK_KIND[b.kind]) b.name = nextPlantName(l)
+    } else {
+      b.inner = null
+      if (b.kind === 'PLANT' || b.name === BLOCK_KIND[b.kind]) b.name = BLOCK_KIND[kind]
+    }
+    b.kind = kind
+  })
+}
+
+/**
+ * 按每个小区块的大小定区块大小：区块宽 = 列数 × 小区块宽，区块长 = 行数 × 小区块长（各行各列改成一样大）。
+ * 左上角不动
+ */
+export function setPlotSize(layout: FieldLayout, ids: string[], w: number | null, h: number | null): FieldLayout {
+  const ok = (v: number | null) => v == null || (Number.isFinite(v) && v >= MIN_SIZE)
+  if (!ok(w) || !ok(h) || (w == null && h == null)) return layout
+  if (!layout.blocks.some((b) => ids.includes(b.id) && b.inner)) return layout
+  return settle(mapBlocks(layout, ids, (b) => {
+    if (!b.inner) return
+    if (w != null) {
+      b.inner.cols = b.inner.cols.map(() => 1)
+      b.w = w * b.inner.cols.length
+    }
+    if (h != null) {
+      b.inner.rows = b.inner.rows.map(() => 1)
+      b.h = h * b.inner.rows.length
+    }
+  }))
+}
+
+// ---------- 合并、拆开区块 ----------
+
+export type Axis = 'row' | 'col'
+
+/** 从上到下、从左到右 */
+const byPlace = (a: Rect, b: Rect) => (Math.abs(a.y - b.y) > TOL ? a.y - b.y : a.x - b.x)
+
+/** 差不多一样的数算一个，从小到大 */
+function cluster(values: number[]): number[] {
+  const out: number[] = []
+  for (const v of [...values].sort((a, b) => a - b)) {
+    if (out.length === 0 || v - out[out.length - 1]! > TOL) out.push(v)
+  }
+  return out
 }
 
 /**
@@ -527,54 +692,78 @@ function absInner(inner: Inner, w: number, h: number): Inner {
   return { ...clone(inner), rows: inner.rows.map((v) => (v / rs) * h), cols: inner.cols.map((v) => (v / cs) * w) }
 }
 
+/**
+ * 几个种植区块是不是整整齐齐排成几行几列（中间可以有空当）：同一行的一样高、小区块行数一样，
+ * 同一列的一样宽、小区块列数一样。是的话返回排好的二维数组
+ */
+function gridOf(blocks: LayoutBlock[]): LayoutBlock[][] | null {
+  const xs = cluster(blocks.map((b) => b.x))
+  const ys = cluster(blocks.map((b) => b.y))
+  if (xs.length * ys.length !== blocks.length) return null
+  const grid: LayoutBlock[][] = []
+  for (const y of ys) {
+    const row: LayoutBlock[] = []
+    for (const x of xs) {
+      const b = blocks.find((v) => Math.abs(v.x - x) <= TOL && Math.abs(v.y - y) <= TOL)
+      if (!b?.inner) return null
+      row.push(b)
+    }
+    grid.push(row)
+  }
+  for (const row of grid) {
+    if (!row.every((b) => Math.abs(b.h - row[0]!.h) <= TOL && b.inner!.rows.length === row[0]!.inner!.rows.length)) return null
+  }
+  for (let j = 0; j < xs.length; j++) {
+    const first = grid[0]![j]!
+    if (!grid.every((row) => Math.abs(row[j]!.w - first.w) <= TOL && row[j]!.inner!.cols.length === first.inner!.cols.length)) return null
+  }
+  return grid
+}
+
 export interface MergeResult {
   layout: FieldLayout
+  /** 合并后留下的区块 */
+  anchorId: string | null
   /** 合并后不再有的小区块 id（被并掉的区块里的） */
   dropped: number[]
   /** 小区块网格是不是拼起来了（所有小区块都保留） */
   joined: boolean
+  /** 不能合并时的原因 */
+  problem: string | null
 }
 
 /**
- * 合并一片区块。左上角的区块留下（名称、类型），其余并进来。
- * 如果都是普通种植区块，而且同一行的小区块行数一样、同一列的小区块列数一样，就把小区块网格拼起来，所有小区块都保留；
+ * 把选中的几个区块合并成一个，占它们的外框（夹在中间的道路、空当一起并进来）。左上角的种植区块留下（名称、类型），其余并进来。
+ * 种植区块整整齐齐排成几行几列时，把小区块网格拼起来，所有小区块都保留；
  * 否则留下左上角区块的小区块网格（拉大），其它区块的小区块去掉。
+ * 外框里有没选上的东西时不能合并
  */
-export function mergeBlocks(layout: FieldLayout, a: { r: number; c: number }, b: { r: number; c: number }): MergeResult {
-  const rect = expandRect(layout.merges, a, b)
-  if (rect.rs * rect.cs < 2) return { layout, dropped: [], joined: true }
+export function mergeBlocks(layout: FieldLayout, ids: string[]): MergeResult {
+  const none = (problem: string): MergeResult => ({ layout, anchorId: null, dropped: [], joined: false, problem })
+  const sel = layout.blocks.filter((b) => ids.includes(b.id))
+  if (sel.length < 2) return none('选两个或更多区块再合并')
+  const box = boundsOf(sel)!
+  const blocker = layout.blocks.find((b) => !ids.includes(b.id) && overlaps(b, box))
+  if (blocker) return none(`中间隔着“${blocker.name}”，把它一起选上，或者先挪开`)
   const l = clone(layout)
-  const inRect = l.blocks.filter((x) => inside(rect, x.r, x.c))
-  const anchor = blockAt(l, rect.r, rect.c)!
-  const grid: LayoutBlock[][] = []
-  let canJoin = inRect.every((x) => x.kind === 'PLANT' && !x.fit && x.inner && !mergeAt(l.merges, x.r, x.c))
-  if (canJoin) {
-    for (let i = 0; i < rect.rs; i++) {
-      grid.push([])
-      for (let j = 0; j < rect.cs; j++) grid[i]!.push(blockAt(l, rect.r + i, rect.c + j)!)
-    }
-    for (let i = 0; i < rect.rs && canJoin; i++) {
-      canJoin = grid[i]!.every((x) => x.inner!.rows.length === grid[i]![0]!.inner!.rows.length)
-    }
-    for (let j = 0; j < rect.cs && canJoin; j++) {
-      canJoin = grid.every((row) => row[j]!.inner!.cols.length === grid[0]![j]!.inner!.cols.length)
-    }
-  }
+  const order = l.blocks.filter((b) => ids.includes(b.id)).sort(byPlace)
+  const plant = order.filter((b) => b.kind === 'PLANT' && b.inner)
+  const anchor = plant[0] ?? order[0]!
+  const grid = plant.length > 0 ? gridOf(plant) : null
   const dropped: number[] = []
-  if (canJoin) {
+  if (grid) {
     const rows: number[] = []
     const cols: number[] = []
     const merges: Span[] = []
     const plots: Record<string, number> = {}
     const kinds: Record<string, CellKind> = {}
     let r0 = 0
-    for (let i = 0; i < rect.rs; i++) {
-      const h = l.rows[rect.r + i]!
-      rows.push(...absInner(grid[i]![0]!.inner!, 1, h).rows)
+    for (let i = 0; i < grid.length; i++) {
+      rows.push(...absInner(grid[i]![0]!.inner!, 1, grid[i]![0]!.h).rows)
       let c0 = 0
-      for (let j = 0; j < rect.cs; j++) {
+      for (let j = 0; j < grid[i]!.length; j++) {
         const inn = grid[i]![j]!.inner!
-        if (i === 0) cols.push(...absInner(grid[0]![j]!.inner!, l.cols[rect.c + j]!, 1).cols)
+        if (i === 0) cols.push(...absInner(inn, grid[0]![j]!.w, 1).cols)
         for (const m of inn.merges) merges.push({ ...m, r: m.r + r0, c: m.c + c0 })
         for (const [k, id] of Object.entries(inn.plots)) {
           const [r, c] = parseKey(k)
@@ -588,206 +777,132 @@ export function mergeBlocks(layout: FieldLayout, a: { r: number; c: number }, b:
       }
       r0 += grid[i]![0]!.inner!.rows.length
     }
-    anchor.inner = {
-      rows: rows.map((v) => round(v, 4)), cols: cols.map((v) => round(v, 4)), merges, plots,
-    }
+    anchor.inner = { rows: rows.map(r4), cols: cols.map(r4), merges, plots }
     putKinds(anchor.inner, kinds)
   } else {
-    for (const x of inRect) {
+    for (const x of order) {
       if (x !== anchor) dropped.push(...Object.values(x.inner?.plots ?? {}))
     }
   }
-  l.blocks = l.blocks.filter((x) => x === anchor || !inside(rect, x.r, x.c))
-  l.merges = l.merges.filter((m) => !containsSpan(rect, m))
-  l.merges.push(rect)
-  anchor.fit = null
-  return { layout: l, dropped, joined: canJoin }
+  l.blocks = l.blocks.filter((x) => x === anchor || !ids.includes(x.id))
+  Object.assign(anchor, { x: box.x, y: box.y, w: box.w, h: box.h })
+  return { layout: settle(l), anchorId: anchor.id, dropped, joined: !!grid, problem: null }
 }
 
-/** 把合并的区块拆开。小区块网格能按原来的行列边界切开时分给各个区块，否则留在左上角区块里，其它新建 */
-export function splitBlock(layout: FieldLayout, blockId: string): FieldLayout {
-  const src = layout.blocks.find((b) => b.id === blockId)
-  if (!src) return layout
-  const span = spanOf(layout.merges, src.r, src.c)
-  if (span.rs * span.cs < 2) return layout
-  const l = clone(layout)
-  const anchor = l.blocks.find((b) => b.id === blockId)!
-  l.merges = l.merges.filter((m) => !(m.r === span.r && m.c === span.c))
-
-  const pieces = anchor.kind === 'PLANT' && !anchor.fit && anchor.inner ? cutInner(l, anchor, span) : null
-  for (let i = 0; i < span.rs; i++) {
-    for (let j = 0; j < span.cs; j++) {
-      const r = span.r + i
-      const c = span.c + j
-      if (i === 0 && j === 0) {
-        if (pieces) anchor.inner = pieces[0]![0]!
-        continue
-      }
-      const nb = newBlock(l, r, c, anchor.kind === 'PLANT' ? 'PLANT' : anchor.kind)
-      if (pieces) nb.inner = pieces[i]![j]!
-      l.blocks.push(nb)
-    }
-  }
-  if (!pieces) anchor.fit = null
-  reconcileFits(l)
-  return l
+/** 小区块网格的第 k 条分界线（1..n-1，axis 为 row 是行之间的横线）能不能切：没有合并的小区块跨过去 */
+function cuttable(inner: Inner, axis: Axis, k: number): boolean {
+  return !inner.merges.some((m) => (axis === 'row' ? m.r < k && m.r + m.rs > k : m.c < k && m.c + m.cs > k))
 }
 
-/** 按区块网格的边界把小区块网格切开；切不开（边界不对齐，或合并的小区块跨过边界）返回 null */
-function cutInner(l: FieldLayout, b: LayoutBlock, span: Span): Inner[][] | null {
-  const box = trackRect(l.rows, l.cols, span)
-  const abs = absInner(b.inner!, box.w, box.h)
-  // 每条区块边界落在第几条小区块分界线上；对不上就切不开
-  const cut = (sizes: number[], tracks: number[]): number[] | null => {
-    const cum = [0]
-    for (const v of sizes) cum.push(cum[cum.length - 1]! + v)
-    const bounds = [0]
-    let acc = 0
-    for (const t of tracks) {
-      acc += t
-      const tol = Math.max(1e-3, acc * 1e-4)
-      const pos = cum.findIndex((v) => Math.abs(v - acc) <= tol)
-      if (pos <= bounds[bounds.length - 1]!) return null
-      bounds.push(pos)
-    }
-    return bounds[bounds.length - 1] === sizes.length ? bounds : null
+/** 小区块网格里的一片：第 r0..r1 行、c0..c1 列（不含 r1、c1） */
+function sliceInner(inner: Inner, r0: number, r1: number, c0: number, c1: number): Inner {
+  const within = (r: number, c: number) => r >= r0 && r < r1 && c >= c0 && c < c1
+  const plots: Record<string, number> = {}
+  for (const [k, id] of Object.entries(inner.plots)) {
+    const [r, c] = parseKey(k)
+    if (within(r, c)) plots[keyOf(r - r0, c - c0)] = id
   }
-  const rb = cut(abs.rows, l.rows.slice(span.r, span.r + span.rs))
-  const cb = cut(abs.cols, l.cols.slice(span.c, span.c + span.cs))
-  if (!rb || !cb) return null
-  for (const m of abs.merges) {
-    const ri = rb.findIndex((x, i) => i < rb.length - 1 && m.r >= x && m.r < rb[i + 1]!)
-    const ci = cb.findIndex((x, i) => i < cb.length - 1 && m.c >= x && m.c < cb[i + 1]!)
-    if (m.r + m.rs > rb[ri + 1]! || m.c + m.cs > cb[ci + 1]!) return null
+  const kinds: Record<string, CellKind> = {}
+  for (const [k, v] of Object.entries(inner.kinds ?? {})) {
+    const [r, c] = parseKey(k)
+    if (within(r, c)) kinds[keyOf(r - r0, c - c0)] = v
   }
-  const out: Inner[][] = []
-  for (let i = 0; i < span.rs; i++) {
-    out.push([])
-    for (let j = 0; j < span.cs; j++) {
-      const r0 = rb[i]!
-      const r1 = rb[i + 1]!
-      const c0 = cb[j]!
-      const c1 = cb[j + 1]!
-      const plots: Record<string, number> = {}
-      for (const [k, id] of Object.entries(abs.plots)) {
-        const [r, c] = parseKey(k)
-        if (r >= r0 && r < r1 && c >= c0 && c < c1) plots[keyOf(r - r0, c - c0)] = id
-      }
-      const kinds: Record<string, CellKind> = {}
-      for (const [k, v] of Object.entries(abs.kinds ?? {})) {
-        const [r, c] = parseKey(k)
-        if (r >= r0 && r < r1 && c >= c0 && c < c1) kinds[keyOf(r - r0, c - c0)] = v
-      }
-      const piece: Inner = {
-        rows: abs.rows.slice(r0, r1).map((v) => round(v, 4)),
-        cols: abs.cols.slice(c0, c1).map((v) => round(v, 4)),
-        merges: abs.merges.filter((m) => m.r >= r0 && m.r < r1 && m.c >= c0 && m.c < c1)
-          .map((m) => ({ ...m, r: m.r - r0, c: m.c - c0 })),
-        plots,
-      }
-      putKinds(piece, kinds)
-      out[i]!.push(piece)
+  const piece: Inner = {
+    rows: inner.rows.slice(r0, r1), cols: inner.cols.slice(c0, c1),
+    merges: inner.merges.filter((m) => within(m.r, m.c)).map((m) => ({ ...m, r: m.r - r0, c: m.c - c0 })),
+    plots,
+  }
+  putKinds(piece, kinds)
+  return piece
+}
+
+/**
+ * 按小区块的分界线把种植区块切成几块（直接改 l）：rowCuts、colCuts 是分界线序号，从小到大。
+ * 左上角那块留原来的 id 和名称，其它是新区块。返回切出来的各块，一行一行排
+ */
+function sliceBlock(l: FieldLayout, b: LayoutBlock, rowCuts: number[], colCuts: number[]): LayoutBlock[] {
+  const inner = b.inner!
+  const sizes = innerSizes(l, b)
+  const rb = [0, ...rowCuts, inner.rows.length]
+  const cb = [0, ...colCuts, inner.cols.length]
+  const box = blockRect(l, b)
+  const out: LayoutBlock[] = []
+  const parts: { rect: Rect; inner: Inner }[] = []
+  for (let i = 0; i < rb.length - 1; i++) {
+    for (let j = 0; j < cb.length - 1; j++) {
+      parts.push({
+        inner: sliceInner(inner, rb[i]!, rb[i + 1]!, cb[j]!, cb[j + 1]!),
+        rect: {
+          x: box.x + sum(sizes.cols, 0, cb[j]!), y: box.y + sum(sizes.rows, 0, rb[i]!),
+          w: sum(sizes.cols, cb[j]!, cb[j + 1]!), h: sum(sizes.rows, rb[i]!, rb[i + 1]!),
+        },
+      })
     }
   }
+  parts.forEach((p, n) => {
+    if (n === 0) {
+      Object.assign(b, p.rect, { inner: p.inner })
+      out.push(b)
+      return
+    }
+    const nb: LayoutBlock = { id: nextId(l), name: nextPlantName(l), kind: 'PLANT', ...p.rect, inner: p.inner }
+    l.blocks.push(nb)
+    out.push(nb)
+  })
   return out
 }
 
-// ---------- 区块属性 ----------
-
-function mapBlocks(layout: FieldLayout, ids: string[], fn: (b: LayoutBlock, l: FieldLayout) => void): FieldLayout {
-  const l = clone(layout)
-  const set = new Set(ids)
-  for (const b of l.blocks) if (set.has(b.id)) fn(b, l)
-  return l
-}
-
-export function renameBlock(layout: FieldLayout, id: string, name: string): FieldLayout {
-  return mapBlocks(layout, [id], (b) => { b.name = name.trim().slice(0, 30) || b.name })
+export interface SplitResult {
+  layout: FieldLayout
+  /** 拆出来的各块（第一个是原来的） */
+  ids: string[]
+  problem: string | null
 }
 
 /**
- * 改区块类型。改成道路、保护区、空地时，里面的小区块去掉；改回种植区块时按默认行列分小区块。
- * 一整行（列）都成了道路时，这一行（列）收窄成道路宽，并成一条；整条道路改回种植区块时，
- * 按旁边区块的大小放宽，并按列（行）分成一个个区块（和纵向道路交叉的地方还是道路）
+ * 把一个区块拆成 rows 行 × cols 列个区块，拼起来还是原来那么大（拆完可以再拖开、在中间画道路）。
+ * 种植区块按小区块的分界线拆，尽量拆得一样多，小区块都保留
  */
-export function setBlockKind(layout: FieldLayout, ids: string[], kind: BlockKind): FieldLayout {
-  // 一条整条道路的各段都选上了、改成种植区块：按整条道路处理
-  const strips: { axis: Axis; index: number }[] = []
-  const handled = new Set<string>()
-  if (kind === 'PLANT') {
-    const sel = new Set(ids)
-    for (const axis of ['row', 'col'] as Axis[]) {
-      const n = trackList(layout, axis).length
-      if (n <= 1) continue
-      for (let i = 0; i < n; i++) {
-        if (!isRoadTrack(layout, axis, i)) continue
-        const own = roadSegments(layout, axis, i)
-        if (own.length > 0 && own.every((id) => sel.has(id))) {
-          strips.push({ axis, index: i })
-          own.forEach((id) => handled.add(id))
+export function splitBlock(layout: FieldLayout, id: string, rows: number, cols: number): SplitResult {
+  const none = (problem: string): SplitResult => ({ layout, ids: [], problem })
+  const src = layout.blocks.find((b) => b.id === id)
+  const nr = Math.round(rows)
+  const nc = Math.round(cols)
+  if (!src) return none('没有这个区块')
+  if (!(nr >= 1) || !(nc >= 1) || nr * nc < 2) return none('至少拆成两块')
+  if (layout.blocks.length + nr * nc - 1 > MAX_BLOCKS) return none(`区块、道路加起来最多 ${MAX_BLOCKS} 个`)
+  const l = clone(layout)
+  const b = l.blocks.find((x) => x.id === id)!
+  if (b.kind !== 'PLANT' || !b.inner) {
+    const made: string[] = [b.id]
+    const box = blockRect(l, b)
+    const w = box.w / nc
+    const h = box.h / nr
+    for (let i = 0; i < nr; i++) {
+      for (let j = 0; j < nc; j++) {
+        const rect = { x: box.x + j * w, y: box.y + i * h, w, h }
+        if (i === 0 && j === 0) {
+          Object.assign(b, rect)
+          continue
         }
+        const nb: LayoutBlock = { id: nextId(l), name: b.name, kind: b.kind, ...rect, inner: null }
+        l.blocks.push(nb)
+        made.push(nb.id)
       }
     }
+    return { layout: settle(l), ids: made, problem: null }
   }
-  const rest = ids.filter((id) => !handled.has(id))
-  const changed = mapBlocks(layout, rest, (b, l) => {
-    if (b.kind === kind) return
-    if (kind === 'PLANT') {
-      const d = l.defaultInner ?? { rows: 1, cols: 1 }
-      b.inner = evenInner(d.rows, d.cols)
-      if (b.name === BLOCK_KIND[b.kind]) b.name = nextPlantName(l)
-    } else {
-      b.inner = null
-      if (b.kind === 'PLANT' || b.name === BLOCK_KIND[b.kind]) b.name = BLOCK_KIND[kind]
-    }
-    b.kind = kind
-  })
-  let next = fitRoadTracks(layout, changed, kind)
-  for (const s of strips) next = roadToBlocks(next, s.axis, s.index)
-  return next
-}
-
-/**
- * 特殊区块：设实际大小（不超过槽位），x、y 是在槽位里的偏移（不给时保持中心）。
- * 和槽位一样大时恢复成普通区块。缩小后槽位里其余部分是道路
- */
-export function setBlockFit(layout: FieldLayout, id: string, w: number, h: number, pos?: { x: number; y: number }): FieldLayout {
-  return mapBlocks(layout, [id], (b, l) => {
-    const s = blockSlot(l, b)
-    const nw = clamp(w, Math.min(s.w, 0.01), s.w)
-    const nh = clamp(h, Math.min(s.h, 0.01), s.h)
-    if (Math.abs(nw - s.w) < EPS && Math.abs(nh - s.h) < EPS) {
-      b.fit = null
-      return
-    }
-    const cur = b.fit ?? { x: 0, y: 0, w: s.w, h: s.h }
-    const x = pos?.x ?? cur.x + (cur.w - nw) / 2
-    const y = pos?.y ?? cur.y + (cur.h - nh) / 2
-    b.fit = { w: round(nw, 4), h: round(nh, 4), x: round(clamp(x, 0, s.w - nw), 4), y: round(clamp(y, 0, s.h - nh), 4) }
-  })
-}
-
-/** 移动特殊区块（在槽位里），dx、dy 是相对现在的位置 */
-export function moveBlockFit(layout: FieldLayout, id: string, x: number, y: number): FieldLayout {
-  return mapBlocks(layout, [id], (b, l) => {
-    if (!b.fit) return
-    const s = blockSlot(l, b)
-    b.fit = { ...b.fit, x: round(clamp(x, 0, s.w - b.fit.w), 4), y: round(clamp(y, 0, s.h - b.fit.h), 4) }
-  })
-}
-
-export type Align = 'left' | 'hcenter' | 'right' | 'top' | 'vcenter' | 'bottom'
-
-export function alignBlockFit(layout: FieldLayout, id: string, align: Align): FieldLayout {
-  const b = layout.blocks.find((x) => x.id === id)
-  if (!b?.fit) return layout
-  const s = blockSlot(layout, b)
-  const { x, y, w, h } = b.fit
-  const pos = {
-    left: { x: 0, y }, hcenter: { x: (s.w - w) / 2, y }, right: { x: s.w - w, y },
-    top: { x, y: 0 }, vcenter: { x, y: (s.h - h) / 2 }, bottom: { x, y: s.h - h },
-  }[align]
-  return moveBlockFit(layout, id, pos.x, pos.y)
+  const inner = b.inner
+  if (nr > inner.rows.length) return none(`里面只有 ${inner.rows.length} 行小区块，最多拆成 ${inner.rows.length} 行`)
+  if (nc > inner.cols.length) return none(`里面只有 ${inner.cols.length} 列小区块，最多拆成 ${inner.cols.length} 列`)
+  const cuts = (n: number, parts: number) => Array.from({ length: parts - 1 }, (_, k) => Math.round(((k + 1) * n) / parts))
+  const rowCuts = cuts(inner.rows.length, nr)
+  const colCuts = cuts(inner.cols.length, nc)
+  if (!rowCuts.every((k) => cuttable(inner, 'row', k)) || !colCuts.every((k) => cuttable(inner, 'col', k))) {
+    return none('有合并的小区块跨在要切开的地方，先进区块把它拆开')
+  }
+  const pieces = sliceBlock(l, b, rowCuts, colCuts)
+  return { layout: settle(l), ids: pieces.map((p) => p.id), problem: null }
 }
 
 // ---------- 区块里的小区块网格 ----------
@@ -921,23 +1036,6 @@ export function moveCells(layout: FieldLayout, id: string, keys: string[], dr: n
     inner.plots = plots
     putKinds(inner, kinds)
   })
-}
-
-/** 交换两个区块的位置（占的行列数一样的才能换）：名称、类型、里面的小区块都跟着换 */
-export function swapBlocks(layout: FieldLayout, a: string, b: string): FieldLayout {
-  const A = layout.blocks.find((x) => x.id === a)
-  const B = layout.blocks.find((x) => x.id === b)
-  if (!A || !B || A === B) return layout
-  const sa = blockSpan(layout, A)
-  const sb = blockSpan(layout, B)
-  if (sa.rs !== sb.rs || sa.cs !== sb.cs) return layout
-  const l = clone(layout)
-  const x = l.blocks.find((v) => v.id === a)!
-  const y = l.blocks.find((v) => v.id === b)!
-  ;[x.r, y.r] = [y.r, x.r]
-  ;[x.c, y.c] = [y.c, x.c]
-  reconcileFits(l)
-  return l
 }
 
 /** 区块里各行（列）小区块平分 */
@@ -1078,226 +1176,350 @@ export function setCellKinds(layout: FieldLayout, id: string, keys: string[], ki
 
 // ---------- 道路 ----------
 //
-// 整行（列）都是道路的叫"整条道路"。加道路是插进一行（列），地块跟着变大，别的区块不变小；
-// 删道路是把这一行（列）去掉，地块跟着变小
+// 道路就是一个长条的矩形，可以随便画、挪、改长短和宽窄。
+// 画路时压到了区块：区块在离路最近的小区块分界线处切开，路放在分界线后面，后面的东西往后挪一个路宽
+// （小区块大小不变，地块跟着变大）；跨过去的垂直道路跟着变长。
 
-const median = (a: number[]) => {
-  const s = [...a].sort((x, y) => x - y)
-  const m = Math.floor(s.length / 2)
-  return s.length % 2 ? s[m]! : (s[m - 1]! + s[m]!) / 2
+/**
+ * 换一个方向看矩形：p、s 是垂直于道路方向的位置和大小（横向道路就是 y 和高），q、t 是顺着道路方向的
+ */
+interface Bar {
+  p: number
+  s: number
+  q: number
+  t: number
 }
 
-const trackList = (l: FieldLayout, axis: Axis) => (axis === 'row' ? l.rows : l.cols)
-const cellOf = (axis: Axis, index: number, k: number) => (axis === 'row' ? { r: index, c: k } : { r: k, c: index })
-const startOf = (axis: Axis, s: Span) => (axis === 'row' ? s.r : s.c)
-const lenOf = (axis: Axis, s: Span) => (axis === 'row' ? s.rs : s.cs)
+const toBar = (r: Rect, axis: Axis): Bar => (axis === 'row' ? { p: r.y, s: r.h, q: r.x, t: r.w } : { p: r.x, s: r.w, q: r.y, t: r.h })
+const putBar = (r: Rect, axis: Axis, b: Bar) => Object.assign(r, axis === 'row' ? { x: b.q, y: b.p, w: b.t, h: b.s } : { x: b.p, y: b.q, w: b.s, h: b.t })
+const barRect = (b: Bar, axis: Axis): Rect => putBar({ x: 0, y: 0, w: 0, h: 0 }, axis, b)
 
-/** 第 index 行（列）是不是整条都是道路 */
-export function isRoadTrack(l: FieldLayout, axis: Axis, index: number): boolean {
-  const tracks = trackList(l, axis)
-  if (index < 0 || index >= tracks.length) return false
-  const n = axis === 'row' ? l.cols.length : l.rows.length
-  for (let k = 0; k < n; k++) {
-    const { r, c } = cellOf(axis, index, k)
-    if (blockAt(l, r, c)?.kind !== 'ROAD') return false
+/** 道路的走向：横向（row，左右方向长）还是纵向（col） */
+export function roadAxis(b: Rect): Axis {
+  return b.w >= b.h ? 'row' : 'col'
+}
+
+/** 新加道路默认多宽：已有道路的宽（取中间值），没有时 1 米 */
+export function defaultRoadWidth(l: FieldLayout): number {
+  const ws = l.blocks.filter((b) => b.kind === 'ROAD').map((b) => Math.min(b.w, b.h))
+  return round(ws.length ? median(ws) : 1 / l.unit.meters, 3)
+}
+
+/**
+ * 区块上能放道路的线（axis 为 row 是横线，返回 y；col 是竖线，返回 x）：两条边，加上里面没被合并的小区块跨过的分界线
+ */
+export function blockSeams(l: FieldLayout, b: LayoutBlock, axis: Axis): number[] {
+  const bar = toBar(b, axis)
+  const out = [bar.p]
+  if (b.kind === 'PLANT' && b.inner) {
+    const sizes = axis === 'row' ? innerSizes(l, b).rows : innerSizes(l, b).cols
+    let acc = bar.p
+    for (let k = 1; k < sizes.length; k++) {
+      acc += sizes[k - 1]!
+      if (cuttable(b.inner, axis, k)) out.push(acc)
+    }
+  }
+  out.push(bar.p + bar.s)
+  return out
+}
+
+/**
+ * 往后挪（直接改 l）：start 里的东西各挪多少，grow 里的道路各变长多少；挪了、变长了以后压到的东西跟着被推到后面去
+ * （道路和道路可以交叉，不推）。obstacles 是不动的障碍（刚画的道路）。返回挪了几个
+ */
+function pushAfter(l: FieldLayout, axis: Axis, start: Map<string, number>, grow: Map<string, number>, obstacles: Bar[]): number {
+  interface Done {
+    bar: Bar
+    road: boolean
+    from: number
+  }
+  const done: Done[] = obstacles.map((bar) => ({ bar, road: true, from: bar.p }))
+  const items = [...l.blocks].sort((a, b) => toBar(a, axis).p - toBar(b, axis).p)
+  let moved = 0
+  for (const x of items) {
+    const bar = toBar(x, axis)
+    const extra = grow.get(x.id) ?? 0
+    if (extra > 0) {
+      bar.s += extra
+      putBar(x, axis, bar)
+      done.push({ bar, road: true, from: bar.p })
+      continue
+    }
+    let need = start.get(x.id) ?? 0
+    for (const y of done) {
+      if (x.kind === 'ROAD' && y.road) continue
+      if (y.from > bar.p + TOL) continue
+      if (Math.min(bar.q + bar.t, y.bar.q + y.bar.t) - Math.max(bar.q, y.bar.q) <= TOL) continue
+      const over = y.bar.p + y.bar.s - (bar.p + need)
+      if (over > TOL) need += over
+    }
+    if (need > EPS) {
+      const from = bar.p
+      bar.p += need
+      putBar(x, axis, bar)
+      done.push({ bar, road: x.kind === 'ROAD', from })
+      moved++
+    }
+  }
+  return moved
+}
+
+/**
+ * 地块在 axis 的垂直方向上变大以后（直接改 l）：原来通到地块那一头的垂直道路跟着通到新的边上——
+ * 只要延长的那一段不压到区块。before 是原来地块在这个方向上多大，skip 是已经挪过、变长过的
+ */
+function reachEdge(l: FieldLayout, axis: Axis, before: number, skip: Set<string>) {
+  const end = Math.max(before, ...l.blocks.map((x) => toBar(x, axis).p + toBar(x, axis).s))
+  if (end - before <= TOL) return
+  for (const x of l.blocks) {
+    if (x.kind !== 'ROAD' || skip.has(x.id) || roadAxis(x) === axis) continue
+    const b = toBar(x, axis)
+    if (Math.abs(b.p + b.s - before) > TOL) continue
+    const more = barRect({ p: b.p + b.s, s: end - b.p - b.s, q: b.q, t: b.t }, axis)
+    if (l.blocks.some((o) => o.kind !== 'ROAD' && overlaps(o, more))) continue
+    putBar(x, axis, { ...b, s: end - b.p })
+  }
+}
+
+export interface RoadResult {
+  layout: FieldLayout
+  /** 新道路的 id；没画成时 null */
+  id: string | null
+  /** 切开了几个区块 */
+  cut: number
+  /** 往后挪了几个 */
+  moved: number
+  /** 地块变大了多少（道路宽度方向） */
+  grew: number
+  problem: string | null
+}
+
+/**
+ * 画一条道路。rect 是画出来的长条，axis 是走向（row 横向、col 纵向）。
+ * - 路的两头落在区块里面时：盖住一半以上就延长到区块那头，否则缩回到区块边上；
+ * - 没压到区块：就放在画的地方；
+ * - 压到了区块：在离路中心最近的分界线（区块的边，或里面小区块之间的线）处放路。
+ *   线在区块里面（小区块之间）：区块在这里切开，前面的不动，后面的往后挪一个路宽，跨过去的垂直道路变长；
+ *   线在区块的边上：旁边有空当就先占空当，空当不够宽才把后面的往后顶，差多少顶多少。
+ *   别的区块都不变小，地块跟着变大。
+ */
+export function drawRoad(layout: FieldLayout, rect: Rect, axis: Axis): RoadResult {
+  const none = (problem: string): RoadResult => ({ layout, id: null, cut: 0, moved: 0, grew: 0, problem })
+  if (layout.blocks.length >= MAX_BLOCKS) return none(`区块、道路加起来最多 ${MAX_BLOCKS} 个`)
+  const road = toBar(rect, axis)
+  const width = road.s
+  if (!(width >= MIN_SIZE)) return none('道路太窄了')
+  let s0 = road.q
+  let s1 = road.q + road.t
+  const solid = layout.blocks.filter((b) => b.kind !== 'ROAD')
+  const hitsBand = (b: Bar) => Math.min(b.p + b.s, road.p + width) - Math.max(b.p, road.p) > TOL
+
+  // 两头落在区块里面：延长到头，或者缩回到区块边上
+  for (let guard = 0; guard < solid.length + 2; guard++) {
+    let changed = false
+    for (const x of solid) {
+      const b = toBar(x, axis)
+      if (!hitsBand(b)) continue
+      const over = Math.min(b.q + b.t, s1) - Math.max(b.q, s0)
+      if (over <= TOL) continue
+      const before = b.q < s0 - TOL
+      const after = b.q + b.t > s1 + TOL
+      if (!before && !after) continue
+      if ((before && after) || over >= b.t / 2) {
+        s0 = Math.min(s0, b.q)
+        s1 = Math.max(s1, b.q + b.t)
+      } else if (before) {
+        s0 = b.q + b.t
+      } else {
+        s1 = b.q
+      }
+      changed = true
+    }
+    if (!changed) break
+  }
+  if (s1 - s0 < MIN_SIZE) return none('道路太短了，再拖长一点')
+
+  const inSpan = (b: Bar) => b.q >= s0 - TOL && b.q + b.t <= s1 + TOL
+  const crossed = solid.filter((x) => {
+    const b = toBar(x, axis)
+    return inSpan(b) && hitsBand(b)
+  })
+  const l = clone(layout)
+  const before = toBar({ x: 0, y: 0, w: l.w, h: l.h }, axis).s
+  const add = (bar: Bar): string => {
+    const nb = newBlock(l, barRect(bar, axis), 'ROAD')
+    l.blocks.push(nb)
+    return nb.id
+  }
+  if (crossed.length === 0) {
+    const id = add({ p: road.p, s: width, q: s0, t: s1 - s0 })
+    settle(l)
+    return { layout: l, id, cut: 0, moved: 0, grew: r4(toBar({ x: 0, y: 0, w: l.w, h: l.h }, axis).s - before), problem: null }
+  }
+
+  // 放在哪条线上：压到的区块里离路中心最近的分界线
+  const center = road.p + width / 2
+  let line = 0
+  let best = Infinity
+  for (const x of crossed) {
+    for (const s of blockSeams(layout, x, axis)) {
+      if (Math.abs(s - center) < best - EPS) {
+        best = Math.abs(s - center)
+        line = s
+      }
+    }
+  }
+
+  // 这条线前后有没有空当：没有区块跨在线上时，路先占空当，空当不够宽才把后面的往后顶
+  const zone = l.blocks.map((x) => ({ x, b: toBar(x, axis) })).filter((v) => inSpan(v.b))
+  const straddles = zone.some((v) => v.x.kind !== 'ROAD' && v.b.p < line - TOL && v.b.p + v.b.s > line + TOL)
+  let at = line
+  let base = width
+  if (!straddles) {
+    let after = Infinity
+    let ahead = Infinity
+    for (const v of zone) {
+      if (v.x.kind === 'ROAD') continue
+      if (v.b.p >= line - TOL) after = Math.min(after, Math.max(0, v.b.p - line))
+      else ahead = Math.min(ahead, Math.max(0, line - v.b.p - v.b.s))
+    }
+    if (after + ahead >= width - TOL) {
+      at = Math.max(line - ahead, Math.min(line, line + after - width))
+      base = 0
+    } else {
+      at = line - ahead
+      base = width - after - ahead
+    }
+  }
+
+  const start = new Map<string, number>()
+  const grow = new Map<string, number>()
+  let cut = 0
+  for (const { x, b } of zone) {
+    if (b.p >= line - TOL) {
+      if (base > TOL) start.set(x.id, base)
+      continue
+    }
+    if (b.p + b.s <= line + TOL) continue
+    // 跨在线上
+    if (x.kind === 'ROAD') {
+      if (base > TOL) grow.set(x.id, base)
+      continue
+    }
+    const seams = blockSeams(l, x, axis)
+    let k = 0
+    for (let i = 0; i < seams.length; i++) if (seams[i]! <= line + TOL) k = i
+    if (k === 0) {
+      // 这个区块里没有能切的线：整个挪到路后面
+      start.set(x.id, line + width - b.p)
+      continue
+    }
+    // 第 k 条线是小区块网格的第几条分界线
+    const sizes = axis === 'row' ? innerSizes(l, x).rows : innerSizes(l, x).cols
+    let index = 0
+    let acc = b.p
+    for (let i = 1; i < sizes.length; i++) {
+      acc += sizes[i - 1]!
+      if (Math.abs(acc - seams[k]!) <= EPS) index = i
+    }
+    const pieces = axis === 'row' ? sliceBlock(l, x, [index], []) : sliceBlock(l, x, [], [index])
+    start.set(pieces[1]!.id, line + width - seams[k]!)
+    cut++
+  }
+  const bar: Bar = { p: at, s: width, q: s0, t: s1 - s0 }
+  const moved = pushAfter(l, axis, start, grow, [bar])
+  reachEdge(l, axis, before, new Set([...start.keys(), ...grow.keys()]))
+  const id = add(bar)
+  settle(l)
+  return { layout: l, id, cut, moved, grew: r4(toBar({ x: 0, y: 0, w: l.w, h: l.h }, axis).s - before), problem: null }
+}
+
+/**
+ * 把一条线后面（只在 from..to 这一段里）的东西往前收 amount（直接改 l），跨过去的垂直道路变短。
+ * 收了以后有东西叠在一起就不收，返回 false
+ */
+function pullBack(l: FieldLayout, axis: Axis, line: number, from: number, to: number, amount: number): boolean {
+  const had = new Set(conflicts(l).map((p) => p.join('|')))
+  const backup = clone(l.blocks)
+  for (const x of l.blocks) {
+    const b = toBar(x, axis)
+    if (b.q < from - TOL || b.q + b.t > to + TOL) continue
+    if (b.p >= line - TOL) {
+      b.p -= amount
+      putBar(x, axis, b)
+    } else if (x.kind === 'ROAD' && b.p + b.s > line + TOL && b.s - amount >= MIN_SIZE) {
+      b.s -= amount
+      putBar(x, axis, b)
+    }
+  }
+  if (l.blocks.some((x) => toBar(x, axis).p < -TOL) || conflicts(l).some((p) => !had.has(p.join('|')))) {
+    l.blocks = backup
+    return false
+  }
+  // 这一段通到地块两头时，地块跟着变小
+  const size = toBar({ x: 0, y: 0, w: l.w, h: l.h }, axis)
+  if (from <= TOL && to >= size.t - TOL) {
+    const end = Math.max(0, ...l.blocks.map((x) => toBar(x, axis).p + toBar(x, axis).s))
+    size.s = Math.max(end, size.s - amount)
+    if (axis === 'row') l.h = size.s
+    else l.w = size.s
   }
   return true
 }
 
-/** 第 index 行（列）里除了和另一个方向的整条道路交叉的地方，还有没有道路 */
-function hasOwnRoad(l: FieldLayout, axis: Axis, index: number): boolean {
-  const perp: Axis = axis === 'row' ? 'col' : 'row'
-  const n = trackList(l, perp).length
-  for (let k = 0; k < n; k++) {
-    const { r, c } = cellOf(axis, index, k)
-    if (blockAt(l, r, c)?.kind === 'ROAD' && !isRoadTrack(l, perp, k)) return true
-  }
-  return false
-}
-
-/** 一条整条道路由哪几段（区块）组成：不算和另一个方向的整条道路交叉的格子 */
-export function roadSegments(l: FieldLayout, axis: Axis, index: number): string[] {
-  const perp: Axis = axis === 'row' ? 'col' : 'row'
-  return l.blocks.filter((b) => {
-    if (b.kind !== 'ROAD') return false
-    const s = blockSpan(l, b)
-    if (startOf(axis, s) !== index || lenOf(axis, s) !== 1) return false
-    return !(lenOf(perp, s) === 1 && isRoadTrack(l, perp, startOf(perp, s)))
-  }).map((b) => b.id)
-}
-
-/** 区块在哪条整条道路上（横向优先）；不在整条道路上时 null */
-export function roadOfBlock(l: FieldLayout, id: string): { axis: Axis; index: number } | null {
-  const b = l.blocks.find((x) => x.id === id)
-  if (!b || b.kind !== 'ROAD') return null
-  const s = blockSpan(l, b)
-  if (s.rs === 1 && isRoadTrack(l, 'row', s.r)) return { axis: 'row', index: s.r }
-  if (s.cs === 1 && isRoadTrack(l, 'col', s.c)) return { axis: 'col', index: s.c }
-  return null
-}
-
-/** 新加道路默认多宽：已有整条道路的宽（取中间值），没有时 1 米 */
-export function defaultRoadWidth(l: FieldLayout): number {
-  const ws = [
-    ...l.rows.filter((_, i) => isRoadTrack(l, 'row', i)),
-    ...l.cols.filter((_, i) => isRoadTrack(l, 'col', i)),
-  ]
-  return round(ws.length ? median(ws) : 1 / l.unit.meters, 3)
-}
-
-/** 道路改回区块时这一行（列）多大：同方向不是道路的行（列）取中间值 */
-function plantTrackSize(l: FieldLayout, axis: Axis): number {
-  const tracks = trackList(l, axis)
-  const ws = tracks.filter((_, i) => !isRoadTrack(l, axis, i))
-  if (ws.length) return round(median(ws), 4)
-  return round(Math.max(...tracks) * 4, 4)
-}
-
-/** 能不能在第 index 行（列）前面加一条道路；不能时返回原因 */
-export function addRoadProblem(l: FieldLayout, axis: Axis, index: number): string | null {
-  const tracks = trackList(l, axis)
-  if (index < 0 || index > tracks.length) return '位置不对'
-  if (tracks.length >= MAX_BLOCK_TRACKS) return `区块最多 ${MAX_BLOCK_TRACKS} 行、${MAX_BLOCK_TRACKS} 列`
-  if (isRoadTrack(l, axis, index - 1) || isRoadTrack(l, axis, index)) return '旁边已经是道路了'
-  for (const m of l.merges) {
-    const s = startOf(axis, m)
-    if (s < index && s + lenOf(axis, m) > index && blockAt(l, m.r, m.c)?.kind !== 'ROAD') {
-      return '有合并的区块跨过这里，先拆开再加道路'
-    }
-  }
-  return null
-}
-
 /**
- * 在第 index 行（列）前面插一条道路（index 等于行数时加在最后）。axis 为 row 是横向道路，col 是纵向道路。
- * 地块跟着变大，别的区块大小不变；碰到纵向（横向）道路的地方连通
+ * 删掉一条道路。close 为 true 时把它后面的东西收回来合拢（这条路通到地块两头时地块跟着变小）；
+ * 合拢会让别的东西叠在一起时只删路、不合拢。closed 说明合拢了没有
  */
-export function addRoad(layout: FieldLayout, axis: Axis, index: number, width: number): FieldLayout {
-  if (!(width > 0) || addRoadProblem(layout, axis, index)) return layout
+export function removeRoad(layout: FieldLayout, id: string, close: boolean): { layout: FieldLayout; closed: boolean } {
+  const road = layout.blocks.find((b) => b.id === id)
+  if (!road) return { layout, closed: false }
   const l = clone(layout)
-  trackList(l, axis).splice(index, 0, round(width, 4))
-  for (const m of l.merges) {
-    if (startOf(axis, m) >= index) {
-      if (axis === 'row') m.r++
-      else m.c++
-    } else if (startOf(axis, m) + lenOf(axis, m) > index) {
-      // 跨过来的道路跟着变长
-      if (axis === 'row') m.rs++
-      else m.cs++
-    }
-  }
-  for (const b of l.blocks) {
-    if (startOf(axis, { r: b.r, c: b.c, rs: 1, cs: 1 }) >= index) {
-      if (axis === 'row') b.r++
-      else b.c++
-    }
-  }
-  fillRoad(l, axis, index)
-  reconcileFits(l)
-  return l
+  l.blocks = l.blocks.filter((b) => b.id !== id)
+  if (!close || road.kind !== 'ROAD') return { layout: l, closed: false }
+  const axis = roadAxis(road)
+  const b = toBar(road, axis)
+  const closed = pullBack(l, axis, b.p + b.s, b.q, b.q + b.t, b.s)
+  return { layout: settle(l), closed }
 }
 
-/** 第 index 行（列）里没被盖住的格子，连着的并成一段道路 */
-function fillRoad(l: FieldLayout, axis: Axis, index: number) {
-  const n = axis === 'row' ? l.cols.length : l.rows.length
-  let run: number[] = []
-  const flush = () => {
-    if (run.length === 0) return
-    const k0 = run[0]!
-    const { r, c } = cellOf(axis, index, k0)
-    l.blocks.push(newBlock(l, r, c, 'ROAD'))
-    if (run.length > 1) l.merges.push(axis === 'row' ? { r, c, rs: 1, cs: run.length } : { r, c, rs: run.length, cs: 1 })
-    run = []
-  }
-  for (let k = 0; k < n; k++) {
-    const { r, c } = cellOf(axis, index, k)
-    if (mergeAt(l.merges, r, c)) flush()
-    else run.push(k)
-  }
-  flush()
-}
-
-/** 去掉只占这一行（列）的区块和合并，返回去掉后的布局（不改原来的） */
-function clearTrack(layout: FieldLayout, axis: Axis, index: number): FieldLayout {
+/**
+ * 改道路的宽。变宽时后面的东西往后挪（地块跟着变大），变窄时往前收回来；两边的区块大小不变。
+ * 这条路只是摆在空地上、后面没有挨着东西时，也是只改它自己
+ */
+export function setRoadWidth(layout: FieldLayout, id: string, width: number): FieldLayout {
+  const road = layout.blocks.find((b) => b.id === id)
+  if (!road || !(width >= MIN_SIZE)) return layout
+  const axis = roadAxis(road)
+  const old = toBar(road, axis)
+  const d = width - old.s
+  if (Math.abs(d) < EPS) return layout
   const l = clone(layout)
-  const inTrack = (s: Span) => startOf(axis, s) === index && lenOf(axis, s) === 1
-  l.blocks = l.blocks.filter((b) => !inTrack(spanOf(layout.merges, b.r, b.c)))
-  l.merges = l.merges.filter((m) => !inTrack(m))
-  return l
-}
-
-/** 删掉一条整条道路：这一行（列）去掉，地块跟着变小 */
-export function removeRoad(layout: FieldLayout, axis: Axis, index: number): FieldLayout {
-  if (!isRoadTrack(layout, axis, index) || trackList(layout, axis).length <= 1) return layout
-  return removeTrack(layout, axis, index)
-}
-
-/** 能不能把一整行（列）改成道路；不能时返回原因 */
-export function trackToRoadProblem(l: FieldLayout, axis: Axis, index: number): string | null {
-  if (index < 0 || index >= trackList(l, axis).length) return '位置不对'
-  for (const m of l.merges) {
-    const s = startOf(axis, m)
-    const crosses = s <= index && s + lenOf(axis, m) > index && lenOf(axis, m) > 1
-    if (crosses && blockAt(l, m.r, m.c)?.kind !== 'ROAD') return '有合并的区块跨过这一行（列），先拆开'
-  }
-  return null
-}
-
-/** 把一整行（列）改成一条道路：里面的区块（和小区块）去掉，收窄成 width（不给时用默认道路宽） */
-export function trackToRoad(layout: FieldLayout, axis: Axis, index: number, width?: number): FieldLayout {
-  if (trackToRoadProblem(layout, axis, index)) return layout
-  const l = clearTrack(layout, axis, index)
-  fillRoad(l, axis, index)
-  trackList(l, axis)[index] = round(width ?? defaultRoadWidth(layout), 4)
-  reconcileFits(l)
-  return l
-}
-
-/**
- * 把一条整条道路改回种植区块：按另一个方向的行（列）分成一个个区块，和整条道路交叉的地方还是道路；
- * 宽（高）按旁边区块的大小
- */
-export function roadToBlocks(layout: FieldLayout, axis: Axis, index: number): FieldLayout {
-  if (!isRoadTrack(layout, axis, index)) return layout
-  const perp: Axis = axis === 'row' ? 'col' : 'row'
-  const n = trackList(layout, perp).length
-  const crossing = Array.from({ length: n }, (_, k) => isRoadTrack(layout, perp, k))
-  const size = plantTrackSize(layout, axis)
-  const l = clearTrack(layout, axis, index)
-  for (let k = 0; k < n; k++) {
-    const { r, c } = cellOf(axis, index, k)
-    if (!mergeAt(l.merges, r, c)) l.blocks.push(newBlock(l, r, c, crossing[k] ? 'ROAD' : 'PLANT'))
-  }
-  trackList(l, axis)[index] = size
-  reconcileFits(l)
-  return l
-}
-
-/**
- * 改了区块类型以后整理道路：一整行（列）新变成道路的，并成一条并收窄成道路宽；
- * 原来整条是道路、改成种植区块后只剩和别的道路交叉的地方的，放宽成旁边区块的大小
- * （改成保护区、空地时不放宽，还是原来的宽）。这个方向上没有别的区块时不动
- */
-function fitRoadTracks(before: FieldLayout, after: FieldLayout, kind: BlockKind): FieldLayout {
-  let l = after
-  const width = defaultRoadWidth(before)
-  for (const axis of ['row', 'col'] as Axis[]) {
-    const n = trackList(after, axis).length
-    if (n !== trackList(before, axis).length) continue
-    for (let i = 0; i < n; i++) {
-      const was = isRoadTrack(before, axis, i)
-      const now = isRoadTrack(l, axis, i)
-      const others = trackList(l, axis).some((_, j) => j !== i && !isRoadTrack(l, axis, j))
-      if (!others) continue
-      if (!was && now) {
-        l = trackToRoad(l, axis, i, width)
-      } else if (was && !now && kind === 'PLANT' && !hasOwnRoad(l, axis, i)) {
-        const size = plantTrackSize(before, axis)
-        l = setTrackSize(l, axis, i, size)
-      }
+  const self = l.blocks.find((b) => b.id === id)!
+  const line = old.p + old.s
+  if (d > 0) {
+    const start = new Map<string, number>()
+    const grow = new Map<string, number>()
+    for (const x of l.blocks) {
+      if (x === self) continue
+      const b = toBar(x, axis)
+      if (b.q < old.q - TOL || b.q + b.t > old.q + old.t + TOL) continue
+      if (b.p >= line - TOL) start.set(x.id, d)
+      else if (x.kind === 'ROAD' && b.p + b.s > line + TOL) grow.set(x.id, d)
     }
+    const bar = { ...old, s: width }
+    putBar(self, axis, bar)
+    // 自己先拿出来，免得被当成要推的东西
+    const at = l.blocks.indexOf(self)
+    l.blocks.splice(at, 1)
+    pushAfter(l, axis, start, grow, [bar])
+    reachEdge(l, axis, toBar({ x: 0, y: 0, w: l.w, h: l.h }, axis).s, new Set([...start.keys(), ...grow.keys()]))
+    l.blocks.splice(at, 0, self)
+  } else {
+    putBar(self, axis, { ...old, s: width })
+    pullBack(l, axis, line, old.q, old.q + old.t, -d)
   }
-  return l
+  return settle(l)
 }
 
 // ---------- 单位 ----------
@@ -1308,11 +1530,9 @@ export function setUnit(layout: FieldLayout, unit: Unit, convert: boolean): Fiel
   const k = convert ? layout.unit.meters / unit.meters : 1
   l.unit = { ...unit }
   if (k !== 1) {
-    l.rows = l.rows.map((v) => round(v * k, 4))
-    l.cols = l.cols.map((v) => round(v * k, 4))
-    for (const b of l.blocks) {
-      if (b.fit) b.fit = { x: round(b.fit.x * k, 4), y: round(b.fit.y * k, 4), w: round(b.fit.w * k, 4), h: round(b.fit.h * k, 4) }
-    }
+    l.w = r4(l.w * k)
+    l.h = r4(l.h * k)
+    for (const b of l.blocks) Object.assign(b, { x: r4(b.x * k), y: r4(b.y * k), w: r4(b.w * k), h: r4(b.h * k) })
   }
   return l
 }
@@ -1320,10 +1540,20 @@ export function setUnit(layout: FieldLayout, unit: Unit, convert: boolean): Fiel
 /** 保存前检查：返回第一个问题，没问题返回 null */
 export function checkLayout(l: FieldLayout): string | null {
   if (!(l.unit.meters > 0) || l.unit.meters > 1000) return '长度单位不对'
-  if (l.rows.length > MAX_BLOCK_TRACKS || l.cols.length > MAX_BLOCK_TRACKS) return `区块最多 ${MAX_BLOCK_TRACKS} 行、${MAX_BLOCK_TRACKS} 列`
+  if (!(l.w > 0) || !(l.h > 0) || l.w > MAX_FIELD || l.h > MAX_FIELD) return '地块大小不对'
+  if (l.blocks.length > MAX_BLOCKS) return `区块、道路加起来最多 ${MAX_BLOCKS} 个`
   if (plotCount(l) > MAX_PLOTS) return `小区块太多了：一块地最多 ${MAX_PLOTS} 个小区块`
   if (l.blocks.some((b) => b.kind === 'PLANT' && b.inner && (b.inner.rows.length > MAX_INNER_TRACKS || b.inner.cols.length > MAX_INNER_TRACKS))) {
     return `一个区块里最多 ${MAX_INNER_TRACKS} 行、${MAX_INNER_TRACKS} 列小区块`
+  }
+  const tiny = l.blocks.find((b) => !(b.w >= MIN_SIZE) || !(b.h >= MIN_SIZE))
+  if (tiny) return `“${tiny.name}”太小了`
+  const out = l.blocks.find((b) => b.x < -TOL || b.y < -TOL || b.x + b.w > l.w + TOL || b.y + b.h > l.h + TOL)
+  if (out) return `“${out.name}”超出了地块`
+  const hit = conflicts(l)[0]
+  if (hit) {
+    const name = (id: string) => l.blocks.find((b) => b.id === id)?.name ?? id
+    return `“${name(hit[0])}”和“${name(hit[1])}”叠在一起了，挪开或者改小一个再保存`
   }
   return null
 }

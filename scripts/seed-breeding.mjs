@@ -37,35 +37,31 @@ const uuid = () => crypto.randomUUID()
 
 /** 几行几列区块（区块间 1 m 道路），每个区块里几行几列小区块 */
 function layout(blockRows, blockCols, innerRows, innerCols, blockW = 6, blockH = 20) {
-  const rows = []
-  const cols = []
-  for (let i = 0; i < blockRows; i++) rows.push(...(i ? [1, blockH] : [blockH]))
-  for (let j = 0; j < blockCols; j++) cols.push(...(j ? [1, blockW] : [blockW]))
+  const road = 1
+  const w = blockCols * blockW + (blockCols - 1) * road
+  const h = blockRows * blockH + (blockRows - 1) * road
   const blocks = []
-  const merges = []
   let no = 1
-  let road = 1
-  for (let r = 0; r < rows.length; r++) {
-    if (r % 2 === 1) {
-      if (cols.length > 1) merges.push({ r, c: 0, rs: 1, cs: cols.length })
-      blocks.push({ id: `R${road++}`, r, c: 0, name: '道路', kind: 'ROAD', fit: null, inner: null })
-      continue
-    }
-    for (let c = 0; c < cols.length; c++) {
-      if (c % 2 === 1) {
-        blocks.push({ id: `R${road++}`, r, c, name: '道路', kind: 'ROAD', fit: null, inner: null })
-      } else {
-        blocks.push({
-          id: `B${no}`, r, c, name: `区块${no}`, kind: 'PLANT', fit: null,
-          inner: { rows: Array(innerRows).fill(1), cols: Array(innerCols).fill(1), merges: [], plots: {} },
-        })
-        no++
-      }
+  for (let i = 0; i < blockRows; i++) {
+    for (let j = 0; j < blockCols; j++) {
+      blocks.push({
+        id: `B${no}`, name: `区块${no}`, kind: 'PLANT', x: j * (blockW + road), y: i * (blockH + road), w: blockW, h: blockH,
+        inner: { rows: Array(innerRows).fill(1), cols: Array(innerCols).fill(1), merges: [], plots: {} },
+      })
+      no++
     }
   }
+  // 区块之间的道路：横的、竖的都通到头
+  let roadNo = 1
+  for (let i = 1; i < blockRows; i++) {
+    blocks.push({ id: `R${roadNo++}`, name: '道路', kind: 'ROAD', x: 0, y: i * blockH + (i - 1) * road, w, h: road, inner: null })
+  }
+  for (let j = 1; j < blockCols; j++) {
+    blocks.push({ id: `R${roadNo++}`, name: '道路', kind: 'ROAD', x: j * blockW + (j - 1) * road, y: 0, w: road, h, inner: null })
+  }
   return {
-    version: 1, unit: { name: '米', symbol: 'm', meters: 1 }, rows, cols, merges, blocks,
-    nextBlockNo: Math.max(no, road), defaultInner: { rows: innerRows, cols: innerCols }, northDeg: 0,
+    version: 2, unit: { name: '米', symbol: 'm', meters: 1 }, w, h, blocks,
+    nextBlockNo: Math.max(no, roadNo), defaultInner: { rows: innerRows, cols: innerCols }, northDeg: 0,
   }
 }
 

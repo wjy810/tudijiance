@@ -5,7 +5,7 @@ import { computed } from 'vue'
 
 import type { PlotStatusCode, ScreenPlot } from '@/shared/api'
 import { PLOT_STATUS } from '@/shared/labels'
-import { blockRect, blockSlot, fieldSize, innerCells, type FieldLayout, type Rect } from '@/shared/fieldLayout'
+import { blockRect, drawOrder, fieldSize, innerCells, type FieldLayout, type Rect } from '@/shared/fieldLayout'
 
 const props = withDefaults(defineProps<{
   layout: FieldLayout
@@ -44,13 +44,12 @@ interface CellShape {
   plot: ScreenPlot | null
 }
 
-const shapes = computed(() => props.layout.blocks.map((b) => {
-  const slot = blockSlot(props.layout, b)
+const shapes = computed(() => drawOrder(props.layout).map((b) => {
   const rect = blockRect(props.layout, b)
   const cells: CellShape[] = b.kind === 'PLANT'
     ? innerCells(props.layout, b).map((c) => ({ key: c.key, r: c.rect, plot: c.plotId != null ? byId.value.get(c.plotId) ?? null : null }))
     : []
-  return { id: b.id, kind: b.kind, name: b.name, slot, rect, fitted: !!b.fit, cells }
+  return { id: b.id, kind: b.kind, name: b.name, rect, cells }
 }))
 
 const cellCount = computed(() => shapes.value.reduce((n, s) => n + s.cells.length, 0))
@@ -92,7 +91,6 @@ function tipOf(c: CellShape): string {
       :fill="DARK ? '#0b1611' : '#cdbf9f'" :stroke="DARK ? 'rgba(226,182,90,0.35)' : '#1c4231'" :stroke-width="hair * 1.2"
     />
     <g v-for="s in shapes" :key="s.id">
-      <rect v-if="s.fitted" :x="s.slot.x" :y="s.slot.y" :width="s.slot.w" :height="s.slot.h" :fill="KIND_FILL.ROAD" />
       <rect :x="s.rect.x" :y="s.rect.y" :width="s.rect.w" :height="s.rect.h" :fill="KIND_FILL[s.kind]" />
       <line
         v-if="s.kind === 'ROAD'"

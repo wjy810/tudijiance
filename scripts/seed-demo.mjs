@@ -170,11 +170,13 @@ async function seasonFor(year, prev) {
 
 /** 一个区块，rows × cols 个小区块，每个 len × wid 米 */
 function gridLayout(rows, cols, len, wid) {
+  const w = cols * wid
+  const h = +(rows * len).toFixed(2)
   return {
-    version: 1, unit: { name: '米', symbol: 'm', meters: 1 }, rows: [+(rows * len).toFixed(2)], cols: [cols * wid],
-    merges: [], nextBlockNo: 2, defaultInner: { rows, cols }, northDeg: 0,
+    version: 2, unit: { name: '米', symbol: 'm', meters: 1 }, w, h,
+    nextBlockNo: 2, defaultInner: { rows, cols }, northDeg: 0,
     blocks: [{
-      id: 'B1', r: 0, c: 0, name: '区块1', kind: 'PLANT', fit: null,
+      id: 'B1', name: '区块1', kind: 'PLANT', x: 0, y: 0, w, h,
       inner: { rows: Array(rows).fill(1), cols: Array(cols).fill(1), merges: [], plots: {} },
     }],
   }

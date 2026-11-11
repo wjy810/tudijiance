@@ -4,7 +4,7 @@
 // 上面的区块标签可以只看某一个区块，格子放大更好点
 import { computed, ref, watch } from 'vue'
 
-import { anchors, keyOf, type FieldLayout, type LayoutBlock } from '@/shared/fieldLayout'
+import { anchors, keyOf, plantBlocks, type FieldLayout, type LayoutBlock } from '@/shared/fieldLayout'
 import type { PickerCell } from './picker'
 import EmptyState from '@/desktop/components/EmptyState.vue'
 
@@ -25,9 +25,7 @@ const emit = defineEmits<{
 const byId = computed(() => new Map(props.cells.map((c) => [c.plotId, c])))
 
 /** 种植区块，从上到下、从左到右 */
-const blocks = computed(() => props.layout.blocks
-  .filter((b) => b.kind === 'PLANT' && b.inner)
-  .sort((a, b) => a.r - b.r || a.c - b.c))
+const blocks = computed(() => plantBlocks(props.layout))
 
 const focus = ref<string | null>(null)
 watch(blocks, (list) => {

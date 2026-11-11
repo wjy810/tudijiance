@@ -152,11 +152,9 @@ public class FieldService {
                     }
                 });
             }
-            return new Block(b.id(), b.r(), b.c(), b.name(), b.kind(), b.fit(),
-                    new Inner(in.rows(), in.cols(), in.merges(), in.plots(), kinds.isEmpty() ? null : kinds));
+            return b.withInner(new Inner(in.rows(), in.cols(), in.merges(), in.plots(), kinds.isEmpty() ? null : kinds));
         }).toList();
-        return new FieldLayout(l.version(), l.unit(), l.rows(), l.cols(), l.merges(), blocks, l.nextBlockNo(),
-                l.defaultInner(), l.northDeg());
+        return l.withBlocks(blocks);
     }
 
     /** 保存过的区块布局；还是按行列建的老网格时为 null */
@@ -428,8 +426,9 @@ public class FieldService {
                     .put(leaf.key(), idAt.get(leaf.rowNo() + "," + leaf.colNo()));
         }
         List<Block> blocks = layout.blocks().stream().map(b -> {
+            Block at = new Block(b.id(), b.name(), b.kind(), round4(b.x()), round4(b.y()), round4(b.w()), round4(b.h()), null);
             if (!FieldLayout.PLANT.equals(b.kind())) {
-                return new Block(b.id(), b.r(), b.c(), b.name(), b.kind(), b.fit(), null);
+                return at;
             }
             Inner in = b.inner();
             Map<String, String> kinds = new LinkedHashMap<>();
@@ -440,13 +439,11 @@ public class FieldService {
                     }
                 });
             }
-            return new Block(b.id(), b.r(), b.c(), b.name(), b.kind(), b.fit(),
-                    new Inner(in.rows(), in.cols(), in.merges() == null ? List.of() : in.merges(),
-                            idsByBlock.getOrDefault(b.id(), Map.of()), kinds.isEmpty() ? null : kinds));
+            return at.withInner(new Inner(in.rows(), in.cols(), in.merges() == null ? List.of() : in.merges(),
+                    idsByBlock.getOrDefault(b.id(), Map.of()), kinds.isEmpty() ? null : kinds));
         }).toList();
-        FieldLayout saved = new FieldLayout(1, layout.unit(), layout.rows(), layout.cols(),
-                layout.merges() == null ? List.of() : layout.merges(), blocks, layout.nextBlockNo(),
-                layout.defaultInner(), layout.northDeg() == null ? 0.0 : layout.northDeg());
+        FieldLayout saved = new FieldLayout(FieldLayout.VERSION, layout.unit(), round4(layout.w()), round4(layout.h()),
+                blocks, layout.nextBlockNo(), layout.defaultInner(), layout.northDeg() == null ? 0.0 : layout.northDeg());
 
         field.setLayout(json.writeValueAsString(saved));
         field.setRowCount(flat.rowCount());
@@ -454,6 +451,10 @@ public class FieldService {
         field.setUpdatedAt(LocalDateTime.now(clock));
         fieldMapper.updateById(field);
         return detail(fieldId);
+    }
+
+    private static double round4(double v) {
+        return Math.round(v * 10000) / 10000.0;
     }
 
     /** 已经分配了品种的小区块不能改成道路、保护区、空地 */

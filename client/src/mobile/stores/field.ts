@@ -106,7 +106,8 @@ export const useFieldStore = defineStore('mobile-field', () => {
     }
     const [d, t] = await Promise.all([repo.fieldDetail(fieldId.value), repo.trials(fieldId.value)])
     plots.value = d.data.plots
-    blockLayout.value = d.data.layoutSaved && d.data.layout ? d.data.layout : null
+    // 手机上存着的可能还是老格式（表格式）的布局：不认得的按行列的老样子显示，联网后会换成新的
+    blockLayout.value = d.data.layoutSaved && d.data.layout?.version === 2 ? d.data.layout : null
     trials.value = sortTrials(t.data)
     noteOffline(d)
     noteOffline(t)

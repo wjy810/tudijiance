@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 平面图（俯视）：按实际尺寸画实验田的区块、道路、保护区、空地和区块里的小区块。
+// 平面图（俯视）：按实际尺寸画地块里的区块、道路、保护区、空地和区块里的小区块。
 //
 // 为了快，这里不用 Vue 模板画图形，而是直接用 Konva 画，分三层：
 //   world   区块、小区块的底色和格子（布局、颜色变了才重画）
@@ -9,8 +9,9 @@
 //
 //   focus 为空时看整块地；为区块 id 时只看这个区块（"进入区块"）
 //   pick  点选的是什么：plot 小区块（录入、布置试验）、block 区块（编辑地块）、cell 区块里的格子（编辑区块里的小区块）
-//   editable 编辑地块：拖分界线改大小、拖特殊区块、拖区块交换位置、拖格子挪小区块
-//   tool  select 选择、pan 拖动画面、measure 测距、road 道路（编辑地块时点区块之间的线加道路，点道路删掉）
+//   editable 编辑地块：区块、道路都是随便摆的矩形——按住就能拖着挪，拖四周的小方块改大小，拖地块的右边、下边改地块大小；
+//            进了区块以后拖分界线改小区块大小、拖格子挪小区块
+//   tool  select 选择、pan 拖动画面、measure 测距；编辑地块时还有 road 画道路、block 画区块
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Konva from 'konva'
 
@@ -19,10 +20,13 @@ import guardTileUrl from '@/assets/art/guard-tile.webp'
 import roadTileUrl from '@/assets/art/road-tile.webp'
 import { eastNorth, eastNorthText } from '@/shared/compass'
 import {
-  CELL_KIND, addRoadProblem, anchors, isRoadTrack, blockRect, blockSlot, blockSpan, canMoveCells, fieldSize, fmt, innerCells, innerSizes,
-  keyOf, parseKey, roadOfBlock, round, sum, trackRect, type Axis, type CellKind, type FieldLayout, type LayoutBlock, type Rect,
-  type Span,
+  CELL_KIND, MIN_SIZE, anchors, blockRect, boundsOf, canMoveCells, conflicts, contentBounds, drawOrder, drawRoad, fieldSize, fmt,
+  innerCells, innerCountFor, innerSizes, keyOf, overlaps, parseKey, plotSize, round, sum,
+  type Axis, type CellKind, type FieldLayout, type LayoutBlock, type Rect, type Span,
 } from '@/shared/fieldLayout'
+import {
+  nearestLine, resizeBy, roadStrip, snapLines, snapMove, snapPoint, type Guide, type Handle, type SnapLine, type SnapLines,
+} from '@/shared/layoutSnap'
 
 export interface CanvasCell {
   lines: string[]
@@ -55,22 +59,14 @@ export interface CanvasLink {
   active: boolean
 }
 
-export type CanvasTool = 'select' | 'pan' | 'measure' | 'road'
+export type CanvasTool = 'select' | 'pan' | 'measure' | 'road' | 'block'
 
-/** 道路工具点了哪里：add 在第 index 行（列）前面加一条道路，remove 删掉第 index 行（列）这条道路 */
-export interface RoadAction {
-  action: 'add' | 'remove'
-  axis: Axis
-  index: number
-}
-
-/** 拖动分界线改大小：a 是第 index 行（列）的新大小，b 是下一行（列）的；拖最外边时 b 为 null */
+/** 进了区块以后拖小区块之间的分界线：a 是第 index 行（列）的新大小，b 是下一行（列）的 */
 export interface TrackResize {
-  scope: 'field' | 'inner'
   axis: Axis
   index: number
   a: number
-  b: number | null
+  b: number
 }
 
 const props = withDefaults(defineProps<{
@@ -85,12 +81,12 @@ const props = withDefaults(defineProps<{
   devices?: CanvasDevice[]
   /** 画面转多少度（图纸朝上为 0，正北朝上时按真北方向转） */
   rotation?: number
-  /** 显示行高列宽标尺（编辑地块时） */
+  /** 显示标尺（编辑地块时） */
   rulers?: boolean
   /** 编辑地块：可以拖动改大小、挪位置 */
   editable?: boolean
   tool?: CanvasTool
-  /** 道路工具加的道路多宽（单位同布局） */
+  /** 画的道路多宽（单位同布局）；摆区块时也按它留出一条路的间隔 */
   roadWidth?: number
   /** 浮在画布上的工具条占的地方（像素），适应窗口时让开 */
   insets?: { top: number; right: number; bottom: number; left: number }
@@ -107,18 +103,22 @@ const emit = defineEmits<{
   open: [plotId: number]
   enter: [blockId: string]
   contextmenu: [target: { plotId?: number; blockId?: string; cell?: string }, x: number, y: number]
-  /** 拖动特殊区块松手：x、y 是在槽位里的新偏移 */
-  moveFit: [blockId: string, x: number, y: number]
-  /** 点了标尺上的第 index 行（列） */
+  /** 把选中的区块拖到别处松手：一起挪 dx、dy；copy 为 true 是按着 Alt 松的手，复制一份过去 */
+  moveBlocks: [ids: string[], dx: number, dy: number, copy: boolean]
+  /** 拖区块四周的小方块松手：新的位置和大小 */
+  resizeBlock: [id: string, rect: Rect]
+  /** 拖地块的右边、下边松手 */
+  resizeField: [w: number, h: number]
+  /** 道路工具画了一条：rect 是画出来的长条，axis 是走向（row 横向、col 纵向） */
+  drawRoad: [rect: Rect, axis: Axis]
+  /** 区块工具拖出了一个方框 */
+  drawBlock: [rect: Rect]
+  /** 点了区块里标尺上的第 index 行（列） */
   track: [axis: Axis, index: number, additive: boolean]
-  /** 拖分界线松手 */
+  /** 进了区块以后拖分界线松手 */
   resizeTrack: [r: TrackResize]
-  /** 道路工具点了一下 */
-  road: [r: RoadAction]
   /** 拖选中的格子松手：整体挪 dr 行 dc 列 */
   moveCells: [blockId: string, keys: string[], dr: number, dc: number]
-  /** 把选中的区块拖到另一个区块上松手：交换位置 */
-  swapBlocks: [a: string, b: string]
   zoom: [percent: number]
 }>()
 
@@ -147,6 +147,8 @@ let worldLayer: Konva.Layer
 let labelLayer: Konva.Layer
 let overlayLayer: Konva.Layer
 let selGroup: Konva.Group
+let chromeGroup: Konva.Group
+let conflictGroup: Konva.Group
 let linkGroup: Konva.Group
 let dragGroup: Konva.Group
 let measureGroup: Konva.Group
@@ -184,7 +186,7 @@ const focusBlock = () => (props.focus ? props.layout.blocks.find((b) => b.id ===
 /** 现在看的范围（单位同布局） */
 function contentRect(): Rect {
   const fb = focusBlock()
-  if (fb) return blockSlot(props.layout, fb)
+  if (fb) return blockRect(props.layout, fb)
   const s = fieldSize(props.layout)
   return { x: 0, y: 0, w: s.w, h: s.h }
 }
@@ -304,9 +306,7 @@ interface CellItem {
 
 interface BlockItem {
   block: LayoutBlock
-  slot: Rect
   rect: Rect
-  span: Span
   cells: CellItem[]
 }
 
@@ -330,12 +330,13 @@ const CK = '#c0562f'
 
 function rebuildModel() {
   const fb = focusBlock()
-  const list = fb ? [fb] : props.layout.blocks
+  // 道路垫在下面，区块画在上面
+  const list = fb ? [fb] : drawOrder(props.layout)
   blockItems = list.map((b) => {
     const cells = innerCells(props.layout, b).map((c) => ({
       blockId: b.id, key: c.key, span: c.span, plotId: c.plotId, kind: c.kind, rect: c.rect,
     }))
-    return { block: b, slot: blockSlot(props.layout, b), rect: blockRect(props.layout, b), span: blockSpan(props.layout, b), cells }
+    return { block: b, rect: blockRect(props.layout, b), cells }
   })
   cellItems = blockItems.flatMap((s) => s.cells)
   cellByPlot = new Map()
@@ -387,18 +388,6 @@ function roadLine(r: Rect): number[] {
     : [r.x + r.w / 2, r.y + m, r.x + r.w / 2, r.y + r.h - m]
 }
 
-/** 槽位里特殊区块以外的部分（道路），最多四块 */
-function slotRoads(s: BlockItem): Rect[] {
-  if (!s.block.fit) return []
-  const { slot: o, rect: i } = s
-  const out: Rect[] = []
-  if (i.y > o.y) out.push({ x: o.x, y: o.y, w: o.w, h: i.y - o.y })
-  if (i.y + i.h < o.y + o.h) out.push({ x: o.x, y: i.y + i.h, w: o.w, h: o.y + o.h - i.y - i.h })
-  if (i.x > o.x) out.push({ x: o.x, y: i.y, w: i.x - o.x, h: i.h })
-  if (i.x + i.w < o.x + o.w) out.push({ x: i.x + i.w, y: i.y, w: o.x + o.w - i.x - i.w, h: i.h })
-  return out
-}
-
 const shape = { listening: false, perfectDrawEnabled: false, shadowForStrokeEnabled: false }
 
 function addText(rect: Rect, lines: string[], color: string) {
@@ -429,15 +418,6 @@ function buildWorld() {
     }))
   }
   for (const s of blockItems) {
-    for (const r of slotRoads(s)) {
-      W.add(new Konva.Rect({ ...shape, ...box(r), ...kindFill('ROAD') }))
-      W.add(new Konva.Line({ ...shape, points: roadLine(r), stroke: ROAD_LINE, strokeWidth: 1.5, dash: [8, 6], strokeScaleEnabled: false }))
-    }
-    if (s.block.fit) {
-      W.add(new Konva.Rect({
-        ...shape, ...box(s.slot), stroke: 'rgba(28, 66, 49, 0.35)', strokeWidth: 1, dash: [4, 4], strokeScaleEnabled: false,
-      }))
-    }
     const plant = s.block.kind === 'PLANT'
     W.add(new Konva.Rect({
       ...shape, ...box(s.rect), ...kindFill(s.block.kind),
@@ -491,6 +471,7 @@ function buildWorld() {
   devGroup = new Konva.Group(shape)
   labelLayer.add(rulerGroup, devGroup)
   ckTags = []
+  drawConflicts()
   drawSelection()
   drawLinks()
   refreshLabels()
@@ -582,6 +563,7 @@ function refreshLabels() {
   drawRulers()
   drawDevices()
   placeCkTags()
+  drawChrome()
   labelLayer.batchDraw()
   // 选中框、对照虚线的粗细跟屏幕走，不用重画
 }
@@ -636,16 +618,37 @@ function drawRulers() {
     return
   }
   if (!props.rulers) return
-  let x = 0
-  props.layout.cols.forEach((w, i) => {
-    add('col', i, { x, y: -gap - px(4), w, h: gap }, fmt(w, u), isRoadTrack(props.layout, 'col', i))
-    x += w
-  })
-  let y = 0
-  props.layout.rows.forEach((h, i) => {
-    add('row', i, { x: -gap - px(4), y, w: gap, h }, fmt(h, u), isRoadTrack(props.layout, 'row', i))
-    y += h
-  })
+  // 整块地：上边、左边各一条刻度尺，从左上角量起
+  const size0 = fieldSize(props.layout)
+  const step = niceStep(64 / view.scale)
+  const off = gap + px(4)
+  const strip = (r: Rect) => rulerGroup.add(new Konva.Rect({
+    ...shape, ...box(r), fill: 'rgba(255, 253, 248, 0.94)', stroke: 'rgba(90, 70, 30, 0.25)', strokeWidth: 1,
+    strokeScaleEnabled: false, cornerRadius: px(4),
+  }))
+  const mark = (x: number, y: number, text: string) => {
+    const w = px(46)
+    const h = px(14)
+    rulerGroup.add(new Konva.Text({
+      ...shape, x, y, width: w, height: h, offsetX: w / 2, offsetY: h / 2, rotation: -props.rotation, text, align: 'center',
+      verticalAlign: 'middle', fontSize: px(10.5), fill: '#6b6450', fontFamily: FONT, wrap: 'none',
+    }))
+  }
+  strip({ x: 0, y: -off, w: size0.w, h: gap })
+  strip({ x: -off, y: 0, w: gap, h: size0.h })
+  const tick = { ...shape, stroke: 'rgba(90, 70, 30, 0.45)', strokeWidth: 1, strokeScaleEnabled: false }
+  for (let i = 0; i * step <= size0.w + 1e-9 && i < 400; i++) {
+    const v = i * step
+    rulerGroup.add(new Konva.Line({ ...tick, points: [v, -px(4), v, -px(4) - gap * 0.28] }))
+    // 两头的数字往里收一点，不压到拐角
+    if (v > px(16) && v < size0.w - px(16)) mark(v, -off + gap * 0.42, String(round(v, 4)))
+  }
+  for (let i = 0; i * step <= size0.h + 1e-9 && i < 400; i++) {
+    const v = i * step
+    rulerGroup.add(new Konva.Line({ ...tick, points: [-px(4), v, -px(4) - gap * 0.28, v] }))
+    if (v > px(16) && v < size0.h - px(16)) mark(-off + gap * 0.42, v, String(round(v, 4)))
+  }
+  mark(-off + gap * 0.5, -off + gap * 0.5, u.symbol)
 }
 
 function drawDevices() {
@@ -682,15 +685,66 @@ function drawSelection() {
     }
   } else {
     const ids = new Set(props.selectedBlocks)
-    for (const s of blockItems) {
-      if (!ids.has(s.block.id)) continue
-      selBox(s.rect, false)
-      if (props.editable && s.block.fit) {
-        selGroup.add(new Konva.Rect({ ...shape, ...box(s.rect), stroke: WHEAT, strokeWidth: 2, dash: [6, 4], strokeScaleEnabled: false }))
-      }
+    for (const s of blockItems) if (ids.has(s.block.id)) selBox(s.rect, false)
+  }
+  drawChrome()
+  overlayLayer.batchDraw()
+}
+
+/**
+ * 编辑地块时选中的东西四周：只选了一个时八个小方块（拖它改大小），标尺上标出选中的范围和大小。
+ * 大小跟屏幕走，缩放后重画
+ */
+function drawChrome() {
+  if (!stage) return
+  chromeGroup.destroyChildren()
+  if (!freeEdit()) return
+  const sel = blockItems.filter((s) => props.selectedBlocks.includes(s.block.id))
+  const b = boundsOf(sel.map((s) => s.rect))
+  if (b && props.rulers) {
+    const u = props.layout.unit
+    const gap = px(RULER) * 0.8
+    const off = gap + px(4)
+    // 不透明：盖住下面的刻度数字，免得和大小叠在一起
+    const bar = { ...shape, fill: '#f0d596', stroke: '#b98a2c', strokeWidth: 1, strokeScaleEnabled: false, cornerRadius: px(3) }
+    chromeGroup.add(new Konva.Rect({ ...bar, x: b.x, y: -off, width: b.w, height: gap }))
+    chromeGroup.add(new Konva.Rect({ ...bar, x: -off, y: b.y, width: gap, height: b.h }))
+    const label = (x: number, y: number, text: string, room: number, turn: number) => {
+      if (room * view.scale < text.length * 7 + 6) return
+      const w = px(text.length * 7 + 10)
+      const h = px(14)
+      chromeGroup.add(new Konva.Text({
+        ...shape, x, y, width: w, height: h, offsetX: w / 2, offsetY: h / 2, rotation: turn, text, align: 'center', verticalAlign: 'middle',
+        fontSize: px(11), fontStyle: 'bold', fill: '#5b4310', fontFamily: FONT, wrap: 'none',
+      }))
+    }
+    label(b.x + b.w / 2, -off + gap / 2, fmt(b.w, u), b.w, -props.rotation)
+    label(-off + gap / 2, b.y + b.h / 2, fmt(b.h, u), b.h, -props.rotation - 90)
+  }
+  const it = selectedItem()
+  if (it) {
+    const k = px(8)
+    for (const h of handlesOf(it.rect)) {
+      chromeGroup.add(new Konva.Rect({
+        ...shape, x: h.x - k / 2, y: h.y - k / 2, width: k, height: k, fill: '#ffffff', stroke: FOREST, strokeWidth: 1.6,
+        strokeScaleEnabled: false, cornerRadius: k * 0.2,
+      }))
     }
   }
-  overlayLayer.batchDraw()
+}
+
+/** 编辑地块时叠在一起的区块：描红（叠着不能保存） */
+function drawConflicts() {
+  if (!stage) return
+  conflictGroup.destroyChildren()
+  if (!props.editable || focusBlock()) return
+  const bad = new Set(conflicts(props.layout).flat())
+  for (const s of blockItems) {
+    if (!bad.has(s.block.id)) continue
+    conflictGroup.add(new Konva.Rect({
+      ...shape, ...box(s.rect), fill: 'rgba(192, 86, 47, 0.2)', stroke: CK, strokeWidth: 2.5, dash: [7, 4], strokeScaleEnabled: false,
+    }))
+  }
 }
 
 function drawLinks() {
@@ -790,19 +844,16 @@ function blockIdOf(t: Target): string | null {
   return null
 }
 
-/** 编辑时鼠标是不是在分界线上：整块地上是区块之间（和最外边），区块里是小区块之间 */
+/** 进了区块以后，鼠标是不是在小区块之间的分界线上 */
 interface Divider {
-  scope: 'field' | 'inner'
   axis: Axis
   index: number
-  /** 拖的是最外边：只改这一行（列） */
-  outer: boolean
   /** 分界线在布局里的位置、能拖的范围 */
   pos: number
   min: number
-  max: number | null
+  max: number
   a: number
-  b: number | null
+  b: number
   /** 分界线另一个方向的范围，画线用 */
   from: number
   to: number
@@ -810,47 +861,26 @@ interface Divider {
 
 function dividerAt(sp: { x: number; y: number }): Divider | null {
   if (!props.editable || props.tool !== 'select') return null
+  const fb = focusBlock()
+  if (!fb?.inner) return null
   const p = toContent(sp)
   const tol = 5 / view.scale
-  const fb = focusBlock()
   const minSize = Math.max(0.01, 4 / view.scale)
-  if (fb) {
-    if (!fb.inner) return null
-    const r = blockRect(props.layout, fb)
-    const s = innerSizes(props.layout, fb)
-    for (const axis of ['col', 'row'] as Axis[]) {
-      const sizes = axis === 'col' ? s.cols : s.rows
-      const start = axis === 'col' ? r.x : r.y
-      const along = axis === 'col' ? p.y : p.x
-      const [lo, hi] = axis === 'col' ? [r.y, r.y + r.h] : [r.x, r.x + r.w]
-      if (along < lo - tol || along > hi + tol) continue
-      let acc = start
-      for (let i = 0; i < sizes.length - 1; i++) {
-        acc += sizes[i]!
-        if (Math.abs((axis === 'col' ? p.x : p.y) - acc) <= tol) {
-          return {
-            scope: 'inner', axis, index: i, outer: false, pos: acc, a: sizes[i]!, b: sizes[i + 1]!,
-            min: acc - sizes[i]! + minSize, max: acc + sizes[i + 1]! - minSize, from: lo, to: hi,
-          }
-        }
-      }
-    }
-    return null
-  }
-  const s = fieldSize(props.layout)
+  const r = blockRect(props.layout, fb)
+  const s = innerSizes(props.layout, fb)
   for (const axis of ['col', 'row'] as Axis[]) {
-    const sizes = axis === 'col' ? props.layout.cols : props.layout.rows
+    const sizes = axis === 'col' ? s.cols : s.rows
+    const start = axis === 'col' ? r.x : r.y
     const along = axis === 'col' ? p.y : p.x
-    const hi = axis === 'col' ? s.h : s.w
-    if (along < -tol || along > hi + tol) continue
-    let acc = 0
-    for (let i = 0; i < sizes.length; i++) {
+    const [lo, hi] = axis === 'col' ? [r.y, r.y + r.h] : [r.x, r.x + r.w]
+    if (along < lo - tol || along > hi + tol) continue
+    let acc = start
+    for (let i = 0; i < sizes.length - 1; i++) {
       acc += sizes[i]!
       if (Math.abs((axis === 'col' ? p.x : p.y) - acc) <= tol) {
-        const outer = i === sizes.length - 1
         return {
-          scope: 'field', axis, index: i, outer, pos: acc, a: sizes[i]!, b: outer ? null : sizes[i + 1]!,
-          min: acc - sizes[i]! + minSize, max: outer ? null : acc + sizes[i + 1]! - minSize, from: 0, to: hi,
+          axis, index: i, pos: acc, a: sizes[i]!, b: sizes[i + 1]!,
+          min: acc - sizes[i]! + minSize, max: acc + sizes[i + 1]! - minSize, from: lo, to: hi,
         }
       }
     }
@@ -860,16 +890,34 @@ function dividerAt(sp: { x: number; y: number }): Divider | null {
 
 // ---------- 鼠标 ----------
 
+interface Pt {
+  x: number
+  y: number
+}
+
 type Drag =
   | { kind: 'pan'; x: number; y: number; px: number; py: number }
   | { kind: 'select'; x: number; y: number; target: Target; additive: boolean; band: boolean }
-  | { kind: 'resize'; d: Divider; start: number; value: number; keep: boolean }
-  | { kind: 'fit'; id: string; fx: number; fy: number; cx: number; cy: number; x: number; y: number; started: boolean; sx: number; sy: number }
-  | { kind: 'swap'; id: string; sx: number; sy: number; started: boolean; over: string | null }
+  | { kind: 'resize'; d: Divider; start: number; value: number }
+  | {
+    kind: 'bmove'; ids: string[]; hit: string; from: Pt; rects: Rect[]; box: Rect; lines: SnapLines
+    dx: number; dy: number; copy: boolean; started: boolean; sx: number; sy: number
+  }
+  | { kind: 'bresize'; id: string; handle: Handle; start: Rect; rect: Rect; lines: SnapLines }
+  | { kind: 'fresize'; edge: 'e' | 's' | 'se'; w: number; h: number; min: { w: number; h: number } }
+  | { kind: 'road' | 'block'; a: Pt; b: Pt; lines: SnapLines; started: boolean; sx: number; sy: number }
   | { kind: 'cells'; blockId: string; keys: string[]; r: number; c: number; dr: number; dc: number; started: boolean; sx: number; sy: number }
 
 let drag: Drag | null = null
 const space = { on: false }
+
+/** 在整块地上编辑：区块、道路随便摆 */
+const freeEdit = () => props.editable && props.pick === 'block' && !focusBlock()
+/** 离线多近算贴上（屏幕上大约 7 像素） */
+const snapTol = () => 7 / view.scale
+/** 没贴上线时位置取整到多少（屏幕上大约 5 像素：1、2、5 × 10 的几次方） */
+const gridStep = () => niceStep(5 / view.scale)
+const NO_LINES: SnapLines = { xs: [], ys: [] }
 
 function local(e: MouseEvent) {
   const r = host.value!.getBoundingClientRect()
@@ -917,6 +965,54 @@ function innerIndexAt(b: LayoutBlock, p: { x: number; y: number }): { r: number;
   return { r: Math.max(0, find(s.rows, p.y - r.y)), c: Math.max(0, find(s.cols, p.x - r.x)) }
 }
 
+// 选中一个区块时四周的八个小方块：拖它改大小
+const HANDLES: { h: Handle; fx: number; fy: number }[] = [
+  { h: 'nw', fx: 0, fy: 0 }, { h: 'ne', fx: 1, fy: 0 }, { h: 'se', fx: 1, fy: 1 }, { h: 'sw', fx: 0, fy: 1 },
+  { h: 'n', fx: 0.5, fy: 0 }, { h: 'e', fx: 1, fy: 0.5 }, { h: 's', fx: 0.5, fy: 1 }, { h: 'w', fx: 0, fy: 0.5 },
+]
+
+/** 现在画出来的小方块（区块太小时只留四个角） */
+function handlesOf(r: Rect): { h: Handle; x: number; y: number }[] {
+  const roomy = (len: number) => len * view.scale >= 34
+  return HANDLES
+    .filter((k) => k.h.length === 2 || ((k.h === 'n' || k.h === 's') ? roomy(r.w) : roomy(r.h)))
+    .map((k) => ({ h: k.h, x: r.x + r.w * k.fx, y: r.y + r.h * k.fy }))
+}
+
+function selectedItem(): BlockItem | null {
+  if (!freeEdit() || props.tool !== 'select' || props.selectedBlocks.length !== 1) return null
+  return blockItems.find((s) => s.block.id === props.selectedBlocks[0]) ?? null
+}
+
+function handleAt(sp: Pt): { id: string; handle: Handle } | null {
+  const it = selectedItem()
+  if (!it) return null
+  for (const k of handlesOf(it.rect)) {
+    const s = toScreen(k)
+    if (Math.abs(s.x - sp.x) <= 7 && Math.abs(s.y - sp.y) <= 7) return { id: it.block.id, handle: k.h }
+  }
+  return null
+}
+
+/** 鼠标在地块右边、下边的外侧：拖动改地块大小 */
+function fieldEdgeAt(sp: Pt): 'e' | 's' | 'se' | null {
+  if (!freeEdit() || props.tool !== 'select') return null
+  const p = toContent(sp)
+  const s = fieldSize(props.layout)
+  const out = 10 / view.scale
+  const e = p.x >= s.w && p.x <= s.w + out && p.y >= 0 && p.y <= s.h + out
+  const so = p.y >= s.h && p.y <= s.h + out && p.x >= 0 && p.x <= s.w + out
+  return e && so ? 'se' : e ? 'e' : so ? 's' : null
+}
+
+/** 画道路、画区块时鼠标所在的点：贴到线上，没贴上就取整 */
+function drawPoint(sp: Pt, lines: SnapLines, free: boolean): Pt {
+  const p = toContent(sp)
+  if (free) return { x: round(p.x, 4), y: round(p.y, 4) }
+  const s = snapPoint(p, lines, snapTol(), gridStep())
+  return { x: round(s.x, 4), y: round(s.y, 4) }
+}
+
 function onPointerDown(e: PointerEvent) {
   if (!stage) return
   const sp = local(e)
@@ -936,34 +1032,51 @@ function onPointerDown(e: PointerEvent) {
     measureClick(toContent(sp))
     return
   }
-  if (props.tool === 'road') {
-    const t = roadTargetAt(sp)
+  if (props.tool === 'road' || props.tool === 'block') {
+    if (!freeEdit()) return
+    // 画道路：路中心贴到区块的边、小区块之间的线上（穿过去），或者贴在离边半个路宽的地方（正好挨着区块）
+    const lines = props.tool === 'road' ? snapLines(props.layout, [], props.roadWidth / 2, true) : snapLines(props.layout, [], props.roadWidth)
+    const a = drawPoint(sp, lines, e.ctrlKey || e.metaKey)
     clearDragGhost()
-    if (t?.kind === 'add' || t?.kind === 'remove') emit('road', { action: t.kind, axis: t.axis, index: t.index })
+    drag = { kind: props.tool, a, b: a, lines, started: false, sx: sp.x, sy: sp.y }
     return
   }
   const div = dividerAt(sp)
   if (div) {
-    drag = { kind: 'resize', d: div, start: div.pos, value: div.pos, keep: keepTotal(div, e) }
+    drag = { kind: 'resize', d: div, start: div.pos, value: div.pos }
     return
   }
-  const target = targetAt(sp)
   const additive = e.ctrlKey || e.metaKey || e.shiftKey
-  if (props.editable && !additive && props.pick === 'block' && !focusBlock()) {
-    const id = target.kind === 'tick' ? null : blockIdOf(target)
-    const b = id ? props.layout.blocks.find((x) => x.id === id) : null
-    if (b && props.selectedBlocks.includes(b.id)) {
-      if (b.fit) {
-        const c = toContent(sp)
-        drag = { kind: 'fit', id: b.id, fx: b.fit.x, fy: b.fit.y, cx: c.x, cy: c.y, x: b.fit.x, y: b.fit.y, started: false, sx: sp.x, sy: sp.y }
+  if (freeEdit()) {
+    const h = handleAt(sp)
+    if (h) {
+      const start = { ...blockItems.find((s) => s.block.id === h.id)!.rect }
+      drag = { kind: 'bresize', id: h.id, handle: h.handle, start, rect: start, lines: snapLines(props.layout, [h.id], props.roadWidth) }
+      return
+    }
+    const t = targetAt(sp)
+    const id = t.kind === 'tick' ? null : blockIdOf(t)
+    if (!id) {
+      const edge = fieldEdgeAt(sp)
+      if (edge) {
+        const s = fieldSize(props.layout)
+        const c = contentBounds(props.layout)
+        drag = { kind: 'fresize', edge, w: s.w, h: s.h, min: { w: c ? c.x + c.w : MIN_SIZE, h: c ? c.y + c.h : MIN_SIZE } }
         return
       }
-      if (props.selectedBlocks.length === 1) {
-        drag = { kind: 'swap', id: b.id, sx: sp.x, sy: sp.y, started: false, over: null }
-        return
+    } else if (!additive) {
+      // 按住就能拖：没选中的先选中它，选中了几个的一起挪
+      const ids = props.selectedBlocks.includes(id) ? [...props.selectedBlocks] : [id]
+      if (!props.selectedBlocks.includes(id)) emit('update:selectedBlocks', ids)
+      const rects = ids.map((i) => blockItems.find((s) => s.block.id === i)?.rect).filter((r): r is Rect => !!r).map((r) => ({ ...r }))
+      drag = {
+        kind: 'bmove', ids, hit: id, from: toContent(sp), rects, box: boundsOf(rects)!, lines: snapLines(props.layout, ids, props.roadWidth),
+        dx: 0, dy: 0, copy: false, started: false, sx: sp.x, sy: sp.y,
       }
+      return
     }
   }
+  const target = targetAt(sp)
   if (props.editable && !additive && props.pick === 'cell' && target.kind === 'cell' && props.selectedCells.includes(target.cell.key)) {
     const fb = focusBlock()
     if (fb) {
@@ -1005,35 +1118,57 @@ function onPointerMove(e: PointerEvent) {
     return
   }
   const p = toContent(sp)
+  const free = e.ctrlKey || e.metaKey
   if (d.kind === 'resize') {
-    d.keep = keepTotal(d.d, e)
     const raw = d.d.axis === 'col' ? p.x : p.y
     const step = niceStep(8 / view.scale)
-    let v = Math.round(raw / step) * step
-    v = Math.max(d.d.min, d.d.max == null || !d.keep ? v : Math.min(d.d.max, v))
-    d.value = v
+    d.value = Math.min(d.d.max, Math.max(d.d.min, Math.round(raw / step) * step))
     drawResizeGhost(d)
     return
   }
-  if (d.kind === 'fit') {
+  if (d.kind === 'bmove') {
     if (!d.started && !moved(d, sp)) return
     d.started = true
-    const b = props.layout.blocks.find((x) => x.id === d.id)
-    if (!b?.fit) return
-    const slot = blockSlot(props.layout, b)
-    const step = niceStep(6 / view.scale)
-    d.x = round(Math.min(Math.max(Math.round((d.fx + p.x - d.cx) / step) * step, 0), slot.w - b.fit.w), 4)
-    d.y = round(Math.min(Math.max(Math.round((d.fy + p.y - d.cy) / step) * step, 0), slot.h - b.fit.h), 4)
-    drawFitGhost(b, d.x, d.y)
+    let dx = p.x - d.from.x
+    let dy = p.y - d.from.y
+    // 按住 Shift 只横着或只竖着挪
+    const lock = e.shiftKey ? (Math.abs(dx) >= Math.abs(dy) ? 'x' : 'y') : null
+    if (lock === 'x') dy = 0
+    if (lock === 'y') dx = 0
+    let guides: Guide[] = []
+    if (!free) {
+      const s = snapMove({ ...d.box, x: d.box.x + dx, y: d.box.y + dy }, d.lines, snapTol(), gridStep())
+      if (lock !== 'y') dx += s.dx
+      if (lock !== 'x') dy += s.dy
+      guides = s.guides.filter((g) => (g.axis === 'x' ? lock !== 'y' : lock !== 'x'))
+    }
+    d.dx = round(dx, 4)
+    d.dy = round(dy, 4)
+    d.copy = e.altKey
+    drawMoveGhost(d, guides, sp)
     return
   }
-  if (d.kind === 'swap') {
+  if (d.kind === 'bresize') {
+    const min = Math.max(MIN_SIZE, 6 / view.scale)
+    const r = resizeBy(d.start, d.handle, p, free ? NO_LINES : d.lines, snapTol(), min, free ? 0 : gridStep())
+    d.rect = { x: round(r.rect.x, 4), y: round(r.rect.y, 4), w: round(r.rect.w, 4), h: round(r.rect.h, 4) }
+    drawBlockResizeGhost(d, r.guides, sp)
+    return
+  }
+  if (d.kind === 'fresize') {
+    const step = free ? 0 : gridStep()
+    const tidy = (v: number) => (step > 0 ? Math.round(v / step) * step : v)
+    if (d.edge !== 's') d.w = round(Math.max(d.min.w, tidy(p.x)), 4)
+    if (d.edge !== 'e') d.h = round(Math.max(d.min.h, tidy(p.y)), 4)
+    drawFieldGhost(d, sp)
+    return
+  }
+  if (d.kind === 'road' || d.kind === 'block') {
     if (!d.started && !moved(d, sp)) return
     d.started = true
-    const t = targetAt(sp)
-    const id = t.kind === 'tick' ? null : blockIdOf(t)
-    d.over = id && id !== d.id ? id : null
-    drawSwapGhost(d.id, d.over, p)
+    d.b = drawPoint(sp, d.lines, free)
+    if (d.kind === 'road') drawRoadGhost(roadStrip(d.a, d.b, props.roadWidth), sp, true)
+    else drawNewBlockGhost(rectBetween(d.a, d.b), sp)
     return
   }
   if (d.kind === 'cells') {
@@ -1048,12 +1183,15 @@ function onPointerMove(e: PointerEvent) {
   }
 }
 
+const rectBetween = (a: Pt, b: Pt): Rect => ({ x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.abs(b.x - a.x), h: Math.abs(b.y - a.y) })
+
 function onPointerUp(e: PointerEvent) {
   const d = drag
   drag = null
   if (host.value?.hasPointerCapture(e.pointerId)) host.value.releasePointerCapture(e.pointerId)
   clearDragGhost()
   hideBand()
+  hideTip()
   setCursor()
   if (!d) return
   if (d.kind === 'select') {
@@ -1069,19 +1207,40 @@ function onPointerUp(e: PointerEvent) {
   if (d.kind === 'resize') {
     const delta = d.value - d.start
     if (Math.abs(delta) < 1e-6) return
-    const a = round(d.d.a + delta, 4)
-    const b = d.d.b == null || !d.keep ? null : round(d.d.b - delta, 4)
-    emit('resizeTrack', { scope: d.d.scope, axis: d.d.axis, index: d.d.index, a, b })
+    emit('resizeTrack', { axis: d.d.axis, index: d.d.index, a: round(d.d.a + delta, 4), b: round(d.d.b - delta, 4) })
     return
   }
-  if (d.kind === 'fit') {
-    if (d.started && (d.x !== d.fx || d.y !== d.fy)) emit('moveFit', d.id, d.x, d.y)
-    else click(targetAt(local(e)), false)
+  if (d.kind === 'bmove') {
+    if (d.started && (d.dx !== 0 || d.dy !== 0)) emit('moveBlocks', d.ids, d.dx, d.dy, d.copy || e.altKey)
+    // 没拖动：只是点了一下，选了几个时只留点的这个
+    else if (!d.started && (props.selectedBlocks.length !== 1 || props.selectedBlocks[0] !== d.hit)) emit('update:selectedBlocks', [d.hit])
     return
   }
-  if (d.kind === 'swap') {
-    if (d.started && d.over && sameSpan(d.id, d.over)) emit('swapBlocks', d.id, d.over)
-    else if (!d.started) click(targetAt(local(e)), false)
+  if (d.kind === 'bresize') {
+    const a = d.start
+    const b = d.rect
+    if (a.x !== b.x || a.y !== b.y || a.w !== b.w || a.h !== b.h) emit('resizeBlock', d.id, b)
+    return
+  }
+  if (d.kind === 'fresize') {
+    const s = fieldSize(props.layout)
+    if (d.w !== s.w || d.h !== s.h) emit('resizeField', d.w, d.h)
+    return
+  }
+  if (d.kind === 'road') {
+    if (d.started) {
+      const strip = roadStrip(d.a, d.b, props.roadWidth)
+      if (Math.max(strip.rect.w, strip.rect.h) * view.scale >= 8) emit('drawRoad', strip.rect, strip.axis)
+    } else {
+      // 只是点了一下：点在区块的边或小区块之间的线上，加一条通到头的道路
+      const line = roadLineAt(local(e))
+      if (line) emit('drawRoad', line.rect, line.axis)
+    }
+    return
+  }
+  if (d.kind === 'block') {
+    const r = rectBetween(d.a, d.b)
+    if (d.started && r.w * view.scale >= 8 && r.h * view.scale >= 8) emit('drawBlock', r)
     return
   }
   if (d.kind === 'cells') {
@@ -1097,24 +1256,8 @@ function cancelDrag() {
   drag = null
   clearDragGhost()
   hideBand()
+  hideTip()
   setCursor()
-}
-
-function sameSpan(a: string, b: string): boolean {
-  const A = props.layout.blocks.find((x) => x.id === a)
-  const B = props.layout.blocks.find((x) => x.id === b)
-  if (!A || !B) return false
-  const sa = blockSpan(props.layout, A)
-  const sb = blockSpan(props.layout, B)
-  return sa.rs === sb.rs && sa.cs === sb.cs
-}
-
-/**
- * 拖区块之间的线：平时只改线左边（上边）的这一列（行），后面的区块跟着挪，地块跟着变大变小；
- * 按住 Shift（或 Alt）是两边一起变、地块总大小不变。区块里的小区块之间总是两边一起变
- */
-function keepTotal(d: Divider, e: { altKey: boolean; shiftKey: boolean }): boolean {
-  return d.scope === 'inner' || ((e.altKey || e.shiftKey) && d.b != null)
 }
 
 /** 拖动时按屏幕上大约多少像素取整：1、2、5 × 10 的几次方 */
@@ -1238,66 +1381,120 @@ function onWheel(e: WheelEvent) {
 
 // ---------- 拖动时的影子 ----------
 
+const CLAY = '#c0562f'
+
 function clearDragGhost() {
   if (!stage) return
   dragGroup.destroyChildren()
   overlayLayer.batchDraw()
 }
 
+/** 提示放在鼠标旁边，靠近右边、下边时翻到另一侧 */
+function tipNear(text: string, sp: Pt) {
+  showTip(text, sp.x > size.w - 290 ? sp.x - 280 : sp.x + 16, sp.y > size.h - 120 ? sp.y - 96 : sp.y + 18)
+}
+
+function drawGuides(guides: Guide[]) {
+  for (const g of guides) {
+    const pad = px(14)
+    const pts = g.axis === 'x' ? [g.pos, g.from - pad, g.pos, g.to + pad] : [g.from - pad, g.pos, g.to + pad, g.pos]
+    dragGroup.add(new Konva.Line({ ...shape, points: pts, stroke: CLAY, strokeWidth: 1.2, dash: [5, 4], strokeScaleEnabled: false }))
+  }
+}
+
+/** 进了区块以后拖小区块之间的线 */
 function drawResizeGhost(d: Extract<Drag, { kind: 'resize' }>) {
   dragGroup.destroyChildren()
   const v = d.value
   const pts = d.d.axis === 'col' ? [v, d.d.from, v, d.d.to] : [d.d.from, v, d.d.to, v]
-  dragGroup.add(new Konva.Line({ ...shape, points: pts, stroke: '#c0562f', strokeWidth: 2.5, strokeScaleEnabled: false }))
+  dragGroup.add(new Konva.Line({ ...shape, points: pts, stroke: CLAY, strokeWidth: 2.5, strokeScaleEnabled: false }))
   overlayLayer.batchDraw()
   const u = props.layout.unit
   const delta = v - d.start
-  const a = d.d.a + delta
   const name = d.d.axis === 'col' ? '列' : '行'
   const n = d.d.index + 1
-  const total = d.d.axis === 'col' ? fieldSize(props.layout).w : fieldSize(props.layout).h
-  const text = d.d.b == null || !d.keep
-    ? `第 ${n} ${name}：${fmt(a, u)}\n地块${d.d.axis === 'col' ? '宽' : '长'} ${fmt(total + delta, u)}${d.d.scope === 'field' && d.d.b != null ? '（按住 Shift 两边一起变）' : ''}`
-    : `第 ${n} ${name}：${fmt(a, u)}　第 ${n + 1} ${name}：${fmt(d.d.b - delta, u)}`
   const s = toScreen(d.d.axis === 'col' ? { x: v, y: d.d.from } : { x: d.d.from, y: v })
-  showTip(text, s.x + 12, s.y + 12)
+  showTip(`第 ${n} ${name}：${fmt(d.d.a + delta, u)}　第 ${n + 1} ${name}：${fmt(d.d.b - delta, u)}`, s.x + 12, s.y + 12)
 }
 
-function drawFitGhost(b: LayoutBlock, x: number, y: number) {
+/** 和 rect 叠在一起的别的区块（道路和道路不算）；skip 是正在挪的 */
+function clashWith(rect: Rect, kind: string, skip: string[]): LayoutBlock | null {
+  for (const s of blockItems) {
+    if (skip.includes(s.block.id)) continue
+    if (kind === 'ROAD' && s.block.kind === 'ROAD') continue
+    if (overlaps(rect, s.rect)) return s.block
+  }
+  return null
+}
+
+function drawMoveGhost(d: Extract<Drag, { kind: 'bmove' }>, guides: Guide[], sp: Pt) {
   dragGroup.destroyChildren()
-  const slot = blockSlot(props.layout, b)
-  const r = { x: slot.x + x, y: slot.y + y, w: b.fit!.w, h: b.fit!.h }
+  let clash: LayoutBlock | null = null
+  d.rects.forEach((r, i) => {
+    const moved: Rect = { x: r.x + d.dx, y: r.y + d.dy, w: r.w, h: r.h }
+    const kind = props.layout.blocks.find((b) => b.id === d.ids[i])?.kind ?? 'PLANT'
+    const hit = clashWith(moved, kind, d.copy ? [] : d.ids)
+    clash = clash ?? hit
+    dragGroup.add(new Konva.Rect({
+      ...shape, ...box(moved), fill: hit ? 'rgba(192, 86, 47, 0.25)' : 'rgba(226, 182, 90, 0.35)', stroke: hit ? CLAY : WHEAT,
+      strokeWidth: 2.5, dash: [6, 4], strokeScaleEnabled: false,
+    }))
+  })
+  drawGuides(guides)
+  overlayLayer.batchDraw()
+  const u = props.layout.unit
+  const lines = [`离左边 ${fmt(d.box.x + d.dx, u)} · 离上边 ${fmt(d.box.y + d.dy, u)}`]
+  if (clash) lines.push(`和“${(clash as LayoutBlock).name}”叠在一起了，叠着不能保存`)
+  lines.push(d.copy ? '松手复制一份放在这里' : '按住 Alt 松手是复制，Shift 只横着或竖着挪')
+  tipNear(lines.join('\n'), sp)
+}
+
+function drawBlockResizeGhost(d: Extract<Drag, { kind: 'bresize' }>, guides: Guide[], sp: Pt) {
+  dragGroup.destroyChildren()
+  const b = props.layout.blocks.find((x) => x.id === d.id)
+  const hit = b ? clashWith(d.rect, b.kind, [d.id]) : null
   dragGroup.add(new Konva.Rect({
-    ...shape, ...box(r), fill: 'rgba(226, 182, 90, 0.35)', stroke: WHEAT, strokeWidth: 2.5, dash: [6, 4], strokeScaleEnabled: false,
+    ...shape, ...box(d.rect), fill: hit ? 'rgba(192, 86, 47, 0.25)' : 'rgba(226, 182, 90, 0.35)', stroke: hit ? CLAY : WHEAT,
+    strokeWidth: 2.5, dash: [6, 4], strokeScaleEnabled: false,
+  }))
+  drawGuides(guides)
+  overlayLayer.batchDraw()
+  const u = props.layout.unit
+  const lines = [`宽 ${fmt(d.rect.w, u)} × 长 ${fmt(d.rect.h, u)}`]
+  if (b?.inner) {
+    const one = plotSize(props.layout, { ...b, ...d.rect })
+    lines.push(one
+      ? `里面 ${b.inner.rows.length} 行 × ${b.inner.cols.length} 列，每个小区块 ${fmt(one.w, u)} × ${fmt(one.h, u)}`
+      : `里面 ${b.inner.rows.length} 行 × ${b.inner.cols.length} 列小区块按比例跟着变`)
+  }
+  if (hit) lines.push(`和“${hit.name}”叠在一起了，叠着不能保存`)
+  tipNear(lines.join('\n'), sp)
+}
+
+function drawFieldGhost(d: Extract<Drag, { kind: 'fresize' }>, sp: Pt) {
+  dragGroup.destroyChildren()
+  dragGroup.add(new Konva.Rect({
+    ...shape, x: 0, y: 0, width: d.w, height: d.h, stroke: FOREST, strokeWidth: 2.5, dash: [8, 5], strokeScaleEnabled: false,
+    fill: 'rgba(28, 66, 49, 0.06)',
   }))
   overlayLayer.batchDraw()
   const u = props.layout.unit
-  const s = toScreen({ x: r.x, y: r.y + r.h })
-  showTip(`离左边 ${fmt(x, u)} · 离上边 ${fmt(y, u)}`, s.x, s.y + 8)
+  tipNear(`地块 ${fmt(d.w, u)} × ${fmt(d.h, u)}\n不能比里面的区块、道路小`, sp)
 }
 
-function drawSwapGhost(id: string, over: string | null, p: { x: number; y: number }) {
+function drawNewBlockGhost(r: Rect, sp: Pt) {
   dragGroup.destroyChildren()
-  const src = blockItems.find((s) => s.block.id === id)
-  if (src) {
-    dragGroup.add(new Konva.Rect({
-      ...shape, x: p.x - src.slot.w / 2, y: p.y - src.slot.h / 2, width: src.slot.w, height: src.slot.h,
-      fill: 'rgba(28, 66, 49, 0.18)', stroke: FOREST, strokeWidth: 2, dash: [6, 4], strokeScaleEnabled: false,
-    }))
-  }
-  const dst = over ? blockItems.find((s) => s.block.id === over) : null
-  if (dst) {
-    const ok = sameSpan(id, dst.block.id)
-    dragGroup.add(new Konva.Rect({
-      ...shape, ...box(dst.slot), fill: ok ? 'rgba(46, 107, 79, 0.25)' : 'rgba(176, 84, 58, 0.22)',
-      stroke: ok ? '#2e6b4f' : '#b0543a', strokeWidth: 3, strokeScaleEnabled: false,
-    }))
-    const s = toScreen({ x: dst.slot.x, y: dst.slot.y })
-    showTip(ok ? `松手和“${dst.block.name}”交换位置` : '大小不一样（占的行列数不同），不能交换', s.x + 8, s.y + 8)
-  } else {
-    hideTip()
-  }
+  const hit = clashWith(r, 'PLANT', [])
+  dragGroup.add(new Konva.Rect({
+    ...shape, ...box(r), fill: hit ? 'rgba(192, 86, 47, 0.22)' : 'rgba(46, 107, 79, 0.2)', stroke: hit ? CLAY : '#2e6b4f',
+    strokeWidth: 2.5, dash: [6, 4], strokeScaleEnabled: false,
+  }))
   overlayLayer.batchDraw()
+  const u = props.layout.unit
+  const n = innerCountFor(props.layout, r.w, r.h)
+  const lines = [`新区块 ${fmt(r.w, u)} × ${fmt(r.h, u)}`, `里面分 ${n.rows} 行 × ${n.cols} 列小区块（建好后可以改）`]
+  if (hit) lines.push(`和“${hit.name}”叠在一起了，叠着不能保存`)
+  tipNear(lines.join('\n'), sp)
 }
 
 function drawCellsGhost(fb: LayoutBlock, d: Extract<Drag, { kind: 'cells' }>) {
@@ -1333,80 +1530,100 @@ function drawCellsGhost(fb: LayoutBlock, d: Extract<Drag, { kind: 'cells' }>) {
   }
 }
 
-// ---------- 道路工具 ----------
+// ---------- 道路工具、区块工具 ----------
 
-type RoadTarget =
-  | { kind: 'add'; axis: Axis; index: number; pos: number }
-  | { kind: 'remove'; axis: Axis; index: number }
-  | { kind: 'blocked'; reason: string; axis?: Axis; pos?: number; rect?: Rect }
-
-/** 道路工具下鼠标在哪：整条道路上是删掉它，区块之间的线（和最外边）上是加道路 */
-function roadTargetAt(sp: { x: number; y: number }): RoadTarget | null {
-  if (!props.editable || focusBlock()) return null
+/**
+ * 道路工具下鼠标正对着哪条线：区块的边、小区块之间的线、地块的边。点一下在这条线上加一条通到地块两头的道路
+ */
+function roadLineAt(sp: Pt): { axis: Axis; rect: Rect; pos: number } | null {
+  if (!freeEdit()) return null
   const L = props.layout
   const p = toContent(sp)
   const s = fieldSize(L)
-  const tol = 10 / view.scale
+  const tol = 9 / view.scale
   if (p.x < -tol || p.y < -tol || p.x > s.w + tol || p.y > s.h + tol) return null
-  for (const it of blockItems) {
-    if (it.block.kind !== 'ROAD' || !inRect(it.rect, p)) continue
-    const road = roadOfBlock(L, it.block.id)
-    if (road) return { kind: 'remove', ...road }
-    return { kind: 'blocked', reason: '这块道路只是一个区块改成的，不是整条，右键可以改类型', rect: it.rect }
+  const lines = snapLines(L, [], 0, true)
+  const facing = (list: SnapLine[], along: number) => list.filter((l) => along >= l.from - tol && along <= l.to + tol)
+  const lx = nearestLine(p.x, facing(lines.xs, p.y), tol)
+  const ly = nearestLine(p.y, facing(lines.ys, p.x), tol)
+  const w = props.roadWidth
+  if (lx && (!ly || Math.abs(lx.pos - p.x) <= Math.abs(ly.pos - p.y))) {
+    return { axis: 'col', pos: lx.pos, rect: { x: lx.pos - w / 2, y: 0, w, h: s.h } }
   }
-  let best: { axis: Axis; index: number; pos: number; d: number } | null = null
-  for (const axis of ['row', 'col'] as Axis[]) {
-    const tracks = axis === 'row' ? L.rows : L.cols
-    const v = axis === 'row' ? p.y : p.x
-    let acc = 0
-    for (let i = 0; i <= tracks.length; i++) {
-      const d = Math.abs(v - acc)
-      if (d <= tol && (!best || d < best.d)) best = { axis, index: i, pos: acc, d }
-      if (i < tracks.length) acc += tracks[i]!
-    }
-  }
-  if (!best) return null
-  const problem = addRoadProblem(L, best.axis, best.index)
-  if (problem) return { kind: 'blocked', reason: problem, axis: best.axis, pos: best.pos }
-  return { kind: 'add', axis: best.axis, index: best.index, pos: best.pos }
+  if (ly) return { axis: 'row', pos: ly.pos, rect: { x: 0, y: ly.pos - w / 2, w: s.w, h: w } }
+  return null
 }
 
-function roadHover(sp: { x: number; y: number }) {
-  hoverKey = ''
-  hoverRect.visible(false)
+/** 画出这条道路放下去的样子，说明会切开、挪动什么。dragging 是正拖着画，否则是点一下加通到头的 */
+function drawRoadGhost(strip: { rect: Rect; axis: Axis }, sp: Pt, dragging: boolean) {
   dragGroup.destroyChildren()
-  const t = roadTargetAt(sp)
   const L = props.layout
   const u = L.unit
-  const s = fieldSize(L)
-  const at = (text: string) => showTip(text, sp.x > size.w - 260 ? sp.x - 250 : sp.x + 16, sp.y + 16)
-  if (!t) {
-    if (focusBlock()) at('道路加在区块之间：先回到整块地')
-    else if (inRect({ x: 0, y: 0, w: s.w, h: s.h }, toContent(sp))) at('把鼠标移到区块之间的线上加道路，移到道路上删掉它')
-    else hideTip()
-  } else if (t.kind === 'add') {
-    const w = props.roadWidth
-    const r = t.axis === 'row' ? { x: 0, y: t.pos - w / 2, w: s.w, h: w } : { x: t.pos - w / 2, y: 0, w, h: s.h }
-    dragGroup.add(new Konva.Rect({ ...shape, ...box(r), fill: 'rgba(217, 207, 185, 0.92)', stroke: '#8a6118', strokeWidth: 1.5, dash: [6, 4], strokeScaleEnabled: false }))
-    dragGroup.add(new Konva.Line({ ...shape, points: roadLine(r), stroke: '#ffffff', strokeWidth: 1.5, dash: [8, 6], strokeScaleEnabled: false }))
-    at(`点一下加一条${t.axis === 'row' ? '横向' : '纵向'}道路，宽 ${fmt(w, u)}\n别的区块不变小，地块${t.axis === 'row' ? '长' : '宽'}变成 ${fmt((t.axis === 'row' ? s.h : s.w) + w, u)}`)
-  } else if (t.kind === 'remove') {
-    const tracks = t.axis === 'row' ? L.rows : L.cols
-    const r = trackRect(L.rows, L.cols, t.axis === 'row'
-      ? { r: t.index, c: 0, rs: 1, cs: L.cols.length } : { r: 0, c: t.index, rs: L.rows.length, cs: 1 })
-    dragGroup.add(new Konva.Rect({ ...shape, ...box(r), fill: 'rgba(176, 84, 58, 0.28)', stroke: '#b0543a', strokeWidth: 2, strokeScaleEnabled: false }))
-    const w = tracks[t.index]!
-    at(`点一下删掉这条${t.axis === 'row' ? '横向' : '纵向'}道路（宽 ${fmt(w, u)}）\n地块${t.axis === 'row' ? '长' : '宽'}变成 ${fmt((t.axis === 'row' ? s.h : s.w) - w, u)}；右键可以改成区块`)
-  } else {
-    if (t.rect) dragGroup.add(new Konva.Rect({ ...shape, ...box(t.rect), stroke: '#b0543a', strokeWidth: 2, dash: [5, 4], strokeScaleEnabled: false }))
-    else if (t.axis && t.pos != null) {
-      const pts = t.axis === 'row' ? [0, t.pos, s.w, t.pos] : [t.pos, 0, t.pos, s.h]
-      dragGroup.add(new Konva.Line({ ...shape, points: pts, stroke: '#b0543a', strokeWidth: 2.5, dash: [6, 4], strokeScaleEnabled: false }))
-    }
-    at(t.reason)
+  const res = drawRoad(L, strip.rect, strip.axis)
+  const made = res.id ? res.layout.blocks.find((b) => b.id === res.id) : null
+  const r: Rect = made ? { x: made.x, y: made.y, w: made.w, h: made.h } : strip.rect
+  const row = strip.axis === 'row'
+  if (made && (res.cut > 0 || res.moved > 0)) {
+    // 切开、往后挪的那条线
+    const pts = row ? [r.x, r.y, r.x + r.w, r.y] : [r.x, r.y, r.x, r.y + r.h]
+    dragGroup.add(new Konva.Line({ ...shape, points: pts, stroke: CLAY, strokeWidth: 2.5, strokeScaleEnabled: false }))
   }
+  dragGroup.add(new Konva.Rect({
+    ...shape, ...box(r), fill: made ? 'rgba(217, 207, 185, 0.9)' : 'rgba(192, 86, 47, 0.2)', stroke: made ? '#8a6118' : CLAY,
+    strokeWidth: 1.8, dash: [6, 4], strokeScaleEnabled: false,
+  }))
+  if (made) dragGroup.add(new Konva.Line({ ...shape, points: roadLine(r), stroke: '#ffffff', strokeWidth: 1.5, dash: [8, 6], strokeScaleEnabled: false }))
   overlayLayer.batchDraw()
-  setCursor(t?.kind === 'remove' ? 'pointer' : t?.kind === 'add' ? 'copy' : t ? 'not-allowed' : undefined)
+  if (!made) {
+    tipNear(res.problem ?? '画不了', sp)
+    return
+  }
+  const lines = [`${dragging ? '松手' : '点一下'}加一条${row ? '横向' : '纵向'}道路：长 ${fmt(row ? r.w : r.h, u)}，宽 ${fmt(row ? r.h : r.w, u)}`]
+  if (res.cut > 0 || res.moved > 0) {
+    const parts = []
+    if (res.cut > 0) parts.push(`切开 ${res.cut} 个区块`)
+    if (res.moved > 0) parts.push(`后面的往${row ? '下' : '右'}挪 ${fmt(row ? r.h : r.w, u)}`)
+    lines.push(`${parts.join('，')}；小区块大小都不变`)
+  } else {
+    lines.push(res.grew > 0 ? '放在地块边上，区块都不动' : '放在空地上，别的都不动')
+  }
+  if (res.grew > 0) lines.push(`地块${row ? '长' : '宽'}变成 ${fmt(row ? res.layout.h : res.layout.w, u)}`)
+  tipNear(lines.join('\n'), sp)
+}
+
+function roadHover(sp: Pt) {
+  hoverKey = ''
+  hoverRect.visible(false)
+  if (!freeEdit()) {
+    clearDragGhost()
+    tipNear('道路画在整块地上：先回到整块地（Esc）', sp)
+    return
+  }
+  const line = roadLineAt(sp)
+  if (line) {
+    drawRoadGhost(line, sp, false)
+    setCursor('copy')
+    return
+  }
+  clearDragGhost()
+  setCursor('crosshair')
+  const p = toContent(sp)
+  const s = fieldSize(props.layout)
+  const pad = 30 / view.scale
+  if (p.x >= -pad && p.y >= -pad && p.x <= s.w + pad && p.y <= s.h + pad) {
+    tipNear('按住拖动：从哪儿拖到哪儿，路就画到哪儿\n把鼠标移到区块的边或小区块之间的线上点一下：加一条通到头的', sp)
+  } else {
+    hideTip()
+  }
+}
+
+function blockHover(sp: Pt) {
+  hoverKey = ''
+  hoverRect.visible(false)
+  overlayLayer.batchDraw()
+  setCursor('crosshair')
+  if (!freeEdit()) tipNear('区块画在整块地上：先回到整块地（Esc）', sp)
+  else tipNear('按住拖出一个方框，建一个种植区块（画到地块外面，地块跟着变大）', sp)
 }
 
 // ---------- 测距 ----------
@@ -1460,26 +1677,55 @@ function drawMeasure(to: { x: number; y: number }) {
 
 let hoverKey = ''
 
+/** 拉手朝哪个方向就用哪个方向的箭头；画面转了以后跟着转 */
+function handleCursor(h: Handle): string {
+  const order: Handle[] = ['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw']
+  const cursors = ['ns-resize', 'nesw-resize', 'ew-resize', 'nwse-resize']
+  const turn = Math.round(props.rotation / 45)
+  return cursors[(((order.indexOf(h) + turn) % 4) + 4) % 4]!
+}
+
+function plainHover() {
+  if (hoverKey || hoverRect.visible()) {
+    hoverKey = ''
+    hoverRect.visible(false)
+    overlayLayer.batchDraw()
+  }
+}
+
 function hoverAt(sp: { x: number; y: number }) {
   if (props.tool === 'road') {
     roadHover(sp)
     return
   }
+  if (props.tool === 'block') {
+    blockHover(sp)
+    return
+  }
   const div = dividerAt(sp)
   if (div) {
-    hoverKey = ''
-    hoverRect.visible(false)
-    overlayLayer.batchDraw()
+    plainHover()
     setCursor(div.axis === 'col' ? 'col-resize' : 'row-resize')
-    const what = div.axis === 'col' ? '宽' : '高'
-    showTip(
-      div.scope === 'inner' ? `拖动改${what}` : div.outer ? `拖动改${what}，地块跟着变大变小`
-        : `拖动改左边这${div.axis === 'col' ? '列' : '行'}的${what}，后面的跟着挪，地块跟着变\n按住 Shift 拖：两边一起变，地块总${what}不变`,
-      sp.x + 14, sp.y + 14,
-    )
+    showTip(`拖动改${div.axis === 'col' ? '宽' : '高'}`, sp.x + 14, sp.y + 14)
+    return
+  }
+  const handle = handleAt(sp)
+  if (handle) {
+    plainHover()
+    setCursor(handleCursor(handle.handle))
+    showTip('拖动改大小，里面的小区块按比例跟着变', sp.x + 14, sp.y + 14)
     return
   }
   const t = targetAt(sp)
+  if (t.kind === 'none') {
+    const edge = fieldEdgeAt(sp)
+    if (edge) {
+      plainHover()
+      setCursor(handleCursor(edge))
+      showTip('拖动改地块的大小', sp.x + 14, sp.y + 14)
+      return
+    }
+  }
   let rect: Rect | null = null
   let text = ''
   let key = ''
@@ -1515,7 +1761,7 @@ function hoverAt(sp: { x: number; y: number }) {
 function cursorFor(t: Target): string {
   if (!props.editable) return t.kind === 'tick' || t.kind === 'tag' ? 'pointer' : 'default'
   const id = t.kind === 'tick' ? null : blockIdOf(t)
-  if (props.pick === 'block' && id && props.selectedBlocks.includes(id)) return 'move'
+  if (props.pick === 'block' && id && !focusBlock()) return 'move'
   if (props.pick === 'cell' && t.kind === 'cell' && props.selectedCells.includes(t.cell.key)) return 'move'
   return t.kind === 'tick' ? 'pointer' : 'default'
 }
@@ -1524,16 +1770,15 @@ function blockTip(id: string): string {
   const b = props.layout.blocks.find((x) => x.id === id)
   if (!b) return ''
   const u = props.layout.unit
-  const slot = blockSlot(props.layout, b)
   const r = blockRect(props.layout, b)
   const lines = [`${b.name}`, `${fmt(r.w, u)} × ${fmt(r.h, u)}`]
-  if (b.fit) lines.push(`特殊区块：原来 ${fmt(slot.w, u)} × ${fmt(slot.h, u)}，四周是道路`)
   if (b.inner) {
     const n = anchors(b.inner.rows.length, b.inner.cols.length, b.inner.merges).length
-    lines.push(`${b.inner.rows.length} 行 × ${b.inner.cols.length} 列，${n} 个小区块`)
+    const one = plotSize(props.layout, b)
+    lines.push(`${b.inner.rows.length} 行 × ${b.inner.cols.length} 列，${n} 个小区块${one ? `，每个 ${fmt(one.w, u)} × ${fmt(one.h, u)}` : ''}`)
   }
   if (props.editable && props.pick === 'block') {
-    lines.push(props.selectedBlocks.includes(b.id) ? (b.fit ? '拖动在原位置里挪动' : '拖到别的区块上交换位置') : '双击进入区块')
+    lines.push(b.kind === 'PLANT' ? '按住拖动挪位置 · 双击进去改小区块' : '按住拖动挪位置 · 选中后拖四周的小方块改大小')
   } else if (!focusBlock() && b.kind === 'PLANT') {
     lines.push('双击名称牌进入区块')
   }
@@ -1541,7 +1786,7 @@ function blockTip(id: string): string {
 }
 
 function onLeave() {
-  if (props.tool === 'road' && !drag) clearDragGhost()
+  if ((props.tool === 'road' || props.tool === 'block') && !drag) clearDragGhost()
   hoverKey = ''
   if (stage) {
     hoverRect.visible(false)
@@ -1581,7 +1826,7 @@ function setCursor(c?: string) {
   if (!host.value) return
   let v = c
   if (!v) v = props.tool === 'measure' ? 'crosshair' : props.tool === 'pan' || space.on ? 'grab' : 'default'
-  if (props.tool === 'road' && !c && !space.on) v = 'cell'
+  if ((props.tool === 'road' || props.tool === 'block') && !c && !space.on) v = 'crosshair'
   if (space.on && !c) v = 'grab'
   if (host.value.style.cursor !== v) host.value.style.cursor = v
 }
@@ -1616,6 +1861,7 @@ async function exportJpeg(filename: string) {
   const white = new Konva.Rect({ ...shape, x: 0, y: 0, width: size.w, height: size.h, fill: '#ffffff' })
   bg.add(white)
   selGroup.visible(false)
+  chromeGroup.visible(false)
   hoverRect.visible(false)
   await nextTick()
   try {
@@ -1623,6 +1869,7 @@ async function exportJpeg(filename: string) {
   } finally {
     white.destroy()
     selGroup.visible(true)
+    chromeGroup.visible(true)
     stage.batchDraw()
   }
 }
@@ -1664,11 +1911,13 @@ onMounted(() => {
   labelLayer = new Konva.Layer({ listening: false })
   overlayLayer = new Konva.Layer({ listening: false })
   selGroup = new Konva.Group(shape)
+  chromeGroup = new Konva.Group(shape)
+  conflictGroup = new Konva.Group(shape)
   linkGroup = new Konva.Group(shape)
   dragGroup = new Konva.Group(shape)
   measureGroup = new Konva.Group(shape)
   hoverRect = new Konva.Rect({ ...shape, visible: false, stroke: 'rgba(28, 66, 49, 0.75)', strokeWidth: 2, strokeScaleEnabled: false, fill: 'rgba(255, 255, 255, 0.18)' })
-  overlayLayer.add(linkGroup, hoverRect, selGroup, dragGroup, measureGroup)
+  overlayLayer.add(linkGroup, conflictGroup, hoverRect, selGroup, chromeGroup, dragGroup, measureGroup)
   stage.add(bg, worldLayer, labelLayer, overlayLayer)
   loadTile(guardTileUrl, 'guard')
   loadTile(roadTileUrl, 'road')
@@ -1703,7 +1952,7 @@ onBeforeUnmount(() => {
 
 watch(() => [props.layout, props.cells, props.focus, props.pick], () => {
   scheduleBuild()
-  if (props.tool === 'road') clearDragGhost()
+  if (props.tool === 'road' || props.tool === 'block') clearDragGhost()
 })
 watch(() => props.rotation, () => {
   buildWorld()
@@ -1715,11 +1964,15 @@ watch(() => props.links, drawLinks)
 watch(() => [props.devices, props.rulers], refreshLabels)
 watch(() => props.tool, (t) => {
   if (t !== 'measure') clearMeasure()
-  if (t !== 'road') clearDragGhost()
+  clearDragGhost()
+  hideTip()
+  // 小方块只在选择工具下有
+  drawChrome()
+  overlayLayer.batchDraw()
   setCursor()
 })
 watch(() => props.insets, () => { if (!touched) fit() }, { deep: true })
-// 布局大小变了（改行高列宽、加删行列）时，没手动缩放过就重新放好
+// 地块大小变了（画了道路、把区块挪到了外面、拖了地块的边）时，没手动缩放过就重新放好
 let lastSize = ''
 watch(() => props.layout, () => {
   const r = contentRect()

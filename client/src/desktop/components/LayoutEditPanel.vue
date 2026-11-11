@@ -1,17 +1,15 @@
 <script setup lang="ts">
-// 编辑地块的属性面板：按选中的东西显示——整块地（单位、区块行列）、一行或一列区块（高、宽、插入、删除）、
-// 一个或几个区块（名称、类型、合并、拆分、小区块行列、特殊大小）、区块里的小区块（行列、行高列宽、合并拆分）
+// 编辑地块的属性面板：按选中的东西显示——整块地（大小、道路宽、方向、单位）、一个区块或一条道路（名称、类型、位置、大小、
+// 小区块行列和大小）、几个区块（对齐、排开、合并）、区块里的小区块（行列、行高列宽、合并拆分）
 import { computed, reactive, ref, watch } from 'vue'
-import { ElMessageBox } from 'element-plus'
-import {
-  ArrowLeft, Bottom, CopyDocument, Delete, Grid, Plus, Right, Scissor, Top,
-} from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { ArrowLeft, CopyDocument, Delete, Grid, Scissor } from '@element-plus/icons-vue'
 
 import {
-  BLOCK_KIND, CELL_KIND, UNIT_PRESETS, cellKind, setCellKinds, alignBlockFit, anchors, blockRect, blockSlot, blockSpan, evenInnerTracks, fieldSize, fmt,
-  innerSizes, insertTrack, keyOf, mergeBlocks, mergeInner, mergeAt, parseKey, removeTrack, removedPlots, renameBlock,
-  resizeBlockGrid, resizeInner, round, setBlockFit, setBlockKind, setInnerTrackSize, setTrackSize, setUnit, splitBlock,
-  splitInner, isRoadTrack, removeRoad, roadOfBlock, roadToBlocks, addRoad, addRoadProblem, defaultRoadWidth,
+  BLOCK_KIND, CELL_KIND, UNIT_PRESETS, alignBlocks, anchors, arrayBlocks, blockRect, cellKind, conflicts, contentBounds, distributeBlocks,
+  evenInnerTracks, fieldSize, fitField, fmt, innerSizes, keyOf, mergeAt, mergeBlocks, mergeInner, parseKey, plotCount, plotSize,
+  removeRoad, removedPlots, renameBlock, resizeInner, roadAxis, round, setBlockKind, setBlockRect, setCellKinds, setFieldSize,
+  setInnerTrackSize, setPlotSize, setRoadWidth, setUnit, splitBlock, splitInner,
   type Align, type BlockKind, type FieldLayout, type LayoutBlock, type Unit,
 } from '@/shared/fieldLayout'
 import MergeBlocksDialog from './MergeBlocksDialog.vue'
@@ -26,6 +24,8 @@ const props = defineProps<{
   rotation?: number
   /** 小区块 id → 编号，提示会去掉哪些小区块时用 */
   plotCode: (id: number) => string
+  /** 画的道路多宽；摆区块时也按它留间隔 */
+  roadWidth: number
 }>()
 
 const emit = defineEmits<{
@@ -33,8 +33,12 @@ const emit = defineEmits<{
   'update:selectedBlocks': [ids: string[]]
   'update:selectedCells': [keys: string[]]
   'update:track': [t: { axis: 'row' | 'col'; index: number } | null]
+  'update:roadWidth': [w: number]
   enter: [id: string]
   leave: []
+  /** 删掉选中的区块、复制一份（平面图页面里做，快捷键也走那里） */
+  remove: []
+  duplicate: []
 }>()
 
 const u = computed(() => props.layout.unit)
@@ -86,20 +90,44 @@ function changeUnit() {
     next = UNIT_PRESETS.find((p) => p.name === unitPick.value) ?? UNIT_PRESETS[0]!
   }
   if (next.name === u.value.name && Math.abs(next.meters - u.value.meters) < 1e-9) return
+  // 道路宽也跟着换算
+  if (convert.value) emit('update:roadWidth', round((props.roadWidth * u.value.meters) / next.meters, 3))
   emit('apply', setUnit(props.layout, next, convert.value))
 }
 
 const size = computed(() => fieldSize(props.layout))
+const content = computed(() => contentBounds(props.layout))
+/** 地块四周有没有空着的边（能收紧） */
+const loose = computed(() => fitField(props.layout) !== props.layout)
 
-async function setGrid(rows: number | undefined, cols: number | undefined) {
-  if (!rows || !cols) return
-  await commit(resizeBlockGrid(props.layout, rows, cols), '减少区块行列')
+function setSize(w: number | undefined, h: number | undefined) {
+  const next = setFieldSize(props.layout, w ?? size.value.w, h ?? size.value.h)
+  if (next === props.layout && (w != null || h != null)) {
+    const c = content.value
+    if (c && ((w != null && w < c.x + c.w - 1e-6) || (h != null && h < c.y + c.h - 1e-6))) {
+      ElMessage.warning('地块不能比里面的区块、道路小。先把它们挪进来或者删掉')
+    }
+  }
+  emit('apply', next)
 }
 
 function setDefaultInner(rows: number | undefined, cols: number | undefined) {
   if (!rows || !cols) return
   emit('apply', { ...props.layout, defaultInner: { rows, cols } })
 }
+
+const stats = computed(() => ({
+  plant: props.layout.blocks.filter((b) => b.kind === 'PLANT').length,
+  road: props.layout.blocks.filter((b) => b.kind === 'ROAD').length,
+  other: props.layout.blocks.filter((b) => b.kind === 'GUARD' || b.kind === 'BLANK').length,
+  plots: plotCount(props.layout),
+}))
+
+/** 叠在一起的（叠着不能保存） */
+const clashes = computed(() => {
+  const name = (id: string) => props.layout.blocks.find((b) => b.id === id)?.name ?? id
+  return conflicts(props.layout).map(([a, b]) => ({ a, b, text: `${name(a)} 和 ${name(b)}` }))
+})
 
 // ---------- 真北方向 ----------
 
@@ -114,120 +142,9 @@ function setNorth(deg: number | undefined) {
   if (d !== north.value) emit('apply', { ...props.layout, northDeg: d })
 }
 
-
-// ---------- 一行（列）区块 ----------
-
-const trackSize = computed(() => {
-  const t = props.track
-  if (!t || props.focus) return null
-  return (t.axis === 'row' ? props.layout.rows : props.layout.cols)[t.index] ?? null
-})
-
-const trackName = computed(() => {
-  const t = props.track
-  if (!t) return ''
-  return t.axis === 'row' ? `第 ${t.index + 1} 行` : `第 ${t.index + 1} 列`
-})
-
-function setTrack(v: number | undefined) {
-  if (!props.track || !v || v <= 0) return
-  emit('apply', setTrackSize(props.layout, props.track.axis, props.track.index, v))
-}
-
-function insertAt(before: boolean) {
-  const t = props.track
-  if (!t) return
-  const index = before ? t.index : t.index + 1
-  emit('apply', insertTrack(props.layout, t.axis, index))
-  emit('update:track', { axis: t.axis, index })
-}
-
-async function removeCurrentTrack() {
-  const t = props.track
-  if (!t) return
-  const next = removeTrack(props.layout, t.axis, t.index)
-  if (next === props.layout) return
-  if (await confirmDrop(next, `删除${trackName.value}区块`)) {
-    emit('apply', next)
-    emit('update:track', null)
-    emit('update:selectedBlocks', [])
-  }
-}
-
-// ---------- 道路 ----------
-
-/** 选中的一个区块是不是整条道路上的一段 */
-const oneRoad = computed(() => (one.value ? roadOfBlock(props.layout, one.value.id) : null))
-/** 标尺选中的一行（列）是不是整条道路 */
-const trackIsRoad = computed(() => !!props.track && !props.focus && isRoadTrack(props.layout, props.track.axis, props.track.index))
-
-function roadWidthOf(r: { axis: 'row' | 'col'; index: number }): number {
-  return (r.axis === 'row' ? props.layout.rows : props.layout.cols)[r.index] ?? 0
-}
-
-function setRoadWidth(r: { axis: 'row' | 'col'; index: number }, v: number | undefined) {
-  if (!v || v <= 0) return
-  emit('apply', setTrackSize(props.layout, r.axis, r.index, v))
-}
-
-function dropRoad(r: { axis: 'row' | 'col'; index: number }) {
-  emit('apply', removeRoad(props.layout, r.axis, r.index))
-  emit('update:selectedBlocks', [])
-  emit('update:track', null)
-}
-
-function roadBack(r: { axis: 'row' | 'col'; index: number }) {
-  emit('apply', roadToBlocks(props.layout, r.axis, r.index))
-  emit('update:selectedBlocks', [])
-}
-
-/** 在选中的一行（列）前面或后面加道路 */
-const roadProblem = (before: boolean) => {
-  const t = props.track
-  if (!t) return '没选'
-  return addRoadProblem(props.layout, t.axis, before ? t.index : t.index + 1)
-}
-
-function roadAt(before: boolean) {
-  const t = props.track
-  if (!t) return
-  emit('apply', addRoad(props.layout, t.axis, before ? t.index : t.index + 1, defaultRoadWidth(props.layout)))
-  if (before) emit('update:track', { axis: t.axis, index: t.index + 1 })
-}
-
 // ---------- 区块 ----------
 
-const mergeable = computed(() => {
-  if (blocks.value.length < 2) return null
-  const rs = blocks.value.map((b) => blockSpan(props.layout, b))
-  const a = { r: Math.min(...rs.map((s) => s.r)), c: Math.min(...rs.map((s) => s.c)) }
-  const b = { r: Math.max(...rs.map((s) => s.r + s.rs - 1)), c: Math.max(...rs.map((s) => s.c + s.cs - 1)) }
-  return { a, b, result: mergeBlocks(props.layout, a, b) }
-})
-
-const mergeOpen = ref(false)
-
-function merge() {
-  if (mergeable.value) mergeOpen.value = true
-}
-
-function onMerged(next: FieldLayout, anchorId: string) {
-  emit('apply', next)
-  emit('update:selectedBlocks', [anchorId])
-}
-
-defineExpose({ merge })
-
-const isMerged = computed(() => {
-  const b = one.value
-  if (!b) return false
-  const s = blockSpan(props.layout, b)
-  return s.rs * s.cs > 1
-})
-
-function split() {
-  if (one.value) emit('apply', splitBlock(props.layout, one.value.id))
-}
+const KINDS: BlockKind[] = ['PLANT', 'ROAD', 'GUARD', 'BLANK']
 
 const kindOfSelection = computed<BlockKind | ''>(() => {
   const kinds = new Set(blocks.value.map((b) => b.kind))
@@ -245,26 +162,29 @@ function rename(name: string) {
 const nameDraft = ref('')
 watch(() => one.value?.name, (n) => { nameDraft.value = n ?? '' }, { immediate: true })
 
-/** 选中区块所在的行高、列宽（没合并时可以直接改） */
-const oneTracks = computed(() => {
+/** 改选中这一个的位置、大小（没给的不变） */
+function setRect(part: { x?: number; y?: number; w?: number; h?: number }) {
   const b = one.value
-  if (!b) return null
-  const s = blockSpan(props.layout, b)
-  return { span: s, w: s.cs === 1 ? props.layout.cols[s.c]! : null, h: s.rs === 1 ? props.layout.rows[s.r]! : null }
-})
-
-function setOneTrack(axis: 'row' | 'col', v: number | undefined) {
-  const t = oneTracks.value
-  if (!t || !v || v <= 0) return
-  emit('apply', setTrackSize(props.layout, axis, axis === 'row' ? t.span.r : t.span.c, v))
+  if (!b) return
+  const next = { x: b.x, y: b.y, w: b.w, h: b.h }
+  for (const [k, v] of Object.entries(part) as ['x' | 'y' | 'w' | 'h', number | undefined][]) {
+    if (v == null || !Number.isFinite(v)) return
+    next[k] = v
+  }
+  emit('apply', setBlockRect(props.layout, b.id, next))
 }
+
+const plotsIn = (b: LayoutBlock) => (b.inner ? anchors(b.inner.rows.length, b.inner.cols.length, b.inner.merges).length : 0)
 
 const innerCountOfSelection = computed(() => {
   const withInner = blocks.value.filter((b) => b.inner)
   if (withInner.length === 0) return null
   const r = new Set(withInner.map((b) => b.inner!.rows.length))
   const c = new Set(withInner.map((b) => b.inner!.cols.length))
-  return { rows: r.size === 1 ? [...r][0]! : undefined, cols: c.size === 1 ? [...c][0]! : undefined, n: withInner.length }
+  return {
+    rows: r.size === 1 ? [...r][0]! : undefined, cols: c.size === 1 ? [...c][0]! : undefined, n: withInner.length,
+    plots: withInner.reduce((n, b) => n + plotsIn(b), 0),
+  }
 })
 
 async function setInnerCounts(rows: number | undefined, cols: number | undefined) {
@@ -276,48 +196,156 @@ async function setInnerCounts(rows: number | undefined, cols: number | undefined
   await commit(next, '减少小区块行列')
 }
 
-const plotsIn = (b: LayoutBlock) => (b.inner ? anchors(b.inner.rows.length, b.inner.cols.length, b.inner.merges).length : 0)
-
-// ---------- 特殊区块 ----------
-
-const fitInfo = computed(() => {
-  const b = one.value
-  if (!b) return null
-  return { slot: blockSlot(props.layout, b), rect: blockRect(props.layout, b), special: !!b.fit }
+/** 选中的种植区块里每个小区块多大：都一样时才有数，不一样的那一项是 undefined */
+const plotSizeOfSelection = computed(() => {
+  const sizes = blocks.value.filter((b) => b.inner).map((b) => plotSize(props.layout, b))
+  if (sizes.length === 0) return null
+  const same = (pick: (s: { w: number; h: number }) => number) => {
+    if (sizes.some((s) => !s)) return undefined
+    const v = pick(sizes[0]!)
+    return sizes.every((s) => Math.abs(pick(s!) - v) < 1e-4) ? round(v, 3) : undefined
+  }
+  return { w: same((s) => s.w), h: same((s) => s.h) }
 })
 
-function setFitSize(w: number | undefined, h: number | undefined) {
-  const b = one.value
-  const f = fitInfo.value
-  if (!b || !f) return
-  emit('apply', setBlockFit(props.layout, b.id, w ?? f.rect.w, h ?? f.rect.h))
+function setPlot(w: number | undefined, h: number | undefined) {
+  emit('apply', setPlotSize(props.layout, props.selectedBlocks, w ?? null, h ?? null))
 }
 
-function makeSpecial() {
-  const b = one.value
-  const f = fitInfo.value
-  if (!b || !f) return
-  // 默认四边各留出 10% 当道路
-  emit('apply', setBlockFit(props.layout, b.id, round(f.slot.w * 0.8, 3), round(f.slot.h * 0.8, 3)))
+// ---------- 合并、拆开、照着排一片 ----------
+
+const mergeProblem = computed(() => (blocks.value.length >= 2 ? mergeBlocks(props.layout, props.selectedBlocks).problem : null))
+const mergeOpen = ref(false)
+
+function merge() {
+  if (blocks.value.length < 2) return
+  if (mergeProblem.value) {
+    ElMessage.warning(`合并不了：${mergeProblem.value}`)
+    return
+  }
+  mergeOpen.value = true
 }
 
-function resetFit() {
-  const b = one.value
-  const f = fitInfo.value
-  if (b && f) emit('apply', setBlockFit(props.layout, b.id, f.slot.w, f.slot.h))
+function onMerged(next: FieldLayout, anchorId: string) {
+  emit('apply', next)
+  emit('update:selectedBlocks', [anchorId])
 }
+
+const splitOpen = ref(false)
+const splitForm = reactive({ rows: 2, cols: 1 })
+
+function openSplit() {
+  const b = one.value
+  if (!b) return
+  // 默认照长的方向拆成两块；那个方向上只有一行（列）小区块、拆不了时换另一个方向
+  const canRows = !b.inner || b.inner.rows.length >= 2
+  const canCols = !b.inner || b.inner.cols.length >= 2
+  const byRows = b.h >= b.w ? canRows || !canCols : !canCols && canRows
+  splitForm.rows = byRows ? 2 : 1
+  splitForm.cols = byRows ? 1 : 2
+  splitOpen.value = true
+}
+
+const splitPreview = computed(() => (one.value ? splitBlock(props.layout, one.value.id, splitForm.rows, splitForm.cols) : null))
+
+function applySplit() {
+  const res = splitPreview.value
+  if (!res || res.problem) return
+  emit('apply', res.layout)
+  emit('update:selectedBlocks', res.ids)
+  splitOpen.value = false
+}
+
+const arrayOpen = ref(false)
+const arrayForm = reactive({ cols: 3, rows: 1, gapX: 1, gapY: 1 })
+
+function openArray() {
+  arrayForm.cols = 3
+  arrayForm.rows = 1
+  arrayForm.gapX = props.roadWidth
+  arrayForm.gapY = props.roadWidth
+  arrayOpen.value = true
+}
+
+const arrayPreview = computed(() => {
+  const b = one.value
+  if (!b) return null
+  return {
+    w: round(arrayForm.cols * b.w + (arrayForm.cols - 1) * arrayForm.gapX, 3),
+    h: round(arrayForm.rows * b.h + (arrayForm.rows - 1) * arrayForm.gapY, 3),
+    count: arrayForm.cols * arrayForm.rows - 1,
+  }
+})
+
+function applyArray() {
+  const b = one.value
+  if (!b) return
+  const res = arrayBlocks(props.layout, b.id, arrayForm.cols, arrayForm.rows, arrayForm.gapX, arrayForm.gapY)
+  if (res.ids.length === 0) {
+    ElMessage.warning('排不了：至少要排出两个，区块、道路加起来也不能太多')
+    return
+  }
+  emit('apply', res.layout)
+  emit('update:selectedBlocks', [b.id, ...res.ids])
+  arrayOpen.value = false
+}
+
+defineExpose({ merge, openSplit, openArray })
+
+// ---------- 对齐、排开 ----------
+
+const ALIGNS: [Align, string][] = [
+  ['left', '靠左'], ['hcenter', '左右居中'], ['right', '靠右'], ['top', '靠上'], ['vcenter', '上下居中'], ['bottom', '靠下'],
+]
 
 function align(a: Align) {
-  if (one.value) emit('apply', alignBlockFit(props.layout, one.value.id, a))
+  emit('apply', alignBlocks(props.layout, props.selectedBlocks, a))
 }
 
-function setFitPos(x: number | undefined, y: number | undefined) {
+const spreadGap = ref(1)
+watch(() => props.roadWidth, (w) => { spreadGap.value = w }, { immediate: true })
+
+/** 排开：axis 为 col 是横着排，row 是竖着排；even 为 true 时两头不动、中间匀开 */
+function spread(axis: 'row' | 'col', even: boolean) {
+  const next = distributeBlocks(props.layout, props.selectedBlocks, axis, even ? undefined : spreadGap.value)
+  if (next === props.layout && even && blocks.value.length < 3) ElMessage.info('匀开要选三个或更多')
+  emit('apply', next)
+}
+
+// ---------- 道路 ----------
+
+const road = computed(() => {
   const b = one.value
-  if (!b?.fit) return
-  emit('apply', setBlockFit(props.layout, b.id, b.fit.w, b.fit.h, { x: x ?? b.fit.x, y: y ?? b.fit.y }))
+  if (!b || b.kind !== 'ROAD') return null
+  const axis = roadAxis(b)
+  return { axis, width: axis === 'row' ? b.h : b.w, length: axis === 'row' ? b.w : b.h }
+})
+
+function changeRoadWidth(v: number | undefined) {
+  if (one.value && v && v > 0) emit('apply', setRoadWidth(props.layout, one.value.id, v))
+}
+
+function changeRoadLength(v: number | undefined) {
+  if (!one.value || !road.value || !v || v <= 0) return
+  setRect(road.value.axis === 'row' ? { w: v } : { h: v })
+}
+
+/** 删掉这条道路，后面的收回来合拢 */
+function closeRoad() {
+  if (!one.value) return
+  const res = removeRoad(props.layout, one.value.id, true)
+  if (!res.closed) ElMessage.info('后面的东西收回来会和别的叠在一起，所以只删了路，没有合拢')
+  emit('apply', res.layout)
+  emit('update:selectedBlocks', [])
 }
 
 // ---------- 区块里的小区块 ----------
+
+const trackName = computed(() => {
+  const t = props.track
+  if (!t) return ''
+  return t.axis === 'row' ? `第 ${t.index + 1} 行` : `第 ${t.index + 1} 列`
+})
 
 const innerTrackSize = computed(() => {
   const b = focusBlock.value
@@ -377,7 +405,6 @@ function splitCell() {
   if (b && m) emit('apply', splitInner(props.layout, b.id, m.r, m.c))
 }
 
-const KINDS: BlockKind[] = ['PLANT', 'ROAD', 'GUARD', 'BLANK']
 
 /** 选中格子的类型（都一样时） */
 const cellKindOfSelection = computed(() => {
@@ -396,6 +423,48 @@ function setCellKind(kind: BlockKind) {
 <template>
   <div class="edit-panel">
     <MergeBlocksDialog v-model="mergeOpen" :layout="layout" :block-ids="selectedBlocks" :plot-code="plotCode" @apply="onMerged" />
+
+    <el-dialog v-model="splitOpen" title="拆成几块" width="420px" append-to-body>
+      <div v-if="one" class="dlg-text">把“{{ one.name }}”拆成几个区块。拆完还在原来的地方、拼起来一样大，可以再拖开，或者在中间画道路。</div>
+      <div class="row-form">
+        <el-input-number v-model="splitForm.rows" :min="1" :max="60" controls-position="right" class="n2" />
+        <span>行 ×</span>
+        <el-input-number v-model="splitForm.cols" :min="1" :max="60" controls-position="right" class="n2" />
+        <span>列区块</span>
+      </div>
+      <div v-if="splitPreview?.problem" class="hint warn">{{ splitPreview.problem }}</div>
+      <div v-else-if="one?.inner" class="hint">按小区块之间的线拆，小区块都留着，编号、品种、数据跟着。</div>
+      <template #footer>
+        <el-button @click="splitOpen = false">取消</el-button>
+        <el-button type="primary" :disabled="!splitPreview || !!splitPreview.problem" @click="applySplit">拆开</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="arrayOpen" title="照着排一片" width="440px" append-to-body>
+      <div v-if="one" class="dlg-text">照着“{{ one.name }}”再排出一样的区块（一样大、一样的小区块行列），它自己算第一个。</div>
+      <div class="row-form">
+        <span class="lbl">横着排</span>
+        <el-input-number v-model="arrayForm.cols" :min="1" :max="50" controls-position="right" class="n2" />
+        <span>个，间隔</span>
+        <el-input-number v-model="arrayForm.gapX" :min="0" :precision="2" :step="0.5" controls-position="right" class="n2" />
+        <span>{{ u.symbol }}</span>
+      </div>
+      <div class="row-form">
+        <span class="lbl">竖着排</span>
+        <el-input-number v-model="arrayForm.rows" :min="1" :max="50" controls-position="right" class="n2" />
+        <span>个，间隔</span>
+        <el-input-number v-model="arrayForm.gapY" :min="0" :precision="2" :step="0.5" controls-position="right" class="n2" />
+        <span>{{ u.symbol }}</span>
+      </div>
+      <div v-if="arrayPreview" class="hint">
+        新加 {{ arrayPreview.count }} 个区块，这一片一共 {{ fmt(arrayPreview.w, u) }} × {{ fmt(arrayPreview.h, u) }}。间隔里是空地，要铺成道路就用道路工具画。
+      </div>
+      <template #footer>
+        <el-button @click="arrayOpen = false">取消</el-button>
+        <el-button type="primary" :disabled="!arrayPreview || arrayPreview.count < 1" @click="applyArray">排出来</el-button>
+      </template>
+    </el-dialog>
+
     <!-- 区块里 -->
     <template v-if="focusBlock">
       <section class="panel panel-pad">
@@ -467,68 +536,12 @@ function setCellKind(kind: BlockKind) {
       </section>
     </template>
 
-    <!-- 整块地：选了一条整条道路（标尺） -->
-    <template v-else-if="track && trackSize != null && trackIsRoad">
-      <section class="panel panel-pad">
-        <div class="panel-title">{{ trackName }}<span class="sub">{{ track.axis === 'row' ? '横向' : '纵向' }}道路</span></div>
-        <div class="row-form">
-          <span class="lbl">路宽</span>
-          <el-input-number
-            :model-value="round(trackSize, 3)" :min="0.001" :precision="3" :controls="false" size="small" class="w"
-            @change="(v: number | undefined) => setRoadWidth(track!, v)"
-          />
-          <span>{{ u.symbol }}</span>
-        </div>
-        <div class="hint">改路宽时两边的区块不变，地块跟着变大变小。</div>
-        <div class="btn-row">
-          <el-button size="small" @click="roadBack(track)">改成区块</el-button>
-          <el-button size="small" type="danger" plain :icon="Delete" @click="dropRoad(track)">删掉这条道路</el-button>
-        </div>
-      </section>
-    </template>
-
-    <!-- 整块地：选了一行或一列区块 -->
-    <template v-else-if="track && trackSize != null">
-      <section class="panel panel-pad">
-        <div class="panel-title">{{ trackName }}区块</div>
-        <div class="row-form">
-          <span class="lbl">{{ track.axis === 'row' ? '高' : '宽' }}</span>
-          <el-input-number
-            :model-value="round(trackSize, 3)" :min="0.001" :precision="3" :controls="false" size="small" class="w"
-            @change="setTrack"
-          />
-          <span>{{ u.symbol }}</span>
-        </div>
-        <div class="btn-row">
-          <el-button size="small" :icon="track.axis === 'row' ? Top : ArrowLeft" @click="insertAt(true)">
-            {{ track.axis === 'row' ? '上面' : '左边' }}插一{{ track.axis === 'row' ? '行' : '列' }}
-          </el-button>
-          <el-button size="small" :icon="track.axis === 'row' ? Bottom : Right" @click="insertAt(false)">
-            {{ track.axis === 'row' ? '下面' : '右边' }}插一{{ track.axis === 'row' ? '行' : '列' }}
-          </el-button>
-          <el-button
-            size="small" type="danger" plain :icon="Delete"
-            :disabled="(track.axis === 'row' ? layout.rows.length : layout.cols.length) <= 1"
-            @click="removeCurrentTrack"
-          >
-            删除
-          </el-button>
-        </div>
-        <div class="hint">插入的是普通种植区块，小区块按“新区块默认”的行列分。地块跟着变大，别的区块不变。</div>
-        <div class="lbl-top">加道路</div>
-        <div class="btn-row tight">
-          <el-button size="small" :disabled="!!roadProblem(true)" @click="roadAt(true)">{{ track.axis === 'row' ? '上面' : '左边' }}加道路</el-button>
-          <el-button size="small" :disabled="!!roadProblem(false)" @click="roadAt(false)">{{ track.axis === 'row' ? '下面' : '右边' }}加道路</el-button>
-        </div>
-      </section>
-    </template>
-
-    <!-- 整块地：选了区块 -->
+    <!-- 整块地：选了一个或几个区块、道路 -->
     <template v-else-if="blocks.length > 0">
       <section class="panel panel-pad">
         <div class="panel-title">
-          {{ one ? one.name : `选了 ${blocks.length} 个区块` }}
-          <span v-if="one" class="sub">第 {{ blockSpan(layout, one).r + 1 }} 行第 {{ blockSpan(layout, one).c + 1 }} 列</span>
+          {{ one ? one.name : `选了 ${blocks.length} 个` }}
+          <span v-if="one" class="sub">{{ BLOCK_KIND[one.kind] }}</span>
         </div>
 
         <div v-if="one" class="row-form">
@@ -547,96 +560,105 @@ function setCellKind(kind: BlockKind) {
         </div>
 
         <div class="btn-row">
-          <el-button v-if="mergeable" type="primary" size="small" :icon="CopyDocument" @click="merge">合并</el-button>
-          <el-button v-if="isMerged" size="small" :icon="Scissor" @click="split">拆开</el-button>
-          <el-button v-if="one?.kind === 'PLANT'" size="small" :icon="Grid" @click="emit('enter', one.id)">进入区块改小区块</el-button>
+          <el-button v-if="one?.kind === 'PLANT'" type="primary" size="small" :icon="Grid" @click="emit('enter', one.id)">进去改小区块</el-button>
+          <el-button v-if="blocks.length > 1" type="primary" size="small" :icon="CopyDocument" @click="merge">合并成一个</el-button>
+          <el-button size="small" :icon="CopyDocument" @click="emit('duplicate')">复制一份</el-button>
+          <el-button v-if="one && one.kind !== 'ROAD'" size="small" :icon="Scissor" @click="openSplit">拆成几块</el-button>
+          <el-button v-if="one && one.kind !== 'ROAD'" size="small" @click="openArray">照着排一片</el-button>
+          <el-button size="small" type="danger" plain :icon="Delete" @click="emit('remove')">删除</el-button>
         </div>
-        <div v-if="mergeable" class="hint">合并时可以选：保留原来的小区块拼起来，或者重新分几行几列。</div>
+        <div v-if="blocks.length > 1 && mergeProblem" class="hint">现在合并不了：{{ mergeProblem }}。</div>
       </section>
 
-      <section v-if="oneRoad" class="panel panel-pad">
-        <div class="panel-title">这条道路<span class="sub">{{ oneRoad.axis === 'row' ? '横向' : '纵向' }}，第 {{ oneRoad.index + 1 }} {{ oneRoad.axis === 'row' ? '行' : '列' }}</span></div>
+      <!-- 一条道路 -->
+      <section v-if="one && road" class="panel panel-pad">
+        <div class="panel-title">这条道路<span class="sub">{{ road.axis === 'row' ? '横向' : '纵向' }}</span></div>
         <div class="row-form">
           <span class="lbl">路宽</span>
           <el-input-number
-            :model-value="round(roadWidthOf(oneRoad), 3)" :min="0.001" :precision="3" :controls="false" size="small" class="w"
-            @change="(v: number | undefined) => setRoadWidth(oneRoad!, v)"
+            :model-value="round(road.width, 3)" :min="0.01" :precision="3" :controls="false" size="small" class="w"
+            @change="changeRoadWidth"
           />
           <span>{{ u.symbol }}</span>
         </div>
-        <div class="hint">改路宽时两边的区块不变，地块跟着变大变小。</div>
+        <div class="hint">改路宽时两边的区块大小不变：变宽了后面的往后挪，变窄了收回来，地块跟着变。</div>
+        <div class="row-form">
+          <span class="lbl">路长</span>
+          <el-input-number
+            :model-value="round(road.length, 3)" :min="0.01" :precision="3" :controls="false" size="small" class="w"
+            @change="changeRoadLength"
+          />
+          <span>{{ u.symbol }}</span>
+        </div>
         <div class="btn-row">
-          <el-button size="small" @click="roadBack(oneRoad)">改成区块</el-button>
-          <el-button size="small" type="danger" plain :icon="Delete" @click="dropRoad(oneRoad)">删掉这条道路</el-button>
+          <el-button size="small" @click="closeRoad">删掉并合拢</el-button>
         </div>
+        <div class="hint">“删除”只去掉路，空出来的地方留着；“删掉并合拢”把后面的收回来。也可以直接在图上拖它、拉它的两头。</div>
       </section>
 
-      <section v-if="one && oneTracks && !oneRoad" class="panel panel-pad">
-        <div class="panel-title">大小<span class="sub">{{ u.name }}</span></div>
-        <div class="row-form">
-          <span class="lbl">这一列宽</span>
+      <!-- 一个：位置和大小 -->
+      <section v-if="one" class="panel panel-pad">
+        <div class="panel-title">位置和大小<span class="sub">{{ u.name }}</span></div>
+        <div class="row-form pair">
+          <span class="lbl">离左边</span>
           <el-input-number
-            v-if="oneTracks.w != null" :model-value="round(oneTracks.w, 3)" :min="0.001" :precision="3" :controls="false"
-            size="small" class="w" @change="(v: number | undefined) => setOneTrack('col', v)"
+            :model-value="round(one.x, 3)" :precision="3" :controls="false" size="small" class="w2"
+            @change="(v: number | undefined) => setRect({ x: v })"
           />
-          <span v-else class="muted">合并了 {{ oneTracks.span.cs }} 列，点上面的标尺分别改</span>
-        </div>
-        <div class="row-form">
-          <span class="lbl">这一行高</span>
+          <span class="lbl">离上边</span>
           <el-input-number
-            v-if="oneTracks.h != null" :model-value="round(oneTracks.h, 3)" :min="0.001" :precision="3" :controls="false"
-            size="small" class="w" @change="(v: number | undefined) => setOneTrack('row', v)"
+            :model-value="round(one.y, 3)" :precision="3" :controls="false" size="small" class="w2"
+            @change="(v: number | undefined) => setRect({ y: v })"
           />
-          <span v-else class="muted">合并了 {{ oneTracks.span.rs }} 行，点左边的标尺分别改</span>
         </div>
-        <div class="hint">改的是整列（整行）区块，同一列（行）的区块一起变；别的区块不变，地块跟着变大变小。</div>
+        <div v-if="!road" class="row-form pair">
+          <span class="lbl">宽</span>
+          <el-input-number
+            :model-value="round(one.w, 3)" :min="0.01" :precision="3" :controls="false" size="small" class="w2"
+            @change="(v: number | undefined) => setRect({ w: v })"
+          />
+          <span class="lbl">长</span>
+          <el-input-number
+            :model-value="round(one.h, 3)" :min="0.01" :precision="3" :controls="false" size="small" class="w2"
+            @change="(v: number | undefined) => setRect({ h: v })"
+          />
+        </div>
+        <div class="lbl-top">贴到地块的边上</div>
+        <div class="align">
+          <el-tooltip v-for="a in ALIGNS" :key="a[0]" :content="a[1]" placement="top">
+            <button class="align-btn" :class="a[0]" :aria-label="a[1]" @click="align(a[0])"><i /></button>
+          </el-tooltip>
+        </div>
+        <div class="hint">也可以直接在图上按住拖；选中后拖四周的小方块改大小；方向键一点点挪。</div>
       </section>
 
-      <section v-if="one && fitInfo && one.kind !== 'ROAD'" class="panel panel-pad special">
-        <div class="panel-title">特殊区块<span class="sub">{{ fitInfo.special ? '已设' : '没设' }}</span></div>
-        <div class="hint">
-          把这个区块设得比原来的位置小，剩下的地方变成道路；区块可以在原来的位置里拖动。
-          原来 {{ fmt(fitInfo.slot.w, u) }} × {{ fmt(fitInfo.slot.h, u) }}。
+      <!-- 几个：对齐、排开 -->
+      <section v-else class="panel panel-pad">
+        <div class="panel-title">对齐和排开</div>
+        <div class="align">
+          <el-tooltip v-for="a in ALIGNS" :key="a[0]" :content="a[1]" placement="top">
+            <button class="align-btn" :class="a[0]" :aria-label="a[1]" @click="align(a[0])"><i /></button>
+          </el-tooltip>
         </div>
-        <template v-if="fitInfo.special && one.fit">
-          <div class="row-form">
-            <span class="lbl">宽 × 高</span>
-            <el-input-number
-              :model-value="round(one.fit.w, 3)" :min="0.001" :max="fitInfo.slot.w" :precision="3" :controls="false" size="small" class="w2"
-              @change="(v: number | undefined) => setFitSize(v, undefined)"
-            />
-            <span>×</span>
-            <el-input-number
-              :model-value="round(one.fit.h, 3)" :min="0.001" :max="fitInfo.slot.h" :precision="3" :controls="false" size="small" class="w2"
-              @change="(v: number | undefined) => setFitSize(undefined, v)"
-            />
-          </div>
-          <div class="row-form">
-            <span class="lbl">离左、上</span>
-            <el-input-number
-              :model-value="round(one.fit.x, 3)" :min="0" :max="fitInfo.slot.w - one.fit.w" :precision="3" :controls="false" size="small" class="w2"
-              @change="(v: number | undefined) => setFitPos(v, undefined)"
-            />
-            <span>,</span>
-            <el-input-number
-              :model-value="round(one.fit.y, 3)" :min="0" :max="fitInfo.slot.h - one.fit.h" :precision="3" :controls="false" size="small" class="w2"
-              @change="(v: number | undefined) => setFitPos(undefined, v)"
-            />
-          </div>
-          <div class="align">
-            <el-tooltip v-for="a in ([['left', '靠左'], ['hcenter', '左右居中'], ['right', '靠右'], ['top', '靠上'], ['vcenter', '上下居中'], ['bottom', '靠下']] as [Align, string][])" :key="a[0]" :content="a[1]" placement="top">
-              <button class="align-btn" :class="a[0]" :aria-label="a[1]" @click="align(a[0])"><i /></button>
-            </el-tooltip>
-          </div>
-          <div class="hint">选中后直接在图上拖动；四周道路的宽度跟着变。</div>
-          <el-button size="small" @click="resetFit">恢复填满</el-button>
-        </template>
-        <el-button v-else size="small" :icon="Plus" @click="makeSpecial">设成特殊区块</el-button>
+        <div class="row-form">
+          <span class="lbl">间隔</span>
+          <el-input-number v-model="spreadGap" :min="0" :precision="2" :step="0.5" size="small" controls-position="right" class="w" />
+          <span>{{ u.symbol }}</span>
+        </div>
+        <div class="btn-row tight">
+          <el-button size="small" @click="spread('col', false)">横着一个挨一个排</el-button>
+          <el-button size="small" @click="spread('row', false)">竖着一个挨一个排</el-button>
+        </div>
+        <div class="btn-row">
+          <el-button size="small" @click="spread('col', true)">横着匀开</el-button>
+          <el-button size="small" @click="spread('row', true)">竖着匀开</el-button>
+        </div>
+        <div class="hint">“一个挨一个排”从最左（最上）那个开始，中间隔上面填的间隔；“匀开”两头不动，中间的间隔调成一样。</div>
       </section>
 
       <section v-if="innerCountOfSelection" class="panel panel-pad">
         <div class="panel-title">
-          区块里的小区块<span class="sub">{{ innerCountOfSelection.n > 1 ? `${innerCountOfSelection.n} 个区块一起改` : `${plotsIn(one!)} 个` }}</span>
+          里面的小区块<span class="sub">{{ innerCountOfSelection.n > 1 ? `${innerCountOfSelection.n} 个区块一起改` : `${innerCountOfSelection.plots} 个` }}</span>
         </div>
         <div class="row-form">
           <el-input-number
@@ -650,26 +672,54 @@ function setCellKind(kind: BlockKind) {
           />
           <span>列</span>
         </div>
+        <div class="lbl-top">每个小区块多大</div>
+        <div v-if="plotSizeOfSelection" class="row-form">
+          <span class="lbl short">宽</span>
+          <el-input-number
+            :model-value="plotSizeOfSelection.w" :min="0.01" :precision="3" :controls="false" size="small" class="w2" placeholder="不一样"
+            @change="(v: number | undefined) => setPlot(v, undefined)"
+          />
+          <span class="lbl short mid">长</span>
+          <el-input-number
+            :model-value="plotSizeOfSelection.h" :min="0.01" :precision="3" :controls="false" size="small" class="w2" placeholder="不一样"
+            @change="(v: number | undefined) => setPlot(undefined, v)"
+          />
+          <span>{{ u.symbol }}</span>
+        </div>
+        <div class="hint">改行列数：区块大小不变，小区块跟着变大变小。填小区块的宽、长：区块按“行列数 × 小区块大小”重新算大小，左上角不动。</div>
       </section>
     </template>
 
     <!-- 整块地：什么都没选 -->
     <template v-else>
       <section class="panel panel-pad">
-        <div class="panel-title">整块地<span class="sub">{{ fmt(size.w, u) }} × {{ fmt(size.h, u) }}</span></div>
-        <div class="row-form">
-          <span class="lbl">区块</span>
+        <div class="panel-title">整块地<span class="sub">{{ stats.plant }} 个区块 · {{ stats.road }} 条道路 · {{ stats.plots }} 个小区块</span></div>
+        <div class="row-form pair">
+          <span class="lbl">宽</span>
           <el-input-number
-            :model-value="layout.rows.length" :min="1" :max="50" size="small" controls-position="right" class="n"
-            @change="(v: number | undefined) => setGrid(v, layout.cols.length)"
+            :model-value="round(size.w, 3)" :min="0.01" :precision="3" :controls="false" size="small" class="w2"
+            @change="(v: number | undefined) => setSize(v, undefined)"
           />
-          <span>行 ×</span>
+          <span class="lbl">长</span>
           <el-input-number
-            :model-value="layout.cols.length" :min="1" :max="50" size="small" controls-position="right" class="n"
-            @change="(v: number | undefined) => setGrid(layout.rows.length, v)"
+            :model-value="round(size.h, 3)" :min="0.01" :precision="3" :controls="false" size="small" class="w2"
+            @change="(v: number | undefined) => setSize(undefined, v)"
           />
-          <span>列</span>
+          <span>{{ u.symbol }}</span>
         </div>
+        <div class="btn-row tight">
+          <el-button size="small" :disabled="!loose" @click="emit('apply', fitField(layout))">收紧到正好放下</el-button>
+        </div>
+        <div class="hint">也可以拖地块的右边、下边。把区块挪到外面、画道路把后面的顶出去，地块会自己跟着变大。</div>
+        <div class="row-form">
+          <span class="lbl">道路宽</span>
+          <el-input-number
+            :model-value="roadWidth" :min="0.01" :max="1000" :precision="2" :step="0.5" size="small" controls-position="right" class="w"
+            @change="(v: number | undefined) => v && emit('update:roadWidth', v)"
+          />
+          <span>{{ u.symbol }}</span>
+        </div>
+        <div class="hint">画道路按这个宽；拖区块时离别的区块正好这么远会自动贴住，留出一条路。</div>
         <div class="row-form">
           <span class="lbl">新区块</span>
           <el-input-number
@@ -683,6 +733,15 @@ function setCellKind(kind: BlockKind) {
           />
           <span>小区块</span>
         </div>
+        <div v-if="stats.plant > 0" class="hint">地里已经有种植区块时，新画的区块按现有小区块的大小分行列。</div>
+      </section>
+
+      <section v-if="clashes.length" class="panel panel-pad clash">
+        <div class="panel-title">叠在一起的<span class="sub">{{ clashes.length }} 处，叠着不能保存</span></div>
+        <button v-for="c in clashes.slice(0, 8)" :key="c.a + c.b" type="button" class="clash-item" @click="emit('update:selectedBlocks', [c.a, c.b])">
+          {{ c.text }}
+        </button>
+        <div class="hint">点一下选中这两个（图上描了红框），把其中一个挪开或者改小。道路和道路可以交叉。</div>
       </section>
 
       <section class="panel panel-pad">
@@ -724,13 +783,13 @@ function setCellKind(kind: BlockKind) {
       <section class="panel panel-pad tips">
         <div class="panel-title">怎么改</div>
         <ul>
-          <li>道路工具（右下角，R）：点区块之间的线加一条道路，点道路删掉。别的区块不变小，地块跟着变大。</li>
-          <li>点区块选中，Ctrl/Shift 加选，拖动框选几个，再“合并”（可以重新分行列）。</li>
-          <li>拖区块之间的线改宽高，后面的跟着挪、地块跟着变；按住 Shift 拖是两边一起变。点标尺改一整列、插入、删除。</li>
-          <li>一整行（列）区块改成道路会收窄成路宽；整条道路改成区块会按旁边区块放宽。</li>
-          <li>选中一个区块拖到同样大小的区块上，两个交换位置。</li>
-          <li>双击区块进去：框选格子设成道路、保护区、空地，或拖到别的位置。</li>
-          <li>右键区块、格子有常用操作。Ctrl Z 撤销，Ctrl Y 重做，Ctrl S 保存。</li>
+          <li>区块、道路都是随便摆的：按住拖动挪位置，选中后拖四周的小方块改大小，Delete 删掉，Ctrl D 复制，方向键一点点挪。</li>
+          <li>道路工具（右下角，R）：按住拖，从哪儿拖到哪儿路就画到哪儿；在区块的边或小区块之间的线上点一下，加一条通到头的。</li>
+          <li>路画在空地上，别的都不动；压到了区块，区块在最近的小区块分界线处切开，后面的往后挪一个路宽，小区块大小不变。</li>
+          <li>区块工具（B）：拖出一个方框就是一个新区块。选中一个区块点“照着排一片”，一次排出一样的几行几列。</li>
+          <li>选几个（Ctrl/Shift 加选、拖动框选）：对齐、排开、合并。拖动时靠近别的边会自动贴住，按住 Ctrl 不贴。</li>
+          <li>双击种植区块进去：改小区块行列、框选格子设成道路、保护区、空地，或拖到别的位置。</li>
+          <li>右键有常用操作。Ctrl Z 撤销，Ctrl Y 重做，Ctrl S 保存。</li>
         </ul>
       </section>
     </template>
@@ -940,5 +999,64 @@ function setCellKind(kind: BlockKind) {
   font-size: var(--fs-sm);
   color: var(--ink-2);
   line-height: 1.8;
+}
+
+.n2 {
+  width: 96px;
+}
+
+/* 一行两个数：标签窄一点，两个输入框一样宽，不折行 */
+.row-form.pair {
+  flex-wrap: nowrap;
+}
+
+.row-form.pair .lbl {
+  width: auto;
+  min-width: 14px;
+  white-space: nowrap;
+}
+
+.row-form.pair .lbl + .w2 + .lbl {
+  margin-left: 6px;
+}
+
+.row-form.pair .w2 {
+  flex: 1 1 0;
+  min-width: 0;
+  width: auto;
+}
+
+.lbl.mid {
+  width: auto;
+  margin-left: 8px;
+}
+
+.lbl.short {
+  width: 20px;
+}
+
+.dlg-text {
+  margin-bottom: 12px;
+  font-size: 13.5px;
+  color: var(--ink-2);
+  line-height: 1.7;
+}
+
+.clash-item {
+  display: block;
+  width: 100%;
+  margin: 6px 0 0;
+  padding: 6px 10px;
+  border: 1px solid rgba(192, 86, 47, 0.35);
+  border-radius: var(--radius-sm);
+  background: rgba(192, 86, 47, 0.06);
+  color: var(--clay);
+  font-size: var(--fs-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.clash-item:hover {
+  background: rgba(192, 86, 47, 0.12);
 }
 </style>

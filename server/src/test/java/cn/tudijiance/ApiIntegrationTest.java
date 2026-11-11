@@ -537,11 +537,11 @@ class ApiIntegrationTest {
         // 新建实验田时直接给区块布局：一行两个区块（各 2 × 3 个小区），单位用“尺”
         Map<String, Object> inner = Map.of("rows", List.of(1, 1), "cols", List.of(1, 1, 1), "merges", List.of());
         Map<String, Object> layout = new HashMap<>(Map.of(
-                "version", 1, "unit", Map.of("name", "尺", "symbol", "尺", "meters", 1.0 / 3),
-                "rows", List.of(40), "cols", List.of(18, 18), "merges", List.of(),
+                "version", 2, "unit", Map.of("name", "尺", "symbol", "尺", "meters", 1.0 / 3),
+                "w", 36, "h", 40,
                 "blocks", List.of(
-                        Map.of("id", "B1", "r", 0, "c", 0, "name", "重复Ⅰ", "kind", "PLANT", "inner", inner),
-                        Map.of("id", "B2", "r", 0, "c", 1, "name", "重复Ⅱ", "kind", "PLANT", "inner", inner)),
+                        Map.of("id", "B1", "x", 0, "y", 0, "w", 18, "h", 40, "name", "重复Ⅰ", "kind", "PLANT", "inner", inner),
+                        Map.of("id", "B2", "x", 18, "y", 0, "w", 18, "h", 40, "name", "重复Ⅱ", "kind", "PLANT", "inner", inner)),
                 "nextBlockNo", 3, "defaultInner", Map.of("rows", 2, "cols", 3)));
         Map<String, Object> req = new HashMap<>(Map.of("name", "区块试验田", "rowCount", 1, "colCount", 1, "layout", layout));
         JsonNode created = call(teacher, post("/api/fields"), req, status().isOk());
@@ -588,15 +588,26 @@ class ApiIntegrationTest {
         JsonNode anchorPlot = find(after.get("plots"), p -> p.get("id").asLong() == anchor);
         assertThat(anchorPlot.get("widthM").decimalValue()).isEqualByComparingTo("6.00");
 
-        // 加一列区块：新区块的小区自动编号，接着用没用过的号
+        // 再摆一个区块，中间留 3 尺的道路：新区块的小区自动编号，接着用没用过的号
         @SuppressWarnings("unchecked")
         Map<String, Object> grown = json.convertValue(after.get("layout"), Map.class);
-        grown.put("cols", List.of(18, 18, 18));
+        grown.put("w", 57);
         @SuppressWarnings("unchecked")
         List<Object> blocks = new ArrayList<>((List<Object>) grown.get("blocks"));
-        blocks.add(Map.of("id", "B3", "r", 0, "c", 2, "name", "重复Ⅲ", "kind", "PLANT", "inner", inner));
+        blocks.add(Map.of("id", "R1", "x", 36, "y", 0, "w", 3, "h", 40, "name", "道路", "kind", "ROAD"));
+        blocks.add(Map.of("id", "B3", "x", 39, "y", 0, "w", 18, "h", 40, "name", "重复Ⅲ", "kind", "PLANT", "inner", inner));
         grown.put("blocks", blocks);
+        // 叠在别的区块上、超出地块都不行
+        Map<String, Object> stacked = new HashMap<>(grown);
+        List<Object> bad = new ArrayList<>(blocks);
+        bad.set(bad.size() - 1, Map.of("id", "B3", "x", 30, "y", 0, "w", 18, "h", 40, "name", "重复Ⅲ", "kind", "PLANT", "inner", inner));
+        stacked.put("blocks", bad);
+        call(teacher, put("/api/fields/" + fieldId + "/layout"), stacked, status().isBadRequest());
+        Map<String, Object> small = new HashMap<>(grown);
+        small.put("w", 50);
+        call(teacher, put("/api/fields/" + fieldId + "/layout"), small, status().isBadRequest());
         JsonNode three = call(teacher, put("/api/fields/" + fieldId + "/layout"), grown, status().isOk());
+        assertThat(three.get("field").get("colCount").asInt()).isEqualTo(9);
         assertThat(three.get("plots").size()).isEqualTo(16);
         List<String> codes = new ArrayList<>();
         three.get("plots").forEach(p -> codes.add(p.get("code").asString()));
@@ -665,7 +676,9 @@ class ApiIntegrationTest {
         assertThat(field.get("layoutSaved").asBoolean()).isFalse();
         JsonNode layout = field.get("layout");
         assertThat(layout.get("blocks").size()).isEqualTo(1);
-        assertThat(layout.get("rows").get(0).asDouble()).isEqualTo(13.3);
+        assertThat(layout.get("version").asInt()).isEqualTo(2);
+        assertThat(layout.get("h").asDouble()).isEqualTo(13.3);
+        assertThat(layout.get("blocks").get(0).get("w").asDouble()).isEqualTo(6.0);
         assertThat(layout.get("blocks").get(0).get("inner").get("plots").size()).isEqualTo(6);
         // 原样保存一次就变成区块布局，小区不变
         long fieldId = field.get("field").get("id").asLong();
